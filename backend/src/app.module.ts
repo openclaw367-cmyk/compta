@@ -22,6 +22,14 @@ import { VatModule } from './modules/vat/vat.module';
 import { VatController } from './modules/vat/vat.controller';
 import { LiasseModule } from './modules/liasse/liasse.module';
 import { LiasseController } from './modules/liasse/liasse.controller';
+import { DevModule } from './modules/dev/dev.module';
+import { DevController } from './modules/dev/dev.controller';
+
+// Dev-only convenience routes (GET /dev/ids) are never mounted when
+// NODE_ENV=production — this isn't a route-level guard, DevModule is
+// absent from the module graph entirely, so there's nothing to hit even
+// by guessing the path.
+const isProduction = process.env.NODE_ENV === 'production';
 
 @Module({
   imports: [
@@ -37,6 +45,7 @@ import { LiasseController } from './modules/liasse/liasse.controller';
     DepreciationModule,
     VatModule,
     LiasseModule,
+    ...(isProduction ? [] : [DevModule]),
   ],
 })
 export class AppModule implements NestModule {
@@ -63,6 +72,7 @@ export class AppModule implements NestModule {
         DepreciationController,
         VatController,
         LiasseController,
+        ...(isProduction ? [] : [DevController]),
       );
   }
 }
