@@ -50,4 +50,23 @@ describe('Money', () => {
     expect(sum.toApiString()).toBe('1.00');
     expect(sum.equals(Money.fromString('1.00'))).toBe(true);
   });
+
+  describe('toApiString vs toFecString', () => {
+    it('toApiString uses a decimal point, for the JSON API boundary', () => {
+      expect(Money.fromString('1234.56').toApiString()).toBe('1234.56');
+    });
+
+    it('toFecString uses a decimal comma, per Article A47 A-1 du LPF §XII', () => {
+      expect(Money.fromString('1234.56').toFecString()).toBe('1234,56');
+    });
+
+    it('toFecString still pads to 2 decimals and never touches the thousands', () => {
+      expect(Money.fromString('7').toFecString()).toBe('7,00');
+      expect(Money.fromString('76224.5').toFecString()).toBe('76224,50');
+    });
+
+    it('toFecString never contains a point', () => {
+      expect(Money.fromString('99999999999.99').toFecString()).not.toContain('.');
+    });
+  });
 });

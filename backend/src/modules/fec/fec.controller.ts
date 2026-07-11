@@ -22,4 +22,23 @@ export class FecController {
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.send(content);
   }
+
+  /** The descriptif required alongside the FEC file — see CLAUDE.md "FEC export". */
+  @Get('export/description')
+  async exportDescription(
+    @CurrentCompany() company: CompanyContext,
+    @Query('fiscalYearId') fiscalYearId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    if (!fiscalYearId) {
+      throw new BadRequestException('fiscalYearId query parameter is required.');
+    }
+    const { fileName, content } = await this.fecExportService.generateDescription(
+      company,
+      fiscalYearId,
+    );
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(content);
+  }
 }

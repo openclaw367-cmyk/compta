@@ -103,17 +103,47 @@ enforced by code review:
 
 The FEC (Fichier des Écritures Comptables) is the mandatory tax-audit
 export for French companies. Implementation lives in `src/modules/fec/`
-and must stay byte-for-byte compliant with the legal spec:
+and must stay byte-for-byte compliant with the legal spec. The primary
+source is `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md` (fetched
+from legifrance.gouv.fr) — the BOI-CF-IOR-60-40-20 document also in
+`specs/` is DGFiP commentary on this article, not the article itself, and
+its own illustrative tables use inconsistent field orderings from example
+to example; don't treat those as authoritative for column order.
 
-- **18 columns, exact order, exact header names**: `JournalCode`,
-  `JournalLib`, `EcritureNum`, `EcritureDate`, `CompteNum`, `CompteLib`,
-  `CompAuxNum`, `CompAuxLib`, `PieceRef`, `PieceDate`, `EcritureLib`,
-  `Debit`, `Credit`, `EcritureLet`, `DateLet`, `ValidDate`,
-  `Montantdevise`, `Idevise`.
+- **18 columns, exact order, exact header names** (Article A47 A-1 §VII):
+  `JournalCode`, `JournalLib`, `EcritureNum`, `EcritureDate`, `CompteNum`,
+  `CompteLib`, `CompAuxNum`, `CompAuxLib`, `PieceRef`, `PieceDate`,
+  `EcritureLib`, `Debit`, `Credit`, `EcritureLet`, `DateLet`, `ValidDate`,
+  `Montantdevise`, `Idevise`. Pinned by a literal (non-DRY-on-purpose)
+  hardcoded list in `fec-format.spec.ts` so an accidental reorder of
+  `FEC_COLUMNS` fails a test instead of drifting silently.
 - **Delimiter**: `|` (pipe). One line per écriture line, plus a header row.
 - **Dates**: `AAAAMMJJ` (`YYYYMMDD`), no separators.
-- **Amounts**: decimal point `.`, no thousands separator, always 2 decimal
-  places, formatted from `Decimal` — never from a float.
+- **Amounts use a decimal COMMA, not a point** (Article A47 A-1 §XII —
+  "comma as the decimal separator, no thousands separator"). This is the
+  opposite of the JSON API boundary convention. `Money.toFecString()`
+  emits the comma form (`"1234,56"`); `Money.toApiString()` (decimal
+  point, `"1234.56"`) is for the JSON API only — never use one where the
+  other belongs. `formatFecAmount()` in `fec-format.ts` always calls
+  `toFecString()`.
+- **PieceRef/PieceDate must never be blank**, even when an écriture has no
+  natural supporting document (Article A47 A-1 §180/§190 commentary —
+  distinct from the "blank if unused" rule that applies to
+  EcritureLet/DateLet/Montantdevise/Idevise/CompAuxNum/CompAuxLib). Use the
+  documented conventional values: `"NA"` for PieceRef, the écriture's own
+  EcritureDate for PieceDate. These conventions are declared in the
+  accompanying description file produced by
+  `FecExportService.generateDescription()` (required by Article A47 A-1
+  §XI) — if you add another conventional fallback anywhere in the export,
+  it must be documented there too.
+- **EcritureNum is a `String`, not an `Int`.** Article A47 A-1 §100
+  (via BOI commentary) allows either one continuous numeric sequence for
+  the whole file or a per-journal sequence, and the per-journal scheme is
+  commonly alphanumeric (e.g. `AN0001`). This project currently implements
+  only the single global sequence, assigned from `Company.nextEcritureNum`
+  — **never derive "next number" by sorting existing `ecritureNum` values**
+  once the column is a string (lexical sort puts `"10"` before `"2"`).
+  Export ordering uses `validatedAt` ascending for the same reason.
 - **File name**: `{SIREN}FEC{ClotureDate:YYYYMMDD}.txt`, e.g.
   `123456789FEC20261231.txt`. The company record must have a valid SIREN to
   export.
@@ -124,7 +154,7 @@ and must stay byte-for-byte compliant with the legal spec:
   to `src/modules/fec/fec-export.service.ts`'s output shape requires a
   matching update to the fixture tests in `src/modules/fec/*.spec.ts`
   before merging — never adjust the test to match new output without
-  re-checking it against the legal text.
+  re-checking it against `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md`.
 
 ## Monaco compliance — verify before trusting
 

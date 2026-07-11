@@ -87,9 +87,19 @@ export class Money {
     return this.value;
   }
 
-  /** Canonical 2-decimal string, for the API boundary and FEC export. */
+  /** Canonical 2-decimal string with a decimal point, for the JSON API boundary. */
   toApiString(): string {
     return this.value.toFixed(2);
+  }
+
+  /**
+   * 2-decimal string with a decimal COMMA, per Article A47 A-1 du LPF §XII
+   * (codage des informations) — the FEC file uses French numeric notation,
+   * not the point used at the JSON API boundary. Used nowhere except FEC
+   * export; do not use this for anything else.
+   */
+  toFecString(): string {
+    return this.value.toFixed(2).replace('.', ',');
   }
 
   toJSON(): string {

@@ -60,6 +60,13 @@ model Company {
 
   vatNumber String?
 
+  /// Next value to assign as Ecriture.ecritureNum (single global sequence —
+  /// see CLAUDE.md "Ledger integrity" and EntriesService.validate). Never
+  /// derive "next number" from MAX(ecritureNum) once ecritureNum is a
+  /// String: lexical ordering breaks past 9 entries ("10" < "2"). This
+  /// counter is incremented atomically inside the validation transaction.
+  nextEcritureNum Int @default(1)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -161,8 +168,13 @@ model Ecriture {
   journal      Journal    @relation(fields: [journalId], references: [id])
 
   /// EcritureNum: assigned only at validation time, sequential and gapless
-  /// per company. Null while the entry is a draft.
-  ecritureNum Int?
+  /// per company. Null while the entry is a draft. String rather than Int
+  /// so a future per-journal numbering scheme can use alphanumeric values
+  /// (Art. A47 A-1 du LPF §100 shows both a global numeric sequence and a
+  /// per-journal alphanumeric one — e.g. "AN0001" — as equally valid).
+  /// The "next number" is tracked via Company.nextEcritureNum, not derived
+  /// from this column, so lexical string ordering is never load-bearing.
+  ecritureNum String?
 
   /// EcritureDate.
   ecritureDate DateTime

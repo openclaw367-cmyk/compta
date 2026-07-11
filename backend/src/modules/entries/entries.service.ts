@@ -90,7 +90,13 @@ export class EntriesService {
     await this.prisma.ecriture.delete({ where: { id } });
   }
 
-  /** Assigns the next company-scoped sequential EcritureNum and locks the entry. */
+  /**
+   * Assigns the next company-scoped sequential EcritureNum and locks the
+   * entry. The number comes from Company.nextEcritureNum, incremented
+   * atomically in this transaction — never from sorting existing
+   * ecritureNum values, which would be lexically wrong once that column is
+   * a String ("10" sorts before "2").
+   */
   async validate(company: CompanyContext, id: string): Promise<Ecriture> {
     return this.prisma.$transaction(async (tx) => {
       const ecriture = await tx.ecriture.findFirst({
@@ -103,16 +109,15 @@ export class EntriesService {
         throw new ConflictException('Écriture is already validated.');
       }
 
-      const last = await tx.ecriture.findFirst({
-        where: { companyId: company.companyId, ecritureNum: { not: null } },
-        orderBy: { ecritureNum: 'desc' },
-        select: { ecritureNum: true },
+      const companyRecord = await tx.company.update({
+        where: { id: company.companyId },
+        data: { nextEcritureNum: { increment: 1 } },
       });
-      const nextEcritureNum = (last?.ecritureNum ?? 0) + 1;
+      const assignedEcritureNum = String(companyRecord.nextEcritureNum - 1);
 
       return tx.ecriture.update({
         where: { id: ecriture.id },
-        data: { ecritureNum: nextEcritureNum, validatedAt: new Date() },
+        data: { ecritureNum: assignedEcritureNum, validatedAt: new Date() },
         include: { lignes: true },
       });
     });

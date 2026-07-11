@@ -7,6 +7,42 @@ import { FEC_COLUMNS } from './fec-format';
 
 const company: CompanyContext = { companyId: 'company-1' };
 
+function makeEcriture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'ecriture-1',
+    ecritureNum: '1',
+    ecritureDate: new Date(Date.UTC(2026, 0, 15)),
+    pieceRef: 'FA-2026-001',
+    pieceDate: new Date(Date.UTC(2026, 0, 14)),
+    libelle: 'Achat fournitures',
+    validatedAt: new Date(Date.UTC(2026, 0, 31)),
+    journal: { code: 'AC', label: 'Achats' },
+    lignes: [
+      {
+        compte: { number: '607000', label: 'Achats de marchandises' },
+        compteAux: null,
+        debit: new Prisma.Decimal('100.00'),
+        credit: new Prisma.Decimal('0.00'),
+        lettrage: null,
+        dateLettrage: null,
+        montantDevise: null,
+        idDevise: null,
+      },
+      {
+        compte: { number: '401000', label: 'Fournisseurs' },
+        compteAux: null,
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('100.00'),
+        lettrage: null,
+        dateLettrage: null,
+        montantDevise: null,
+        idDevise: null,
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function makePrismaMock() {
   return {
     company: {
@@ -25,40 +61,7 @@ function makePrismaMock() {
     },
     ecriture: {
       count: jest.fn().mockResolvedValue(0),
-      findMany: jest.fn().mockResolvedValue([
-        {
-          id: 'ecriture-1',
-          ecritureNum: 1,
-          ecritureDate: new Date(Date.UTC(2026, 0, 15)),
-          pieceRef: 'FA-2026-001',
-          pieceDate: new Date(Date.UTC(2026, 0, 14)),
-          libelle: 'Achat fournitures',
-          validatedAt: new Date(Date.UTC(2026, 0, 31)),
-          journal: { code: 'AC', label: 'Achats' },
-          lignes: [
-            {
-              compte: { number: '607000', label: 'Achats de marchandises' },
-              compteAux: null,
-              debit: new Prisma.Decimal('100.00'),
-              credit: new Prisma.Decimal('0.00'),
-              lettrage: null,
-              dateLettrage: null,
-              montantDevise: null,
-              idDevise: null,
-            },
-            {
-              compte: { number: '401000', label: 'Fournisseurs' },
-              compteAux: null,
-              debit: new Prisma.Decimal('0.00'),
-              credit: new Prisma.Decimal('100.00'),
-              lettrage: null,
-              dateLettrage: null,
-              montantDevise: null,
-              idDevise: null,
-            },
-          ],
-        },
-      ]),
+      findMany: jest.fn().mockResolvedValue([makeEcriture()]),
     },
   };
 }
@@ -79,7 +82,7 @@ describe('FecExportService', () => {
     expect(headerLine.split('|')).toHaveLength(18);
   });
 
-  it('formats dates as AAAAMMJJ and amounts with a 2-decimal point', async () => {
+  it('formats dates as AAAAMMJJ, EcritureNum as a string, and amounts with a decimal comma', async () => {
     const { content } = await service.generate(company, 'fy-2026');
     const dataLine = content.split('\r\n')[1];
     const fields = dataLine.split('|');
@@ -88,9 +91,12 @@ describe('FecExportService', () => {
     expect(fields[2]).toBe('1'); // EcritureNum
     expect(fields[3]).toBe('20260115'); // EcritureDate
     expect(fields[4]).toBe('607000'); // CompteNum
-    expect(fields[11]).toBe('100.00'); // Debit
-    expect(fields[12]).toBe('0.00'); // Credit
+    expect(fields[11]).toBe('100,00'); // Debit — comma, not point (Art. A47 A-1 §XII)
+    expect(fields[12]).toBe('0,00'); // Credit
     expect(fields[15]).toBe('20260131'); // ValidDate
+    // Never a point in a monetary field.
+    expect(fields[11]).not.toContain('.');
+    expect(fields[12]).not.toContain('.');
   });
 
   it('names the file {SIREN}FEC{closingDate}.txt', async () => {
@@ -111,5 +117,54 @@ describe('FecExportService', () => {
   it('refuses to export a fiscal year that still has unvalidated (draft) écritures', async () => {
     prisma.ecriture.count.mockResolvedValueOnce(2);
     await expect(service.generate(company, 'fy-2026')).rejects.toThrow(ConflictException);
+  });
+
+  describe('PieceRef/PieceDate — never blank (Art. A47 A-1 §180/§190)', () => {
+    it('uses the real PieceRef/PieceDate when the écriture has them', async () => {
+      const { content } = await service.generate(company, 'fy-2026');
+      const fields = content.split('\r\n')[1].split('|');
+      expect(fields[8]).toBe('FA-2026-001'); // PieceRef
+      expect(fields[9]).toBe('20260114'); // PieceDate
+    });
+
+    it('falls back to "NA" for PieceRef when the écriture has none (e.g. écritures d\'à nouveau)', async () => {
+      prisma.ecriture.findMany.mockResolvedValueOnce([makeEcriture({ pieceRef: null })]);
+      const { content } = await service.generate(company, 'fy-2026');
+      const fields = content.split('\r\n')[1].split('|');
+      expect(fields[8]).toBe('NA');
+      // Never blank.
+      expect(fields[8]).not.toBe('');
+    });
+
+    it("falls back to the écriture's own EcritureDate for PieceDate when none is set", async () => {
+      prisma.ecriture.findMany.mockResolvedValueOnce([makeEcriture({ pieceDate: null })]);
+      const { content } = await service.generate(company, 'fy-2026');
+      const fields = content.split('\r\n')[1].split('|');
+      expect(fields[9]).toBe('20260115'); // same as EcritureDate
+      expect(fields[9]).not.toBe('');
+    });
+  });
+
+  describe('generateDescription', () => {
+    it('documents the delimiter, decimal comma, and PieceRef/PieceDate conventions', async () => {
+      const { fileName, content } = await service.generateDescription(company, 'fy-2026');
+      expect(fileName).toBe('123456789FEC20261231_description.txt');
+      expect(content).toContain('"|"');
+      expect(content).toContain('virgule');
+      expect(content).toContain('AAAAMMJJ');
+      expect(content).toContain('"NA"');
+    });
+
+    it('refuses when the company has no SIREN, same as the main export', async () => {
+      prisma.company.findUnique.mockResolvedValueOnce({
+        id: 'company-1',
+        jurisdiction: 'FR',
+        siren: null,
+        rci: null,
+      });
+      await expect(service.generateDescription(company, 'fy-2026')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
   });
 });

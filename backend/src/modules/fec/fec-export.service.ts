@@ -4,11 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Account, Ecriture, EcritureLigne, Journal } from '@prisma/client';
+import { Account, Company, Ecriture, EcritureLigne, FiscalYear, Journal } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import {
   FEC_COLUMNS,
+  FEC_CONVENTIONAL_PIECE_REF,
   FEC_DELIMITER,
   FEC_LINE_BREAK,
   fecFileName,
@@ -26,6 +27,17 @@ export interface FecFile {
   content: string;
 }
 
+export interface FecDescription {
+  fileName: string;
+  content: string;
+}
+
+interface ExportContext {
+  companyRecord: Company;
+  fiscalYear: FiscalYear;
+  identifier: string;
+}
+
 /**
  * Produces the FEC (Fichier des Écritures Comptables) export required by
  * Article A47 A-1 du LPF. Any change to the output shape here is
@@ -36,6 +48,78 @@ export class FecExportService {
   constructor(private readonly prisma: PrismaService) {}
 
   async generate(company: CompanyContext, fiscalYearId: string): Promise<FecFile> {
+    const { identifier, fiscalYear } = await this.resolveExportContext(company, fiscalYearId);
+
+    const draftCount = await this.prisma.ecriture.count({
+      where: { companyId: company.companyId, fiscalYearId, validatedAt: null },
+    });
+    if (draftCount > 0) {
+      throw new ConflictException(
+        `${draftCount} écriture(s) in this fiscal year are not yet validated. Validate or ` +
+          'delete them before exporting — a FEC export never silently skips unvalidated entries.',
+      );
+    }
+
+    const ecritures = (await this.prisma.ecriture.findMany({
+      where: { companyId: company.companyId, fiscalYearId, validatedAt: { not: null } },
+      include: {
+        journal: true,
+        lignes: { include: { compte: true, compteAux: true } },
+      },
+      // ecritureNum is a String (see schema) so sorting by it lexically
+      // would put "10" before "2". Numbers are assigned in strictly
+      // increasing order at validation time, so ordering by validatedAt
+      // reproduces the correct ascending EcritureNum order without
+      // parsing the string.
+      orderBy: { validatedAt: 'asc' },
+    })) as EcritureWithRelations[];
+
+    const rows = ecritures.flatMap((ecriture) =>
+      ecriture.lignes.map((ligne) => this.formatRow(ecriture, ligne)),
+    );
+
+    const content = [FEC_COLUMNS.join(FEC_DELIMITER), ...rows].join(FEC_LINE_BREAK);
+
+    return { fileName: fecFileName(identifier, fiscalYear.endDate), content };
+  }
+
+  /**
+   * The descriptif required by Article A47 A-1 du LPF §XI (referenced at
+   * §VI-390 of the BOI commentary): whenever the file relies on
+   * company-defined conventions rather than raw source data, that
+   * convention must be documented and handed to the vérificateur
+   * alongside the FEC file itself.
+   */
+  async generateDescription(
+    company: CompanyContext,
+    fiscalYearId: string,
+  ): Promise<FecDescription> {
+    const { identifier, fiscalYear } = await this.resolveExportContext(company, fiscalYearId);
+    const fecName = fecFileName(identifier, fiscalYear.endDate);
+
+    const content = [
+      `Descriptif accompagnant le fichier des écritures comptables ${fecName}`,
+      `(Article A47 A-1 du LPF §XI)`,
+      '',
+      `Séparateur de champs : "${FEC_DELIMITER}" (pipe)`,
+      `Fin de ligne : CRLF`,
+      `Format des dates (EcritureDate, PieceDate, DateLet, ValidDate) : AAAAMMJJ`,
+      `Séparateur décimal (Debit, Credit, Montantdevise) : virgule "," (Art. A47 A-1 §XII)`,
+      '',
+      "Valeurs conventionnelles utilisées lorsqu'aucune donnée source n'est disponible :",
+      `- PieceRef : "${FEC_CONVENTIONAL_PIECE_REF}" lorsque l'écriture n'a pas de pièce ` +
+        "justificative associée (par exemple les écritures d'à nouveau).",
+      "- PieceDate : date de l'écriture (EcritureDate) lorsqu'aucune date de pièce " +
+        "justificative n'est disponible.",
+    ].join(FEC_LINE_BREAK);
+
+    return { fileName: `${fecName.replace(/\.txt$/, '')}_description.txt`, content };
+  }
+
+  private async resolveExportContext(
+    company: CompanyContext,
+    fiscalYearId: string,
+  ): Promise<ExportContext> {
     const [companyRecord, fiscalYear] = await Promise.all([
       this.prisma.company.findUnique({ where: { id: company.companyId } }),
       this.prisma.fiscalYear.findFirst({
@@ -58,32 +142,7 @@ export class FecExportService {
       );
     }
 
-    const draftCount = await this.prisma.ecriture.count({
-      where: { companyId: company.companyId, fiscalYearId, validatedAt: null },
-    });
-    if (draftCount > 0) {
-      throw new ConflictException(
-        `${draftCount} écriture(s) in this fiscal year are not yet validated. Validate or ` +
-          'delete them before exporting — a FEC export never silently skips unvalidated entries.',
-      );
-    }
-
-    const ecritures = (await this.prisma.ecriture.findMany({
-      where: { companyId: company.companyId, fiscalYearId, validatedAt: { not: null } },
-      include: {
-        journal: true,
-        lignes: { include: { compte: true, compteAux: true } },
-      },
-      orderBy: { ecritureNum: 'asc' },
-    })) as EcritureWithRelations[];
-
-    const rows = ecritures.flatMap((ecriture) =>
-      ecriture.lignes.map((ligne) => this.formatRow(ecriture, ligne)),
-    );
-
-    const content = [FEC_COLUMNS.join(FEC_DELIMITER), ...rows].join(FEC_LINE_BREAK);
-
-    return { fileName: fecFileName(identifier, fiscalYear.endDate), content };
+    return { companyRecord, fiscalYear, identifier };
   }
 
   private formatRow(
@@ -99,14 +158,17 @@ export class FecExportService {
     const fields: string[] = [
       ecriture.journal.code,
       ecriture.journal.label,
-      String(ecriture.ecritureNum),
+      ecriture.ecritureNum,
       formatFecDate(ecriture.ecritureDate),
       ligne.compte.number,
       ligne.compte.label,
       ligne.compteAux?.number ?? '',
       ligne.compteAux?.label ?? '',
-      ecriture.pieceRef ?? '',
-      ecriture.pieceDate ? formatFecDate(ecriture.pieceDate) : '',
+      // PieceRef/PieceDate must never be blank (Art. A47 A-1 du LPF
+      // §180/§190) — fall back to the documented conventional values
+      // rather than the "blank if unused" rule that applies elsewhere.
+      ecriture.pieceRef ?? FEC_CONVENTIONAL_PIECE_REF,
+      formatFecDate(ecriture.pieceDate ?? ecriture.ecritureDate),
       ecriture.libelle,
       formatFecAmount(ligne.debit),
       formatFecAmount(ligne.credit),

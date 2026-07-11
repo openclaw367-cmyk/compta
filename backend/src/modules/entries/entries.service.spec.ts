@@ -22,6 +22,7 @@ function baseDto(overrides: Partial<CreateEcritureDto> = {}): CreateEcritureDto 
 
 function makePrismaMock() {
   const prisma = {
+    company: { update: jest.fn() },
     journal: { findFirst: jest.fn().mockResolvedValue({ id: 'journal-1' }) },
     fiscalYear: { findFirst: jest.fn().mockResolvedValue({ id: 'fiscal-year-1' }) },
     ecriture: {
@@ -92,25 +93,44 @@ describe('EntriesService', () => {
     await expect(service.create(company, baseDto())).rejects.toThrow(NotFoundException);
   });
 
-  it('assigns sequential EcritureNum on validation, starting from 1', async () => {
-    prisma.ecriture.findFirst
-      .mockResolvedValueOnce({ id: 'ecriture-1', validatedAt: null }) // the entry being validated
-      .mockResolvedValueOnce(null); // no prior validated entries
+  it('assigns sequential EcritureNum (as a string) on validation, starting from 1', async () => {
+    prisma.ecriture.findFirst.mockResolvedValueOnce({ id: 'ecriture-1', validatedAt: null });
+    // Company.nextEcritureNum starts at 1 (schema default); after the
+    // atomic increment inside validate(), the update returns 2.
+    prisma.company.update.mockResolvedValueOnce({ nextEcritureNum: 2 });
     const result = await service.validate(company, 'ecriture-1');
+    expect(prisma.company.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: company.companyId },
+        data: { nextEcritureNum: { increment: 1 } },
+      }),
+    );
     expect(prisma.ecriture.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ ecritureNum: 1 }) }),
+      expect.objectContaining({ data: expect.objectContaining({ ecritureNum: '1' }) }),
     );
     expect(result).toBeDefined();
   });
 
   it('assigns the next sequential EcritureNum after existing validated entries', async () => {
-    prisma.ecriture.findFirst
-      .mockResolvedValueOnce({ id: 'ecriture-2', validatedAt: null })
-      .mockResolvedValueOnce({ ecritureNum: 7 });
+    prisma.ecriture.findFirst.mockResolvedValueOnce({ id: 'ecriture-2', validatedAt: null });
+    // Counter was already at 8 (7 previously assigned); increment returns 9.
+    prisma.company.update.mockResolvedValueOnce({ nextEcritureNum: 9 });
     await service.validate(company, 'ecriture-2');
     expect(prisma.ecriture.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ ecritureNum: 8 }) }),
+      expect.objectContaining({ data: expect.objectContaining({ ecritureNum: '8' }) }),
     );
+  });
+
+  it('never derives EcritureNum by sorting existing string values (lexical-sort trap)', async () => {
+    // Regression guard: if validate() ever went back to "find max
+    // ecritureNum" instead of the Company counter, string sorting would
+    // put "10" before "2". Assert the counter path is what's used by
+    // checking ecriture.findFirst is only called once (for the entry
+    // itself), never a second time to search for a "last" ecritureNum.
+    prisma.ecriture.findFirst.mockResolvedValueOnce({ id: 'ecriture-3', validatedAt: null });
+    prisma.company.update.mockResolvedValueOnce({ nextEcritureNum: 11 });
+    await service.validate(company, 'ecriture-3');
+    expect(prisma.ecriture.findFirst).toHaveBeenCalledTimes(1);
   });
 
   it('refuses to validate an already-validated écriture', async () => {
