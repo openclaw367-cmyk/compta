@@ -23,6 +23,25 @@ specs/       Compliance / functional specs (FEC, PCG, VAT, liasse references)
 samples/     Sample files (e.g. real-world FEC exports, PCG account lists)
 ```
 
+## Local dev setup
+
+1. A local PostgreSQL instance, reachable at the connection string in
+   `backend/.env` (copy from `backend/.env.example`: database `compta_fr_mc`,
+   user `compta`). There is no bundled Docker Compose file yet — point
+   `DATABASE_URL` at whatever Postgres instance/service you run locally.
+2. `cd backend && npm install`
+3. `npx prisma migrate dev` — applies `backend/prisma/migrations/` (currently
+   just the `20260711170231_init` baseline) and runs `npm run seed`
+   automatically via the `prisma.seed` config in `package.json`. Run
+   `npm run seed` on its own to re-seed without a migration.
+4. `npm run start:dev` — watch-mode NestJS server. Seeding gives you a demo
+   company (SIREN `123456789`), its 2026 fiscal year, the standard PCG
+   accounts, and the five standard journals (AC, VE, BQ, OD, AN) to exercise
+   the API against.
+5. API docs are served at `/docs` (Swagger UI), deliberately not `/api`
+   since that's the REST prefix. `/docs` loads without any tenant context —
+   see the middleware note below for why that's safe.
+
 ## Multi-tenant data model — non-negotiable
 
 The product is used as a single-company tool today, but the schema and
@@ -42,6 +61,15 @@ later is a feature flag, not a migration:
   `@CurrentCompany()`), never by re-deriving it ad hoc per controller.
 - Uniqueness constraints (account numbers, journal codes, entry sequence
   numbers, etc.) are scoped **per company**, not global.
+- `CompanyContextMiddleware` is wired up in `app.module.ts` via an explicit
+  `forRoutes(...)` allowlist of domain controllers, not a wildcard
+  `forRoutes('*')`. Two reasons: Express 5's `path-to-regexp` no longer
+  accepts a bare `'*'` wildcard, and Swagger (`SwaggerModule.setup('docs', ...)`)
+  registers its routes directly on the underlying HTTP adapter rather than as
+  a Nest controller, so it was never reachable by Nest middleware routing in
+  the first place — there's no exclusion to configure for it. When a new
+  domain controller is added, it must be added to that allowlist explicitly
+  or its routes will run with no company context resolved.
 
 ## Money handling — hard rule, non-negotiable
 
@@ -155,6 +183,23 @@ to example; don't treat those as authoritative for column order.
   matching update to the fixture tests in `src/modules/fec/*.spec.ts`
   before merging — never adjust the test to match new output without
   re-checking it against `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md`.
+
+## Known scope boundaries
+
+Things that are deliberately incomplete right now — not bugs, but don't
+assume they're covered either:
+
+- **Article A47 A-1 §VIII** (simplified/micro-BIC reporting variants) has
+  not been cross-checked against `src/modules/fec/`. Everything else in
+  the FEC section above has been verified against
+  `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md`; §VIII specifically
+  has not.
+- **VAT (`src/modules/vat/`) and liasse fiscale (`src/modules/liasse/`)
+  are stubs.** They throw `NotImplementedException`, not a
+  plausible-looking fake computation. Don't build on top of them assuming
+  real logic exists.
+- **Monaco rules are unverified** — see "Monaco compliance" below. Nothing
+  Monaco-specific should be treated as settled without a cited source.
 
 ## Monaco compliance — verify before trusting
 
