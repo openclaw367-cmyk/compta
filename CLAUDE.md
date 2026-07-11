@@ -27,8 +27,10 @@ samples/     Sample files (e.g. real-world FEC exports, PCG account lists)
 
 1. A local PostgreSQL instance, reachable at the connection string in
    `backend/.env` (copy from `backend/.env.example`: database `compta_fr_mc`,
-   user `compta`). There is no bundled Docker Compose file yet — point
-   `DATABASE_URL` at whatever Postgres instance/service you run locally.
+   user `compta`). There is no bundled Docker Compose file yet — this
+   project currently develops against a native Windows install, service
+   name `postgresql-x64-17`; point `DATABASE_URL` at whatever Postgres
+   instance/service you run locally.
 2. `cd backend && npm install`
 3. `npx prisma migrate dev` — applies `backend/prisma/migrations/` (currently
    just the `20260711170231_init` baseline) and runs `npm run seed`
@@ -189,17 +191,27 @@ to example; don't treat those as authoritative for column order.
 Things that are deliberately incomplete right now — not bugs, but don't
 assume they're covered either:
 
-- **Article A47 A-1 §VIII** (simplified/micro-BIC reporting variants) has
-  not been cross-checked against `src/modules/fec/`. Everything else in
-  the FEC section above has been verified against
-  `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md`; §VIII specifically
-  has not.
+- **FEC output has not been run through DGFiP's Test Compta Demat
+  validator.** The export has been checked field-by-field against
+  `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md`, but that's a
+  reading of the legal text, not confirmation from the actual tool the
+  tax administration uses to accept/reject FEC files. Treat the export as
+  spec-compliant, not yet field-validated, until a real file has been run
+  through Test Compta Demat.
+- **Frontend is not yet scaffolded** — see "Stack" above. Nothing in this
+  file about frontend conventions (React app sharing types with the
+  backend, single-company UX) has been exercised against real code yet.
 - **VAT (`src/modules/vat/`) and liasse fiscale (`src/modules/liasse/`)
   are stubs.** They throw `NotImplementedException`, not a
   plausible-looking fake computation. Don't build on top of them assuming
   real logic exists.
 - **Monaco rules are unverified** — see "Monaco compliance" below. Nothing
   Monaco-specific should be treated as settled without a cited source.
+- **Article A47 A-1 §VIII** (simplified/micro-BIC reporting variants) has
+  not been cross-checked against `src/modules/fec/`. Everything else in
+  the FEC section above has been verified against
+  `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md`; §VIII specifically
+  has not.
 
 ## Monaco compliance — verify before trusting
 
