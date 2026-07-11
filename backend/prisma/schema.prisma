@@ -1,0 +1,316 @@
+// Prisma schema for the French/Monaco double-entry accounting suite.
+//
+// Every domain model carries companyId and is scoped per-company — see
+// CLAUDE.md "Multi-tenant data model". All monetary fields are
+// Decimal @db.Decimal(15, 2) — see CLAUDE.md "Money handling". Never widen
+// a monetary field to Float/Real/Double.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// FR = France (Article A47 A-1 du LPF rules apply).
+/// MC = Monaco (rules verified independently — see CLAUDE.md "Monaco compliance").
+enum Jurisdiction {
+  FR
+  MC
+}
+
+enum JournalType {
+  ACHATS
+  VENTES
+  BANQUE
+  CAISSE
+  OPERATIONS_DIVERSES
+  A_NOUVEAU
+}
+
+enum DepreciationMethod {
+  LINEAR
+  // Declining-balance (dégressif) coefficients are not yet implemented —
+  // see CLAUDE.md and depreciation.service.ts. Do not select this value
+  // from application code until the calculation is implemented.
+  DECLINING
+}
+
+enum ImportStatus {
+  PENDING
+  COMMITTED
+  FAILED
+}
+
+/// A tenant ("dossier"). The UI only ever shows one Company today, but the
+/// schema is multi-tenant from day one — every other model scopes to a
+/// companyId. See CLAUDE.md "Multi-tenant data model".
+model Company {
+  id           String       @id @default(cuid())
+  name         String
+  jurisdiction Jurisdiction
+
+  /// French SIREN (9 digits). Required to produce a FEC export for a FR company.
+  siren String?
+
+  /// Monaco RCI (Registre du Commerce et de l'Industrie) identifier.
+  rci String?
+
+  vatNumber String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  fiscalYears     FiscalYear[]
+  accounts        Account[]
+  journals        Journal[]
+  ecritures       Ecriture[]
+  ecritureLignes  EcritureLigne[]
+  fixedAssets     FixedAsset[]
+  depreciationEntries DepreciationEntry[]
+  vatRates        VatRate[]
+  importBatches   ImportBatch[]
+}
+
+/// Exercice comptable. Ecritures are validated (locked) relative to a
+/// fiscal year's close, and FEC exports are always for exactly one
+/// fiscal year.
+model FiscalYear {
+  id        String    @id @default(cuid())
+  companyId String
+  company   Company   @relation(fields: [companyId], references: [id])
+
+  label     String
+  startDate DateTime
+  endDate   DateTime
+  closedAt  DateTime?
+
+  ecritures           Ecriture[]
+  depreciationEntries DepreciationEntry[]
+
+  @@unique([companyId, label])
+  @@index([companyId])
+}
+
+/// Compte (PCG chart-of-accounts entry). Number-to-class validation
+/// (leading digit -> PCG class 1-8) is enforced in the accounts service,
+/// not the schema, so it can produce a clear domain error.
+model Account {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  /// CompteNum in FEC terms.
+  number String
+  /// CompteLib in FEC terms.
+  label  String
+
+  /// Leading digit of `number`, i.e. the PCG class (1-8).
+  pcgClass Int
+
+  /// True for a compte auxiliaire (e.g. a specific client/supplier
+  /// sub-account referenced from an EcritureLigne as CompAuxNum/CompAuxLib).
+  isAuxiliary Boolean @default(false)
+
+  parentId String?
+  parent   Account?  @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children Account[] @relation("AccountHierarchy")
+
+  linesAsMain EcritureLigne[] @relation("EcritureLigneCompte")
+  linesAsAux  EcritureLigne[] @relation("EcritureLigneCompteAux")
+
+  fixedAssetsAsAsset       FixedAsset[] @relation("FixedAssetAccount")
+  fixedAssetsAsDepreciation FixedAsset[] @relation("FixedAssetDepreciationAccount")
+  fixedAssetsAsExpense     FixedAsset[] @relation("FixedAssetExpenseAccount")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, number])
+  @@index([companyId])
+}
+
+/// Journal comptable (JournalCode / JournalLib in FEC terms).
+model Journal {
+  id        String      @id @default(cuid())
+  companyId String
+  company   Company     @relation(fields: [companyId], references: [id])
+
+  code  String
+  label String
+  type  JournalType
+
+  ecritures Ecriture[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+}
+
+/// Écriture comptable (journal entry). See CLAUDE.md "Ledger integrity"
+/// for the invariants that must hold before/at validation:
+/// balance, sequential numbering, immutability once validated.
+model Ecriture {
+  id           String     @id @default(cuid())
+  companyId    String
+  company      Company    @relation(fields: [companyId], references: [id])
+  fiscalYearId String
+  fiscalYear   FiscalYear @relation(fields: [fiscalYearId], references: [id])
+  journalId    String
+  journal      Journal    @relation(fields: [journalId], references: [id])
+
+  /// EcritureNum: assigned only at validation time, sequential and gapless
+  /// per company. Null while the entry is a draft.
+  ecritureNum Int?
+
+  /// EcritureDate.
+  ecritureDate DateTime
+
+  /// PieceRef / PieceDate: reference to the supporting document.
+  pieceRef  String?
+  pieceDate DateTime?
+
+  /// EcritureLib.
+  libelle String
+
+  /// ValidDate. Null = draft (editable). Set = immutable; corrections must
+  /// be posted as a new reversing entry referencing this one.
+  validatedAt DateTime?
+
+  /// Set when this entry reverses/corrects another validated entry
+  /// (contre-passation / extourne).
+  reversesId String?
+  reverses   Ecriture?  @relation("EcritureReversal", fields: [reversesId], references: [id])
+  reversedBy Ecriture[] @relation("EcritureReversal")
+
+  importBatchId String?
+  importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id])
+
+  lignes EcritureLigne[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // EcritureNum is only meaningful once assigned, but must be unique per
+  // company when present.
+  @@unique([companyId, ecritureNum])
+  @@index([companyId, fiscalYearId])
+  @@index([companyId, journalId])
+}
+
+/// Ligne d'écriture. Exactly one of debit/credit is non-zero — enforced in
+/// the entries service (see CLAUDE.md rule 4), not expressible in SQL alone.
+model EcritureLigne {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id])
+  ecritureId String
+  ecriture   Ecriture @relation(fields: [ecritureId], references: [id])
+
+  compteId String
+  compte   Account @relation("EcritureLigneCompte", fields: [compteId], references: [id])
+
+  /// Compte auxiliaire (CompAuxNum/CompAuxLib), e.g. a specific client/supplier.
+  compteAuxId String?
+  compteAux   Account? @relation("EcritureLigneCompteAux", fields: [compteAuxId], references: [id])
+
+  debit  Decimal @db.Decimal(15, 2) @default(0)
+  credit Decimal @db.Decimal(15, 2) @default(0)
+
+  /// EcritureLet / DateLet: lettrage (reconciliation) marker.
+  lettrage     String?
+  dateLettrage DateTime?
+
+  /// Montantdevise / Idevise: original amount and currency for foreign-currency lines.
+  montantDevise Decimal? @db.Decimal(15, 2)
+  idDevise      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, ecritureId])
+  @@index([companyId, compteId])
+}
+
+/// Immobilisation (fixed asset) for the depreciation module. Only
+/// straight-line (LINEAR) amortization is implemented so far.
+model FixedAsset {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  label            String
+  accountId        String
+  account          Account @relation("FixedAssetAccount", fields: [accountId], references: [id])
+  depreciationAccountId String
+  depreciationAccount   Account @relation("FixedAssetDepreciationAccount", fields: [depreciationAccountId], references: [id])
+  expenseAccountId String
+  expenseAccount   Account @relation("FixedAssetExpenseAccount", fields: [expenseAccountId], references: [id])
+
+  acquisitionDate  DateTime
+  serviceStartDate DateTime
+  acquisitionValue Decimal @db.Decimal(15, 2)
+  residualValue    Decimal @db.Decimal(15, 2) @default(0)
+  usefulLifeYears  Int
+  method           DepreciationMethod @default(LINEAR)
+
+  depreciationEntries DepreciationEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+/// One year's depreciation schedule line (dotation aux amortissements) for
+/// a FixedAsset, optionally linked to the Ecriture that posted it.
+model DepreciationEntry {
+  id           String     @id @default(cuid())
+  companyId    String
+  company      Company    @relation(fields: [companyId], references: [id])
+  fixedAssetId String
+  fixedAsset   FixedAsset @relation(fields: [fixedAssetId], references: [id])
+  fiscalYearId String
+  fiscalYear   FiscalYear @relation(fields: [fiscalYearId], references: [id])
+
+  amount Decimal @db.Decimal(15, 2)
+
+  postedEcritureId String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([fixedAssetId, fiscalYearId])
+  @@index([companyId])
+}
+
+/// Taux de TVA applicable for a company/jurisdiction over a date range.
+/// Populated per-company because Monaco rates must be verified
+/// independently rather than assumed identical to France — see CLAUDE.md.
+model VatRate {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  label       String
+  ratePercent Decimal   @db.Decimal(5, 2)
+  validFrom   DateTime
+  validTo     DateTime?
+
+  @@index([companyId])
+}
+
+/// A committed Excel journal import. Ecritures created from an import are
+/// drafts (unvalidated) until reviewed and validated like any other entry.
+model ImportBatch {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  fileName String
+  status   ImportStatus @default(PENDING)
+  errors   Json?
+
+  ecritures Ecriture[]
+
+  createdAt DateTime @default(now())
+}

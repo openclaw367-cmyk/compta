@@ -1,0 +1,183 @@
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { EntriesService } from './entries.service';
+import { PrismaService } from '../../common/prisma/prisma.service';
+import { CompanyContext } from '../../common/tenant/company-context';
+import { CreateEcritureDto } from './dto/create-ecriture.dto';
+
+const company: CompanyContext = { companyId: 'company-1' };
+
+function baseDto(overrides: Partial<CreateEcritureDto> = {}): CreateEcritureDto {
+  return {
+    journalId: 'journal-1',
+    fiscalYearId: 'fiscal-year-1',
+    ecritureDate: '2026-01-15',
+    libelle: 'Achat fournitures',
+    lignes: [
+      { compteId: 'account-607', debit: '100.00' },
+      { compteId: 'account-401', credit: '100.00' },
+    ],
+    ...overrides,
+  };
+}
+
+function makePrismaMock() {
+  const prisma = {
+    journal: { findFirst: jest.fn().mockResolvedValue({ id: 'journal-1' }) },
+    fiscalYear: { findFirst: jest.fn().mockResolvedValue({ id: 'fiscal-year-1' }) },
+    ecriture: {
+      create: jest.fn((args: { data: unknown; include?: unknown }) => ({
+        id: 'ecriture-1',
+        validatedAt: null,
+        ...(args.data as object),
+      })),
+      findFirst: jest.fn(),
+      update: jest.fn((args: { where: { id: string }; data: unknown }) => ({
+        id: args.where.id,
+        ...(args.data as object),
+      })),
+      delete: jest.fn(),
+    },
+    ecritureLigne: { deleteMany: jest.fn() },
+    $transaction: jest.fn(),
+  };
+  prisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(prisma));
+  return prisma;
+}
+
+describe('EntriesService', () => {
+  let prisma: ReturnType<typeof makePrismaMock>;
+  let service: EntriesService;
+
+  beforeEach(() => {
+    prisma = makePrismaMock();
+    service = new EntriesService(prisma as unknown as PrismaService);
+  });
+
+  it('creates a balanced écriture', async () => {
+    const ecriture = await service.create(company, baseDto());
+    expect(prisma.ecriture.create).toHaveBeenCalled();
+    expect(ecriture).toBeDefined();
+  });
+
+  it('rejects an écriture where debit != credit', async () => {
+    const dto = baseDto({
+      lignes: [
+        { compteId: 'account-607', debit: '100.00' },
+        { compteId: 'account-401', credit: '99.00' },
+      ],
+    });
+    await expect(service.create(company, dto)).rejects.toThrow(BadRequestException);
+    expect(prisma.ecriture.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a line with both a debit and a credit amount', async () => {
+    const dto = baseDto({
+      lignes: [
+        { compteId: 'account-607', debit: '100.00', credit: '100.00' },
+        { compteId: 'account-401', credit: '100.00' },
+      ],
+    });
+    await expect(service.create(company, dto)).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects a line with neither a debit nor a credit amount', async () => {
+    const dto = baseDto({
+      lignes: [{ compteId: 'account-607' }, { compteId: 'account-401', credit: '100.00' }],
+    });
+    await expect(service.create(company, dto)).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects referencing a journal from another company', async () => {
+    prisma.journal.findFirst.mockResolvedValueOnce(null);
+    await expect(service.create(company, baseDto())).rejects.toThrow(NotFoundException);
+  });
+
+  it('assigns sequential EcritureNum on validation, starting from 1', async () => {
+    prisma.ecriture.findFirst
+      .mockResolvedValueOnce({ id: 'ecriture-1', validatedAt: null }) // the entry being validated
+      .mockResolvedValueOnce(null); // no prior validated entries
+    const result = await service.validate(company, 'ecriture-1');
+    expect(prisma.ecriture.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ ecritureNum: 1 }) }),
+    );
+    expect(result).toBeDefined();
+  });
+
+  it('assigns the next sequential EcritureNum after existing validated entries', async () => {
+    prisma.ecriture.findFirst
+      .mockResolvedValueOnce({ id: 'ecriture-2', validatedAt: null })
+      .mockResolvedValueOnce({ ecritureNum: 7 });
+    await service.validate(company, 'ecriture-2');
+    expect(prisma.ecriture.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ ecritureNum: 8 }) }),
+    );
+  });
+
+  it('refuses to validate an already-validated écriture', async () => {
+    prisma.ecriture.findFirst.mockResolvedValueOnce({
+      id: 'ecriture-1',
+      validatedAt: new Date(),
+    });
+    await expect(service.validate(company, 'ecriture-1')).rejects.toThrow(ConflictException);
+  });
+
+  it('refuses to delete a validated écriture', async () => {
+    prisma.ecriture.findFirst.mockResolvedValueOnce({
+      id: 'ecriture-1',
+      validatedAt: new Date(),
+      lignes: [],
+    });
+    await expect(service.remove(company, 'ecriture-1')).rejects.toThrow(ConflictException);
+    expect(prisma.ecriture.delete).not.toHaveBeenCalled();
+  });
+
+  it('refuses to edit a validated écriture', async () => {
+    prisma.ecriture.findFirst.mockResolvedValueOnce({
+      id: 'ecriture-1',
+      validatedAt: new Date(),
+      lignes: [],
+    });
+    await expect(service.update(company, 'ecriture-1', baseDto())).rejects.toThrow(
+      ConflictException,
+    );
+  });
+
+  it('reversal swaps debit and credit on every line', async () => {
+    prisma.ecriture.findFirst.mockResolvedValueOnce({
+      id: 'ecriture-1',
+      journalId: 'journal-1',
+      fiscalYearId: 'fiscal-year-1',
+      libelle: 'Achat fournitures',
+      validatedAt: new Date(),
+      lignes: [
+        { compteId: 'account-607', compteAuxId: null, debit: '100.00', credit: '0.00' },
+        { compteId: 'account-401', compteAuxId: null, debit: '0.00', credit: '100.00' },
+      ],
+    });
+
+    await service.reverse(company, 'ecriture-1');
+
+    expect(prisma.ecriture.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          reversesId: 'ecriture-1',
+          lignes: {
+            create: [
+              expect.objectContaining({ compteId: 'account-607', debit: '0.00', credit: '100.00' }),
+              expect.objectContaining({ compteId: 'account-401', debit: '100.00', credit: '0.00' }),
+            ],
+          },
+        }),
+      }),
+    );
+  });
+
+  it('refuses to reverse a draft (unvalidated) écriture', async () => {
+    prisma.ecriture.findFirst.mockResolvedValueOnce({
+      id: 'ecriture-1',
+      validatedAt: null,
+      lignes: [],
+    });
+    await expect(service.reverse(company, 'ecriture-1')).rejects.toThrow(BadRequestException);
+  });
+});
