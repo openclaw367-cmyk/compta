@@ -7,10 +7,16 @@ depreciation (amortissements), VAT (TVA), and liasse fiscale.
 ## Stack
 
 - **Backend**: TypeScript, NestJS, PostgreSQL, Prisma ORM.
-- **Frontend** (not yet scaffolded): planned as a TypeScript/React app sharing
-  types with the backend. Single-company UX for now (auto-selects the one
+- **Frontend**: TypeScript/React + Vite + Tailwind v4, sharing request-DTO
+  types with the backend via `import type` (erased at build — see
+  `frontend/src/api/dto.ts`). Single-company UX (auto-selects the one
   company, no company picker) even though the data model is multi-tenant —
-  see "Multi-tenant data model" below.
+  see "Multi-tenant data model" below. All four core screens are built:
+  journal entry grid (with inline tiers creation), tiers management, grand
+  livre / trial balance, Excel import (preview-then-confirm), and FEC
+  export. TVA and liasse fiscale are honest "non implémenté" placeholders,
+  matching their backend stub status — nothing to build there until the
+  backend logic exists.
 - **Package manager**: npm.
 - **Testing**: Jest (unit + e2e, NestJS default).
 - **Validation**: `class-validator` / `class-transformer` on all DTOs.
@@ -18,9 +24,11 @@ depreciation (amortissements), VAT (TVA), and liasse fiscale.
 Repo layout:
 
 ```
-backend/     NestJS API (this is what's scaffolded so far)
+backend/     NestJS API
+frontend/    React/Vite app (see "Frontend" above for what's built)
 specs/       Compliance / functional specs (FEC, PCG, VAT, liasse references)
 samples/     Sample files (e.g. real-world FEC exports, PCG account lists)
+docs/        Compliance artifacts (e.g. Test Compta Demat reports)
 ```
 
 ## Local dev setup
@@ -88,9 +96,11 @@ helper, not in a test fixture that pretends to be temporary.
 - API boundary: monetary values are **serialized as strings** in JSON
   request/response bodies (e.g. `"1234.56"`), never as JS numbers. DTOs use
   a `Decimal`-aware validator/transformer, not `@IsNumber()`.
-- Frontend (once scaffolded): monetary values are parsed into a `Decimal`
-  immediately on receipt and formatted for display only at the last
-  possible moment. No arithmetic on `parseFloat()`'d money, ever.
+- Frontend: money is a string everywhere — API responses, component
+  props, form state — never a JS number. `frontend/src/lib/money.ts` does
+  all formatting and summing via string/BigInt operations
+  (`formatMoneyFr`, `addMoneyStrings`, `subtractMoneyStrings`); no
+  `Number()`/`parseFloat()` ever touches an amount.
 - Enforcement: an ESLint rule (`backend/eslint-rules/no-float-money.js`,
   wired into `eslint.config.mjs`) flags arithmetic operators applied to
   values typed or named as money outside the `Decimal` API. Unit tests in
@@ -187,9 +197,26 @@ to example; don't treat those as authoritative for column order.
 - **File name**: `{SIREN}FEC{ClotureDate:YYYYMMDD}.txt`, e.g.
   `123456789FEC20261231.txt`. The company record must have a valid SIREN to
   export.
-- **Only validated écritures are exportable.** An export over a period that
-  contains unvalidated (draft) entries must fail loudly, not silently skip
-  them.
+- **Only validated écritures are exportable — and this blocks the whole
+  export, not just the drafts.** If any écriture in the fiscal year is
+  still a draft, `FecExportService.generate()` throws a
+  `ConflictException` naming the count; it never silently exports the
+  validated subset and skips the rest. This was learned the hard way
+  once already: the FEC export screen's first draft assumed drafts would
+  just be *excluded* and left "Générer" clickable, which meant clicking
+  it just threw. `FecExportPage` now counts drafts client-side (from the
+  already-fetched écritures list) and disables Generate while any exist,
+  with copy that says "blocks", not "excludes" — if you touch that
+  screen, keep those in sync with this rule rather than re-deriving it.
+- **Any new file-download endpoint needs `exposedHeaders` in CORS, not
+  just a `Content-Disposition` header.** `Content-Disposition` isn't in
+  the browser's default CORS-safelisted header set, so
+  `response.headers.get('Content-Disposition')` silently returns `null`
+  in frontend code unless the backend's `app.enableCors()` call in
+  `main.ts` explicitly exposes it. Already fixed for the two `/fec/*`
+  download routes; a future download endpoint (e.g. a liasse PDF) needs
+  the same header added to that `exposedHeaders` array, not a new CORS
+  config.
 - Field-name and column-order changes are compliance-breaking. Any change
   to `src/modules/fec/fec-export.service.ts`'s output shape requires a
   matching update to the fixture tests in `src/modules/fec/*.spec.ts`
@@ -218,9 +245,10 @@ assume they're covered either:
   filing's volume, edge-case account numbers, or a Monaco company) — treat
   each materially different dataset as needing its own run, not covered
   by this one.
-- **Frontend is not yet scaffolded** — see "Stack" above. Nothing in this
-  file about frontend conventions (React app sharing types with the
-  backend, single-company UX) has been exercised against real code yet.
+- **Frontend has no screens for VAT or liasse fiscale** — deliberately:
+  see "Stack" above. There's nothing to build there until the backend
+  stubs below are implemented; the nav entries are honest
+  "non implémenté" placeholders, not faked screens.
 - **VAT (`src/modules/vat/`) and liasse fiscale (`src/modules/liasse/`)
   are stubs.** They throw `NotImplementedException`, not a
   plausible-looking fake computation. Don't build on top of them assuming
