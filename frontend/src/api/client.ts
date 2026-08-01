@@ -17,10 +17,14 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // FormData bodies (file upload) must NOT get an explicit Content-Type —
+  // fetch sets multipart/form-data with the correct boundary itself, and
+  // overriding it here would break the boundary and the upload with it.
+  const isFormData = init?.body instanceof FormData;
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
-      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(init?.body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
       Accept: 'application/json',
       ...init?.headers,
     },
@@ -46,4 +50,6 @@ export const api = {
   patch: <T>(path: string, data: unknown): Promise<T> =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(data) }),
   delete: <T>(path: string): Promise<T> => request<T>(path, { method: 'DELETE' }),
+  postForm: <T>(path: string, formData: FormData): Promise<T> =>
+    request<T>(path, { method: 'POST', body: formData }),
 };

@@ -4,6 +4,7 @@ import { PlaceholderPage } from './components/placeholders/PlaceholderPage';
 import { JournalEntriesPage } from './pages/JournalEntriesPage';
 import { TiersPage } from './pages/TiersPage';
 import { GrandLivrePage } from './pages/GrandLivrePage';
+import { ImportExcelPage } from './pages/ImportExcelPage';
 
 export default function App() {
   return (
@@ -12,16 +13,7 @@ export default function App() {
         <Route path="/" element={<JournalEntriesPage />} />
         <Route path="/tiers" element={<TiersPage />} />
         <Route path="/grand-livre" element={<GrandLivrePage />} />
-        <Route
-          path="/import"
-          element={
-            <PlaceholderPage
-              kind="not-built"
-              title="Import Excel"
-              message="Import d'un classeur, aperçu de validation, puis confirmation avant écriture — à construire après la saisie manuelle."
-            />
-          }
-        />
+        <Route path="/import" element={<ImportExcelPage />} />
         <Route
           path="/fec"
           element={

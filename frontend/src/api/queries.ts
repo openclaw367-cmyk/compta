@@ -5,6 +5,8 @@ import type {
   AccountLedgerResponse,
   Ecriture,
   FiscalYear,
+  ImportBatch,
+  ImportPreviewResponse,
   Journal,
   TrialBalanceResponse,
 } from './types';
@@ -164,5 +166,33 @@ export function useRenameAccount() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['accounts'] });
     },
+  });
+}
+
+function importFormData(fiscalYearId: string, file: File): FormData {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('fiscalYearId', fiscalYearId);
+  return formData;
+}
+
+/** Pure read — writes nothing server-side, safe to call as often as needed. */
+export function usePreviewImport() {
+  return useMutation({
+    mutationFn: ({ fiscalYearId, file }: { fiscalYearId: string; file: File }) =>
+      api.postForm<ImportPreviewResponse>(
+        '/import-excel/preview',
+        importFormData(fiscalYearId, file),
+      ),
+  });
+}
+
+/** The real commit — re-submits the same file previewed a moment earlier. */
+export function useConfirmImport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ fiscalYearId, file }: { fiscalYearId: string; file: File }) =>
+      api.postForm<ImportBatch>('/import-excel', importFormData(fiscalYearId, file)),
+    onSuccess: () => invalidateEcrituresAndLedger(queryClient),
   });
 }

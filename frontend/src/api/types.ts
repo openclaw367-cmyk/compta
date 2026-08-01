@@ -125,3 +125,45 @@ export interface AccountLedgerResponse {
   lines: AccountLedgerLine[];
   totals: LedgerTotals;
 }
+
+export interface ImportPreviewLigne {
+  compteNum: string;
+  compteLib: string;
+  debit: string;
+  credit: string;
+}
+
+export interface ImportPreviewEcriture {
+  ecritureRef: string;
+  journalCode: string;
+  ecritureDate: string;
+  libelle: string;
+  pieceRef?: string;
+  /** Money string — total debit, which always equals total credit for a valid group. */
+  total: string;
+  lignes: ImportPreviewLigne[];
+  isDuplicate: boolean;
+  duplicateOf?: string;
+}
+
+export interface ImportPreviewRejected {
+  ecritureRef: string;
+  errors: string[];
+}
+
+/** Response for POST /import-excel/preview — writes nothing, purely informational. */
+export interface ImportPreviewResponse {
+  fileErrors: string[];
+  toImport: ImportPreviewEcriture[];
+  rejected: ImportPreviewRejected[];
+}
+
+export interface ImportBatch {
+  id: string;
+  companyId: string;
+  fileName: string;
+  status: 'PENDING' | 'COMMITTED' | 'FAILED';
+  errors: string[] | null;
+  createdAt: string;
+  ecritures?: Ecriture[];
+}

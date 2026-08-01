@@ -1,10 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { ImportBatch, Prisma } from '@prisma/client';
+import { Account, Ecriture, ImportBatch, Journal, Prisma } from '@prisma/client';
 import ExcelJS, { Row, Worksheet } from 'exceljs';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { Money } from '../../common/decimal';
 import { assertFiscalYearOpen } from '../../common/ledger/assert-fiscal-year-open';
+import {
+  ImportPreviewEcritureDto,
+  ImportPreviewResponseDto,
+} from './dto/import-preview-response.dto';
 
 /**
  * Column headers expected on row 1 of the imported sheet. EcritureRef is a
@@ -64,6 +68,31 @@ export interface ImportedFile {
   buffer: Buffer;
 }
 
+interface ValidGroupLigne {
+  compteId: string;
+  compteNum: string;
+  compteLib: string;
+  debit: Money;
+  credit: Money;
+}
+
+interface ValidGroup {
+  ecritureRef: string;
+  journalCode: string;
+  ecritureDate: Date;
+  libelle: string;
+  pieceRef?: string;
+  total: Money;
+  lignes: ValidGroupLigne[];
+  /** Ready for Prisma — built once here so importJournal() doesn't redo this work. */
+  data: Prisma.EcritureCreateWithoutImportBatchInput;
+}
+
+interface RejectedGroup {
+  ecritureRef: string;
+  errors: string[];
+}
+
 /**
  * Imports a journal from an Excel sheet as draft (unvalidated) écritures,
  * so they go through the normal review/validate flow like anything entered
@@ -76,11 +105,94 @@ export interface ImportedFile {
 export class ImportExcelService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Parses, groups, validates, and flags suspected duplicates — a pure
+   * read, writes nothing (not even an ImportBatch row). The frontend
+   * confirms by re-submitting the same file to importJournal(), which
+   * redoes this same work; this method never becomes "the" import, it
+   * only ever previews one.
+   */
+  async preview(
+    company: CompanyContext,
+    fiscalYearId: string,
+    file: ImportedFile,
+  ): Promise<ImportPreviewResponseDto> {
+    await this.requireOpenFiscalYear(company, fiscalYearId);
+
+    const parsed = await this.tryParseWorkbook(file);
+    if ('fileErrors' in parsed) {
+      return { fileErrors: parsed.fileErrors, toImport: [], rejected: [] };
+    }
+
+    const { journalByCode, accountByNumber } = await this.loadLookups(company);
+    const { valid, rejected } = this.groupAndValidate(
+      parsed.lines,
+      company,
+      fiscalYearId,
+      journalByCode,
+      accountByNumber,
+    );
+    const duplicateOf = await this.findDuplicates(company, valid);
+
+    return {
+      fileErrors: [],
+      toImport: valid.map((group) =>
+        this.toPreviewEcriture(group, duplicateOf.get(group.ecritureRef)),
+      ),
+      rejected,
+    };
+  }
+
+  /**
+   * Always persists exactly one ImportBatch — COMMITTED on success, FAILED
+   * (carrying the errors) otherwise — so there's a real import history
+   * even when nothing could be imported. Still atomic: any error anywhere
+   * in the file means nothing is imported; duplicates are preview-only
+   * warnings and never block this.
+   */
   async importJournal(
     company: CompanyContext,
     fiscalYearId: string,
     file: ImportedFile,
   ): Promise<ImportBatch> {
+    await this.requireOpenFiscalYear(company, fiscalYearId);
+
+    const parsed = await this.tryParseWorkbook(file);
+    if ('fileErrors' in parsed) {
+      await this.persistFailedBatch(company, file.originalname, parsed.fileErrors);
+      throw new BadRequestException({ message: 'Import failed', errors: parsed.fileErrors });
+    }
+
+    const { journalByCode, accountByNumber } = await this.loadLookups(company);
+    const { valid, rejected } = this.groupAndValidate(
+      parsed.lines,
+      company,
+      fiscalYearId,
+      journalByCode,
+      accountByNumber,
+    );
+
+    if (rejected.length > 0) {
+      const errors = rejected.flatMap((group) => group.errors);
+      await this.persistFailedBatch(company, file.originalname, errors);
+      throw new BadRequestException({ message: 'Import failed', errors });
+    }
+
+    return this.prisma.importBatch.create({
+      data: {
+        companyId: company.companyId,
+        fileName: file.originalname,
+        status: 'COMMITTED',
+        ecritures: { create: valid.map((group) => group.data) },
+      },
+      include: { ecritures: { include: { lignes: true } } },
+    });
+  }
+
+  private async requireOpenFiscalYear(
+    company: CompanyContext,
+    fiscalYearId: string,
+  ): Promise<void> {
     const fiscalYear = await this.prisma.fiscalYear.findFirst({
       where: { id: fiscalYearId, companyId: company.companyId },
     });
@@ -88,30 +200,142 @@ export class ImportExcelService {
       throw new NotFoundException(`Fiscal year ${fiscalYearId} not found`);
     }
     assertFiscalYearOpen(fiscalYear);
+  }
 
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(file.buffer as unknown as ExcelJS.Buffer);
-    const worksheet = workbook.worksheets[0];
-    if (!worksheet) {
-      throw new BadRequestException('The workbook has no worksheets.');
-    }
-
-    const columnIndex = this.readHeader(worksheet);
-    const { lines, errors: parseErrors } = this.readLines(worksheet, columnIndex);
-    if (parseErrors.length > 0) {
-      throw new BadRequestException({ message: 'Import failed', errors: parseErrors });
-    }
-    if (lines.length === 0) {
-      throw new BadRequestException('The sheet has no data rows.');
-    }
-
+  private async loadLookups(
+    company: CompanyContext,
+  ): Promise<{ journalByCode: Map<string, Journal>; accountByNumber: Map<string, Account> }> {
     const [journals, accounts] = await Promise.all([
       this.prisma.journal.findMany({ where: { companyId: company.companyId } }),
       this.prisma.account.findMany({ where: { companyId: company.companyId } }),
     ]);
-    const journalByCode = new Map(journals.map((journal) => [journal.code, journal]));
-    const accountByNumber = new Map(accounts.map((account) => [account.number, account]));
+    return {
+      journalByCode: new Map(journals.map((journal) => [journal.code, journal])),
+      accountByNumber: new Map(accounts.map((account) => [account.number, account])),
+    };
+  }
 
+  private async persistFailedBatch(
+    company: CompanyContext,
+    fileName: string,
+    errors: string[],
+  ): Promise<void> {
+    await this.prisma.importBatch.create({
+      data: { companyId: company.companyId, fileName, status: 'FAILED', errors },
+    });
+  }
+
+  /**
+   * Suspected duplicates: same journal + same date + same set of
+   * (compteId, debit, credit) as an existing écriture (validated or
+   * draft) or another group in this same file. The whole entry must be
+   * structurally identical — not a line-by-line match — so a signature
+   * built from all of a candidate's lines is what's compared, not
+   * individual lines.
+   */
+  private async findDuplicates(
+    company: CompanyContext,
+    groups: ValidGroup[],
+  ): Promise<Map<string, string>> {
+    const existing = await this.prisma.ecriture.findMany({
+      where: { companyId: company.companyId },
+      include: { lignes: true, journal: true },
+    });
+
+    const existingBySignature = new Map<string, Ecriture>();
+    for (const ecriture of existing) {
+      const signature = this.buildSignature(
+        ecriture.journal.code,
+        ecriture.ecritureDate,
+        ecriture.lignes.map((ligne) => ({
+          compteId: ligne.compteId,
+          debit: Money.fromDecimal(ligne.debit),
+          credit: Money.fromDecimal(ligne.credit),
+        })),
+      );
+      if (!existingBySignature.has(signature)) {
+        existingBySignature.set(signature, ecriture);
+      }
+    }
+
+    const duplicateOf = new Map<string, string>();
+    const seenInFile = new Map<string, string>();
+
+    for (const group of groups) {
+      const signature = this.buildSignature(group.journalCode, group.ecritureDate, group.lignes);
+
+      const existingMatch = existingBySignature.get(signature);
+      if (existingMatch) {
+        duplicateOf.set(
+          group.ecritureRef,
+          existingMatch.ecritureNum
+            ? `écriture existante n°${existingMatch.ecritureNum}`
+            : 'écriture existante (brouillon)',
+        );
+        continue;
+      }
+
+      const fileMatch = seenInFile.get(signature);
+      if (fileMatch) {
+        duplicateOf.set(group.ecritureRef, `doublon dans le fichier (EcritureRef "${fileMatch}")`);
+      } else {
+        seenInFile.set(signature, group.ecritureRef);
+      }
+    }
+
+    return duplicateOf;
+  }
+
+  /**
+   * A whole-entry identity key: journal + date + the sorted set of
+   * (account, debit, credit) across every line. Two écritures collide
+   * here only if they're structurally identical, not merely
+   * line-for-line similar — matches the requirement that duplicate
+   * detection compares entries as a unit.
+   */
+  private buildSignature(
+    journalCode: string,
+    ecritureDate: Date,
+    lignes: { compteId: string; debit: Money; credit: Money }[],
+  ): string {
+    const dateKey = ecritureDate.toISOString().slice(0, 10);
+    const lineKeys = lignes
+      .map(
+        (ligne) => `${ligne.compteId}:${ligne.debit.toApiString()}:${ligne.credit.toApiString()}`,
+      )
+      .sort();
+    return `${journalCode}|${dateKey}|${lineKeys.join(';')}`;
+  }
+
+  private toPreviewEcriture(
+    group: ValidGroup,
+    duplicateOf: string | undefined,
+  ): ImportPreviewEcritureDto {
+    return {
+      ecritureRef: group.ecritureRef,
+      journalCode: group.journalCode,
+      ecritureDate: group.ecritureDate.toISOString().slice(0, 10),
+      libelle: group.libelle,
+      pieceRef: group.pieceRef,
+      total: group.total.toApiString(),
+      lignes: group.lignes.map((ligne) => ({
+        compteNum: ligne.compteNum,
+        compteLib: ligne.compteLib,
+        debit: ligne.debit.toApiString(),
+        credit: ligne.credit.toApiString(),
+      })),
+      isDuplicate: Boolean(duplicateOf),
+      duplicateOf,
+    };
+  }
+
+  private groupAndValidate(
+    lines: ParsedLine[],
+    company: CompanyContext,
+    fiscalYearId: string,
+    journalByCode: Map<string, Journal>,
+    accountByNumber: Map<string, Account>,
+  ): { valid: ValidGroup[]; rejected: RejectedGroup[] } {
     const groups = new Map<string, ParsedLine[]>();
     for (const line of lines) {
       const group = groups.get(line.ecritureRef) ?? [];
@@ -119,11 +343,11 @@ export class ImportExcelService {
       groups.set(line.ecritureRef, group);
     }
 
-    const groupErrors: string[] = [];
-    const ecrituresToCreate: Prisma.EcritureCreateWithoutImportBatchInput[] = [];
+    const valid: ValidGroup[] = [];
+    const rejected: RejectedGroup[] = [];
 
     for (const [ref, groupLines] of groups) {
-      const result = this.buildEcritureFromGroup(
+      const result = this.buildGroup(
         ref,
         groupLines,
         company,
@@ -132,51 +356,40 @@ export class ImportExcelService {
         accountByNumber,
       );
       if ('errors' in result) {
-        groupErrors.push(...result.errors);
+        rejected.push({ ecritureRef: ref, errors: result.errors });
       } else {
-        ecrituresToCreate.push(result.data);
+        valid.push(result.group);
       }
     }
 
-    if (groupErrors.length > 0) {
-      throw new BadRequestException({ message: 'Import failed', errors: groupErrors });
-    }
-
-    return this.prisma.importBatch.create({
-      data: {
-        companyId: company.companyId,
-        fileName: file.originalname,
-        status: 'COMMITTED',
-        ecritures: { create: ecrituresToCreate },
-      },
-      include: { ecritures: { include: { lignes: true } } },
-    });
+    return { valid, rejected };
   }
 
-  private buildEcritureFromGroup(
+  private buildGroup(
     ref: string,
     groupLines: ParsedLine[],
     company: CompanyContext,
     fiscalYearId: string,
-    journalByCode: Map<string, { id: string; code: string }>,
-    accountByNumber: Map<string, { id: string; number: string }>,
-  ): { data: Prisma.EcritureCreateWithoutImportBatchInput } | { errors: string[] } {
+    journalByCode: Map<string, Journal>,
+    accountByNumber: Map<string, Account>,
+  ): { group: ValidGroup } | { errors: string[] } {
     const errors: string[] = [];
     const distinctJournalCodes = new Set(groupLines.map((line) => line.journalCode));
     if (distinctJournalCodes.size > 1) {
-      errors.push(`EcritureRef "${ref}" mixes more than one JournalCode.`);
-      return { errors };
+      return { errors: [`EcritureRef "${ref}" mixes more than one JournalCode.`] };
     }
 
     const journal = journalByCode.get(groupLines[0].journalCode);
     if (!journal) {
-      errors.push(`EcritureRef "${ref}": unknown JournalCode "${groupLines[0].journalCode}".`);
-      return { errors };
+      return {
+        errors: [`EcritureRef "${ref}": unknown JournalCode "${groupLines[0].journalCode}".`],
+      };
     }
 
     let totalDebit = Money.zero();
     let totalCredit = Money.zero();
     const lignesData: Prisma.EcritureLigneCreateWithoutEcritureInput[] = [];
+    const lineSummaries: ValidGroupLigne[] = [];
 
     for (const line of groupLines) {
       const compte = accountByNumber.get(line.compteNum);
@@ -216,6 +429,13 @@ export class ImportExcelService {
         debit: line.debit.toDecimal(),
         credit: line.credit.toDecimal(),
       });
+      lineSummaries.push({
+        compteId: compte.id,
+        compteNum: compte.number,
+        compteLib: compte.label,
+        debit: line.debit,
+        credit: line.credit,
+      });
     }
 
     if (errors.length > 0) {
@@ -232,20 +452,67 @@ export class ImportExcelService {
 
     const first = groupLines[0];
     return {
-      data: {
-        company: { connect: { id: company.companyId } },
-        journal: { connect: { id: journal.id } },
-        fiscalYear: { connect: { id: fiscalYearId } },
+      group: {
+        ecritureRef: ref,
+        journalCode: journal.code,
         ecritureDate: first.ecritureDate,
-        pieceRef: first.pieceRef,
-        pieceDate: first.pieceDate,
         libelle: first.libelle,
-        lignes: { create: lignesData },
+        pieceRef: first.pieceRef,
+        total: totalDebit,
+        lignes: lineSummaries,
+        data: {
+          company: { connect: { id: company.companyId } },
+          journal: { connect: { id: journal.id } },
+          fiscalYear: { connect: { id: fiscalYearId } },
+          ecritureDate: first.ecritureDate,
+          pieceRef: first.pieceRef,
+          pieceDate: first.pieceDate,
+          libelle: first.libelle,
+          lignes: { create: lignesData },
+        },
       },
     };
   }
 
-  private readHeader(worksheet: Worksheet): Map<string, number> {
+  private async tryParseWorkbook(
+    file: ImportedFile,
+  ): Promise<{ lines: ParsedLine[] } | { fileErrors: string[] }> {
+    const workbook = new ExcelJS.Workbook();
+    try {
+      await workbook.xlsx.load(file.buffer as unknown as ExcelJS.Buffer);
+    } catch (error) {
+      return {
+        fileErrors: [
+          `Could not read the file as an .xlsx workbook (${
+            error instanceof Error ? error.message : String(error)
+          }).`,
+        ],
+      };
+    }
+
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet) {
+      return { fileErrors: ['The workbook has no worksheets.'] };
+    }
+
+    const header = this.readHeader(worksheet);
+    if ('fileErrors' in header) {
+      return header;
+    }
+
+    const { lines, errors } = this.readLines(worksheet, header.columnIndex);
+    if (errors.length > 0) {
+      return { fileErrors: errors };
+    }
+    if (lines.length === 0) {
+      return { fileErrors: ['The sheet has no data rows.'] };
+    }
+    return { lines };
+  }
+
+  private readHeader(
+    worksheet: Worksheet,
+  ): { columnIndex: Map<string, number> } | { fileErrors: string[] } {
     const columnIndex = new Map<string, number>();
     worksheet.getRow(1).eachCell((cell, colNumber) => {
       const name = cellValueToString(cell.value).trim();
@@ -254,11 +521,11 @@ export class ImportExcelService {
 
     const missing = REQUIRED_COLUMNS.filter((name) => !columnIndex.has(name));
     if (missing.length > 0) {
-      throw new BadRequestException(
-        `Missing required column(s) in the import sheet: ${missing.join(', ')}.`,
-      );
+      return {
+        fileErrors: [`Missing required column(s) in the import sheet: ${missing.join(', ')}.`],
+      };
     }
-    return columnIndex;
+    return { columnIndex };
   }
 
   private readLines(
