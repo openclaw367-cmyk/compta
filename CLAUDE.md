@@ -11,12 +11,20 @@ depreciation (amortissements), VAT (TVA), and liasse fiscale.
   types with the backend via `import type` (erased at build — see
   `frontend/src/api/dto.ts`). Single-company UX (auto-selects the one
   company, no company picker) even though the data model is multi-tenant —
-  see "Multi-tenant data model" below. All four core screens are built:
-  journal entry grid (with inline tiers creation), tiers management, grand
-  livre / trial balance, Excel import (preview-then-confirm), and FEC
-  export. TVA and liasse fiscale are honest "non implémenté" placeholders,
-  matching their backend stub status — nothing to build there until the
-  backend logic exists.
+  see "Multi-tenant data model" below. The four core screens are built:
+  journal entry grid (with inline tiers creation and a "Contre-passer"
+  action on validated entries for extourne/contre-passation), tiers
+  management, grand livre / trial balance, Excel import
+  (preview-then-confirm), and FEC export. Five admin/setup screens are also
+  built: fiscal-year management (create, close — surfaces the
+  draft-écritures-remaining guard directly), company profile
+  (view/edit — name, SIREN/RCI, jurisdiction, structured address), VAT
+  rates management (create/list — the CA3 declaration computation itself
+  is still a stub, see below), and a combined "Comptes & journaux" screen
+  for creating journals and plain (non-tiers) PCG accounts. Liasse fiscale
+  is the one remaining honest "non implémenté" placeholder, matching its
+  backend stub status — nothing to build there until the backend logic
+  exists.
 - **Package manager**: npm.
 - **Testing**: Jest (unit + e2e, NestJS default).
 - **Validation**: `class-validator` / `class-transformer` on all DTOs.
@@ -40,10 +48,14 @@ docs/        Compliance artifacts (e.g. Test Compta Demat reports)
    name `postgresql-x64-17`; point `DATABASE_URL` at whatever Postgres
    instance/service you run locally.
 2. `cd backend && npm install`
-3. `npx prisma migrate dev` — applies `backend/prisma/migrations/` (currently
-   just the `20260711170231_init` baseline) and runs `npm run seed`
-   automatically via the `prisma.seed` config in `package.json`. Run
-   `npm run seed` on its own to re-seed without a migration.
+3. `npx prisma migrate dev` — applies `backend/prisma/migrations/` (the
+   `20260711170231_init` baseline plus `20260801195325_add_company_address`)
+   and runs `npm run seed` automatically via the `prisma.seed` config in
+   `package.json`. Run `npm run seed` on its own to re-seed without a
+   migration. On Windows, `prisma generate` can fail with `EPERM` renaming
+   `query_engine-windows.dll.node` if the dev server is running and holds
+   the file open — stop `npm run start:dev` first, regenerate, then
+   restart it.
 4. `npm run start:dev` — watch-mode NestJS server. Seeding gives you a demo
    company (SIREN `123456789`), its 2026 fiscal year, the standard PCG
    accounts, and the five standard journals (AC, VE, BQ, OD, AN) to exercise
@@ -128,9 +140,11 @@ enforced by code review:
 3. **Immutability after validation.** Once an écriture is validated
    (`validDate` set — typically at period close), it can never be edited or
    deleted. Corrections happen via a new reversing/offsetting entry
-   (extourne / contre-passation) that references the original. Draft
-   (unvalidated) entries, e.g. freshly imported from Excel, may still be
-   edited before validation.
+   (extourne / contre-passation) that references the original — reachable
+   from the journal grid via the "Contre-passer" action on a validated
+   row, not just `POST /entries/:id/reverse` directly. Draft (unvalidated)
+   entries, e.g. freshly imported from Excel, may still be edited before
+   validation.
 4. **One posting side per line.** A journal entry line has either a debit
    or a credit amount, never both, and the amount is always positive.
 5. **Chart of accounts (PCG) structure.** Account numbers follow the Plan
@@ -245,14 +259,24 @@ assume they're covered either:
   filing's volume, edge-case account numbers, or a Monaco company) — treat
   each materially different dataset as needing its own run, not covered
   by this one.
-- **Frontend has no screens for VAT or liasse fiscale** — deliberately:
-  see "Stack" above. There's nothing to build there until the backend
-  stubs below are implemented; the nav entries are honest
-  "non implémenté" placeholders, not faked screens.
-- **VAT (`src/modules/vat/`) and liasse fiscale (`src/modules/liasse/`)
-  are stubs.** They throw `NotImplementedException`, not a
-  plausible-looking fake computation. Don't build on top of them assuming
-  real logic exists.
+- **Frontend has no screen for liasse fiscale** — deliberately: see
+  "Stack" above. There's nothing to build there until the backend stub
+  below is implemented; the nav entry is an honest "non implémenté"
+  placeholder, not a faked screen. VAT is different: rate management is
+  real and has a real screen (`VatPage`), but the CA3 declaration
+  computation itself is still a stub — the page says so directly rather
+  than implying the whole VAT feature works.
+- **Liasse fiscale (`src/modules/liasse/`) is a stub**, and so is VAT's
+  `computeDeclaration()` specifically (`VatRate` CRUD is not — see above).
+  Both throw `NotImplementedException`, not a plausible-looking fake
+  computation. Don't build on top of them assuming real logic exists.
+- **No delete/deactivate endpoint exists for `Journal`, `Account`,
+  `VatRate`, or `FiscalYear`.** Each has create + list (+ close, for
+  FiscalYear), nothing more — discovered directly while building their
+  admin screens, when cleaning up test data required a raw Prisma script
+  instead of the API. `Account` and `Journal` also have no update beyond
+  `Account.rename()`. If a future screen needs to remove or correct one
+  of these, that's new backend work, not existing-but-unwired UI.
 - **Monaco rules are unverified** — see "Monaco compliance" below. Nothing
   Monaco-specific should be treated as settled without a cited source.
 - **Article A47 A-1 §VIII** (simplified/micro-BIC reporting variants) has
@@ -282,27 +306,37 @@ assume they're covered either:
 
 ## Current state & roadmap
 
-**Where things stand (as of 2026-08-01):** all four core frontend screens
-are done — journal entry grid (with inline tiers creation), tiers
-management, grand livre / trial balance, Excel import (preview-then-confirm),
-and FEC export. FEC has passed one structural validation run against
-DGFiP's Test Compta Demat (see "Known scope boundaries" above — one sample
-dataset, not a blanket clearance). Ledger integrity guards are in place at
-the service layer: closed-fiscal-year rejection, refusal to close a year
-with draft écritures, drafts-only deletion (`EntriesService.remove()`
-guards against deleting a validated entry), and FEC export blocking
-entirely (not partially) while any draft exists. VAT and liasse fiscale
-remain stubs — see "Known scope boundaries" below for those and the other
-logged gaps (depreciation not posting to the ledger, `dateLettrage` not
-API-settable, no import-batch listing endpoint, Article A47 A-1 §VIII
-uncross-checked).
+**Where things stand (as of 2026-08-01):** the four core frontend screens
+are done — journal entry grid (with inline tiers creation and entry
+reversal), tiers management, grand livre / trial balance, Excel import
+(preview-then-confirm), and FEC export. FEC has passed one structural
+validation run against DGFiP's Test Compta Demat (see "Known scope
+boundaries" above — one sample dataset, not a blanket clearance). Five
+more UI gaps identified in a full frontend/backend coverage audit have
+since been closed, each wiring an already-working backend endpoint to a
+new screen: entry reversal (contre-passation), fiscal-year management
+(create/close), company profile (view/edit, including new structured
+address columns on `Company`), VAT rates management, and journal/basic
+PCG account creation. Ledger integrity guards are in place at the service
+layer: closed-fiscal-year rejection, refusal to close a year with draft
+écritures, drafts-only deletion (`EntriesService.remove()` guards against
+deleting a validated entry), and FEC export blocking entirely (not
+partially) while any draft exists — all now reachable from the UI, not
+just the API. Liasse fiscale remains a stub — see "Known scope
+boundaries" below for that and the other logged gaps (depreciation not
+posting to the ledger, `dateLettrage` not API-settable, no import-batch
+listing endpoint, no delete/deactivate on Journal/Account/VatRate/
+FiscalYear, Article A47 A-1 §VIII uncross-checked).
 
 **Build order for what's next**, roughly in priority:
 
 1. **VAT (TVA)** — CA3 declaration computation, currently a stub
-   (`src/modules/vat/`). France first; Monaco is a verified divergence
-   layer on top, not a parallel guess — see "Monaco compliance" below,
-   nothing Monaco-specific ships without a cited source.
+   (`src/modules/vat/computeDeclaration()`). Rate management
+   (`VatRate` CRUD) is already real and has a screen; this item is
+   specifically the collected-vs-deductible-TVA computation. France
+   first; Monaco is a verified divergence layer on top, not a parallel
+   guess — see "Monaco compliance" below, nothing Monaco-specific ships
+   without a cited source.
 2. **Liasse fiscale** — currently a stub (`src/modules/liasse/`).
 3. **Cash flow statement**, plus bilan and compte de résultat if the
    liasse work above doesn't already cover them.
