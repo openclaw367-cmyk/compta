@@ -16,7 +16,8 @@
     "test:cov": "jest --coverage",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "ts-node prisma/seed.ts",
+    "seed:sample": "ts-node prisma/seed-sample.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
