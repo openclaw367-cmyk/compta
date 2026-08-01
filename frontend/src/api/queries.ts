@@ -10,11 +10,13 @@ import type {
   ImportPreviewResponse,
   Journal,
   TrialBalanceResponse,
+  VatRate,
 } from './types';
 import type {
   CreateEcritureDto,
   CreateFiscalYearDto,
   CreateTiersDto,
+  CreateVatRateDto,
   UpdateAccountDto,
   UpdateCompanyDto,
 } from './dto';
@@ -69,6 +71,23 @@ export function useFiscalYears() {
     queryKey: ['fiscal-years'],
     queryFn: () => api.get<FiscalYear[]>('/fiscal-years'),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useVatRates() {
+  return useQuery({
+    queryKey: ['vat-rates'],
+    queryFn: () => api.get<VatRate[]>('/vat/rates'),
+  });
+}
+
+export function useCreateVatRate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateVatRateDto) => api.post<VatRate>('/vat/rates', dto),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['vat-rates'] });
+    },
   });
 }
 

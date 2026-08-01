@@ -8,6 +8,7 @@ import { TiersPage } from './pages/TiersPage';
 import { GrandLivrePage } from './pages/GrandLivrePage';
 import { ImportExcelPage } from './pages/ImportExcelPage';
 import { FecExportPage } from './pages/FecExportPage';
+import { VatPage } from './pages/VatPage';
 
 export default function App() {
   return (
@@ -20,16 +21,7 @@ export default function App() {
         <Route path="/grand-livre" element={<GrandLivrePage />} />
         <Route path="/import" element={<ImportExcelPage />} />
         <Route path="/fec" element={<FecExportPage />} />
-        <Route
-          path="/tva"
-          element={
-            <PlaceholderPage
-              kind="not-implemented"
-              title="TVA"
-              message="Le calcul de la déclaration de TVA n'est pas encore implémenté côté serveur (VatService.computeDeclaration lève NotImplementedException). Rien à afficher ici tant que ce n'est pas fait — voir CLAUDE.md."
-            />
-          }
-        />
+        <Route path="/tva" element={<VatPage />} />
         <Route
           path="/liasse"
           element={

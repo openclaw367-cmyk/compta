@@ -42,6 +42,16 @@ export interface Company {
   country: string;
 }
 
+export interface VatRate {
+  id: string;
+  companyId: string;
+  label: string;
+  /** Percentage string, e.g. "20.00" — same Decimal-serializes-as-string convention as money. */
+  ratePercent: string;
+  validFrom: string;
+  validTo: string | null;
+}
+
 export interface FiscalYear {
   id: string;
   companyId: string;
