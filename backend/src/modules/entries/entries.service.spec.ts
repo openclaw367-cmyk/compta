@@ -177,6 +177,24 @@ describe('EntriesService', () => {
     expect(prisma.ecriture.delete).not.toHaveBeenCalled();
   });
 
+  it('deletes a draft écriture and its lines', async () => {
+    prisma.ecriture.findFirst.mockResolvedValueOnce({
+      id: 'ecriture-1',
+      validatedAt: null,
+      lignes: [
+        { compteId: 'account-607', debit: '100.00', credit: '0.00' },
+        { compteId: 'account-401', debit: '0.00', credit: '100.00' },
+      ],
+    });
+
+    await service.remove(company, 'ecriture-1');
+
+    expect(prisma.ecritureLigne.deleteMany).toHaveBeenCalledWith({
+      where: { ecritureId: 'ecriture-1' },
+    });
+    expect(prisma.ecriture.delete).toHaveBeenCalledWith({ where: { id: 'ecriture-1' } });
+  });
+
   it('refuses to edit a validated écriture', async () => {
     prisma.ecriture.findFirst.mockResolvedValueOnce({
       id: 'ecriture-1',

@@ -85,10 +85,20 @@ export class EntriesService {
     });
   }
 
+  /**
+   * assertDraft() guards against deleting a validated écriture (that's
+   * what reverse() is for). Lines are deleted before the écriture itself
+   * — there's no cascade in the schema, and every draft has lines by
+   * construction (minimum two, to balance), so the parent delete alone
+   * would always trip the EcritureLigne_ecritureId_fkey constraint.
+   */
   async remove(company: CompanyContext, id: string): Promise<void> {
     const existing = await this.findOne(company, id);
     this.assertDraft(existing);
-    await this.prisma.ecriture.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.ecritureLigne.deleteMany({ where: { ecritureId: id } });
+      await tx.ecriture.delete({ where: { id } });
+    });
   }
 
   /**
