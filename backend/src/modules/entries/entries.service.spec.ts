@@ -93,6 +93,32 @@ describe('EntriesService', () => {
     await expect(service.create(company, baseDto())).rejects.toThrow(NotFoundException);
   });
 
+  it('rejects creating an écriture in a closed fiscal year', async () => {
+    prisma.fiscalYear.findFirst.mockResolvedValueOnce({
+      id: 'fiscal-year-1',
+      label: '2026',
+      closedAt: new Date(),
+    });
+    await expect(service.create(company, baseDto())).rejects.toThrow(BadRequestException);
+    expect(prisma.ecriture.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects updating a draft into a closed fiscal year', async () => {
+    prisma.ecriture.findFirst.mockResolvedValueOnce({
+      id: 'ecriture-1',
+      validatedAt: null,
+      lignes: [],
+    });
+    prisma.fiscalYear.findFirst.mockResolvedValueOnce({
+      id: 'fiscal-year-1',
+      label: '2026',
+      closedAt: new Date(),
+    });
+    await expect(service.update(company, 'ecriture-1', baseDto())).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
   it('assigns sequential EcritureNum (as a string) on validation, starting from 1', async () => {
     prisma.ecriture.findFirst.mockResolvedValueOnce({ id: 'ecriture-1', validatedAt: null });
     // Company.nextEcritureNum starts at 1 (schema default); after the
@@ -199,5 +225,23 @@ describe('EntriesService', () => {
       lignes: [],
     });
     await expect(service.reverse(company, 'ecriture-1')).rejects.toThrow(BadRequestException);
+  });
+
+  it('refuses to reverse into a closed fiscal year', async () => {
+    prisma.ecriture.findFirst.mockResolvedValueOnce({
+      id: 'ecriture-1',
+      journalId: 'journal-1',
+      fiscalYearId: 'fiscal-year-1',
+      libelle: 'Achat fournitures',
+      validatedAt: new Date(),
+      lignes: [],
+    });
+    prisma.fiscalYear.findFirst.mockResolvedValueOnce({
+      id: 'fiscal-year-1',
+      label: '2026',
+      closedAt: new Date(),
+    });
+    await expect(service.reverse(company, 'ecriture-1')).rejects.toThrow(BadRequestException);
+    expect(prisma.ecriture.create).not.toHaveBeenCalled();
   });
 });

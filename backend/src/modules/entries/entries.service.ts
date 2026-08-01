@@ -8,6 +8,7 @@ import { Ecriture } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { Money } from '../../common/decimal';
+import { assertFiscalYearOpen } from '../../common/ledger/assert-fiscal-year-open';
 import { CreateEcritureDto } from './dto/create-ecriture.dto';
 import { CreateEcritureLigneDto } from './dto/create-ecriture-ligne.dto';
 
@@ -139,6 +140,13 @@ export class EntriesService {
     if (!original.validatedAt) {
       throw new BadRequestException('Only a validated écriture can be reversed.');
     }
+    const fiscalYear = await this.prisma.fiscalYear.findFirst({
+      where: { id: original.fiscalYearId, companyId: company.companyId },
+    });
+    if (!fiscalYear) {
+      throw new NotFoundException(`Fiscal year ${original.fiscalYearId} not found`);
+    }
+    assertFiscalYearOpen(fiscalYear);
 
     return this.prisma.ecriture.create({
       data: {
@@ -230,5 +238,6 @@ export class EntriesService {
     if (!fiscalYear) {
       throw new NotFoundException(`Fiscal year ${fiscalYearId} not found`);
     }
+    assertFiscalYearOpen(fiscalYear);
   }
 }

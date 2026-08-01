@@ -128,6 +128,16 @@ enforced by code review:
    3 stocks, 4 tiers, 5 financiers, 6 charges, 7 produits, 8 comptes
    spéciaux). Account creation validates the leading digit against a known
    class; unclassifiable accounts are rejected, not silently accepted.
+6. **A closed fiscal year rejects new or mutated écritures.** Enforced by
+   `assertFiscalYearOpen()` (`src/common/ledger/assert-fiscal-year-open.ts`),
+   shared by `EntriesService` (create/update/reverse) and
+   `ImportExcelService` — one check, every posting path, not a rule each
+   service remembers independently.
+7. **A fiscal year cannot be closed while it still has draft écritures.**
+   `FiscalYearsService.close()` counts unvalidated écritures first and
+   refuses (naming the count) rather than closing around them — otherwise
+   rule 6 would leave those drafts permanently stuck, neither editable nor
+   postable.
 
 ## FEC export (Article A47 A-1 du LPF)
 
@@ -222,6 +232,25 @@ assume they're covered either:
   the FEC section above has been verified against
   `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md`; §VIII specifically
   has not.
+- **Depreciation never posts to the ledger.** `DepreciationService.generateSchedule()`
+  computes and persists `DepreciationEntry` rows (the dotation amount per
+  fiscal year), but nothing creates the corresponding écriture (débit
+  681100 dotations aux amortissements / crédit 280xxx). `DepreciationEntry.postedEcritureId`
+  exists in the schema for exactly this and is never set anywhere in
+  `src/`. Until this is wired up, the schedule is a number, not an
+  accounting entry — someone has to post it by hand.
+- **`EcritureLigne.dateLettrage` isn't settable through the API.**
+  `lettrage` (EcritureLet) is exposed on `CreateEcritureLigneDto` and
+  settable at line-creation time, but there's no lettering
+  endpoint/DTO field for `dateLettrage` (DateLet) — the only way to set it
+  today is a direct Prisma write (see `backend/prisma/seed-sample.ts`).
+- **No way to list or inspect past Excel import batches.**
+  `ImportExcelController` only exposes `POST /import-excel`; there's no
+  `GET` for `ImportBatch` records, so past imports are only visible
+  indirectly via the écritures they created. Relatedly, `ImportStatus.FAILED`
+  is defined in the schema but never persisted — a parse failure throws
+  before any `ImportBatch` row exists, so nothing is ever written as
+  `FAILED` today.
 
 ## Monaco compliance — verify before trusting
 
@@ -256,9 +285,10 @@ independently-configured jurisdiction, not "France with a different flag":
   controllers, services, DTOs) follows normal NestJS/English conventions.
 - **Modules**: one NestJS module per bounded domain concept under
   `src/modules/*` (companies, accounts, journals, entries, fec,
-  import-excel, depreciation, vat, liasse). Cross-cutting concerns
-  (Prisma client, company context, Decimal helpers) live under
-  `src/common/*`.
+  import-excel, depreciation, vat, liasse, ledger — trial balance / grand
+  livre reporting, reads only, never writes). Cross-cutting concerns
+  (Prisma client, company context, Decimal helpers, ledger guards like
+  `assertFiscalYearOpen`) live under `src/common/*`.
 - **DTOs validate at the boundary.** Every controller input is a class
   decorated with `class-validator` decorators; never trust a raw request
   body past the controller.

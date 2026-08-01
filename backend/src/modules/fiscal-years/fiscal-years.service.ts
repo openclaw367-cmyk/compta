@@ -47,12 +47,28 @@ export class FiscalYearsService {
     return fiscalYear;
   }
 
-  /** Locks the fiscal year. Does not itself validate open écritures — see EntriesService. */
+  /**
+   * Locks the fiscal year. Refuses while any écriture in it is still a
+   * draft (unvalidated) — once closed, EntriesService/ImportExcelService
+   * reject new or mutated écritures for it (see assertFiscalYearOpen), so
+   * a draft left behind at close time would become permanently stuck.
+   */
   async close(company: CompanyContext, id: string): Promise<FiscalYear> {
     const fiscalYear = await this.findOne(company, id);
     if (fiscalYear.closedAt) {
       throw new ConflictException(`Fiscal year "${fiscalYear.label}" is already closed.`);
     }
+
+    const draftCount = await this.prisma.ecriture.count({
+      where: { companyId: company.companyId, fiscalYearId: id, validatedAt: null },
+    });
+    if (draftCount > 0) {
+      throw new ConflictException(
+        `Cannot close fiscal year "${fiscalYear.label}": ${draftCount} écriture(s) are still ` +
+          'unvalidated (draft). Validate or delete them first.',
+      );
+    }
+
     return this.prisma.fiscalYear.update({
       where: { id: fiscalYear.id },
       data: { closedAt: new Date() },

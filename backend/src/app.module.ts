@@ -22,6 +22,8 @@ import { VatModule } from './modules/vat/vat.module';
 import { VatController } from './modules/vat/vat.controller';
 import { LiasseModule } from './modules/liasse/liasse.module';
 import { LiasseController } from './modules/liasse/liasse.controller';
+import { LedgerModule } from './modules/ledger/ledger.module';
+import { LedgerController } from './modules/ledger/ledger.controller';
 import { DevModule } from './modules/dev/dev.module';
 import { DevController } from './modules/dev/dev.controller';
 
@@ -45,6 +47,7 @@ const isProduction = process.env.NODE_ENV === 'production';
     DepreciationModule,
     VatModule,
     LiasseModule,
+    LedgerModule,
     ...(isProduction ? [] : [DevModule]),
   ],
 })
@@ -72,6 +75,7 @@ export class AppModule implements NestModule {
         DepreciationController,
         VatController,
         LiasseController,
+        LedgerController,
         ...(isProduction ? [] : [DevController]),
       );
   }

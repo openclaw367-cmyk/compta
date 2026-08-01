@@ -4,6 +4,7 @@ import ExcelJS, { Row, Worksheet } from 'exceljs';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { Money } from '../../common/decimal';
+import { assertFiscalYearOpen } from '../../common/ledger/assert-fiscal-year-open';
 
 /**
  * Column headers expected on row 1 of the imported sheet. EcritureRef is a
@@ -86,9 +87,7 @@ export class ImportExcelService {
     if (!fiscalYear) {
       throw new NotFoundException(`Fiscal year ${fiscalYearId} not found`);
     }
-    if (fiscalYear.closedAt) {
-      throw new BadRequestException(`Fiscal year "${fiscalYear.label}" is closed.`);
-    }
+    assertFiscalYearOpen(fiscalYear);
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(file.buffer as unknown as ExcelJS.Buffer);
