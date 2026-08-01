@@ -71,6 +71,15 @@ export function IconDocument(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconCalendar(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <rect x="3.5" y="4" width="13" height="12" rx="1.5" />
+      <path d="M3.5 7.5h13M6.5 3v2.5M13.5 3v2.5" />
+    </svg>
+  );
+}
+
 export function IconUsers(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base(props)}>

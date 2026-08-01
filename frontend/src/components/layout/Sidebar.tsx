@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import type { SVGProps } from 'react';
 import {
+  IconCalendar,
   IconDocument,
   IconDownload,
   IconGrid,
@@ -19,6 +20,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Écritures', Icon: IconGrid, end: true },
+  { to: '/exercices', label: 'Exercices', Icon: IconCalendar },
   { to: '/tiers', label: 'Tiers', Icon: IconUsers },
   { to: '/grand-livre', label: 'Grand livre', Icon: IconLedger },
   { to: '/import', label: 'Import Excel', Icon: IconUpload },

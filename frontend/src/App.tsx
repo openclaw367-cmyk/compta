@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';
 import { PlaceholderPage } from './components/placeholders/PlaceholderPage';
 import { JournalEntriesPage } from './pages/JournalEntriesPage';
+import { FiscalYearsPage } from './pages/FiscalYearsPage';
 import { TiersPage } from './pages/TiersPage';
 import { GrandLivrePage } from './pages/GrandLivrePage';
 import { ImportExcelPage } from './pages/ImportExcelPage';
@@ -12,6 +13,7 @@ export default function App() {
     <AppShell>
       <Routes>
         <Route path="/" element={<JournalEntriesPage />} />
+        <Route path="/exercices" element={<FiscalYearsPage />} />
         <Route path="/tiers" element={<TiersPage />} />
         <Route path="/grand-livre" element={<GrandLivrePage />} />
         <Route path="/import" element={<ImportExcelPage />} />

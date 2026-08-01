@@ -10,7 +10,7 @@ import type {
   Journal,
   TrialBalanceResponse,
 } from './types';
-import type { CreateEcritureDto, CreateTiersDto, UpdateAccountDto } from './dto';
+import type { CreateEcritureDto, CreateFiscalYearDto, CreateTiersDto, UpdateAccountDto } from './dto';
 
 /**
  * GET /entries has no server-side journal/fiscal-year filter (it's a
@@ -62,6 +62,27 @@ export function useFiscalYears() {
     queryKey: ['fiscal-years'],
     queryFn: () => api.get<FiscalYear[]>('/fiscal-years'),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useCreateFiscalYear() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateFiscalYearDto) => api.post<FiscalYear>('/fiscal-years', dto),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['fiscal-years'] });
+    },
+  });
+}
+
+/** Refuses (ConflictException) while the year still has draft écritures — see fiscal-years.service.ts. */
+export function useCloseFiscalYear() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<FiscalYear>(`/fiscal-years/${id}/close`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['fiscal-years'] });
+    },
   });
 }
 
