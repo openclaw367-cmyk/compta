@@ -78,3 +78,50 @@ export interface ApiErrorBody {
   /** NestJS's ValidationPipe sends an array (one message per failed rule); domain errors send a single string. */
   message: string | string[];
 }
+
+export interface LedgerTotals {
+  debit: string;
+  credit: string;
+  balance: string;
+}
+
+export interface TrialBalanceLine {
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  totalDebit: string;
+  totalCredit: string;
+  balance: string;
+}
+
+export interface TrialBalanceResponse {
+  fiscalYearId: string;
+  periodStart?: string;
+  periodEnd?: string;
+  lines: TrialBalanceLine[];
+  totals: LedgerTotals;
+}
+
+export interface AccountLedgerLine {
+  ecritureId: string;
+  ecritureNum: string | null;
+  journalCode: string;
+  ecritureDate: string;
+  pieceRef?: string | null;
+  libelle: string;
+  debit: string;
+  credit: string;
+  lettrage?: string | null;
+  runningBalance: string;
+}
+
+export interface AccountLedgerResponse {
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  fiscalYearId: string;
+  periodStart?: string;
+  periodEnd?: string;
+  lines: AccountLedgerLine[];
+  totals: LedgerTotals;
+}

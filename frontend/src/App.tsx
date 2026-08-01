@@ -3,6 +3,7 @@ import { AppShell } from './components/layout/AppShell';
 import { PlaceholderPage } from './components/placeholders/PlaceholderPage';
 import { JournalEntriesPage } from './pages/JournalEntriesPage';
 import { TiersPage } from './pages/TiersPage';
+import { GrandLivrePage } from './pages/GrandLivrePage';
 
 export default function App() {
   return (
@@ -10,16 +11,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<JournalEntriesPage />} />
         <Route path="/tiers" element={<TiersPage />} />
-        <Route
-          path="/grand-livre"
-          element={
-            <PlaceholderPage
-              kind="not-built"
-              title="Grand livre"
-              message="Cet écran arrive juste après la revue de la saisie d'écritures. L'API (balance générale et détail par compte) existe déjà côté serveur."
-            />
-          }
-        />
+        <Route path="/grand-livre" element={<GrandLivrePage />} />
         <Route
           path="/import"
           element={

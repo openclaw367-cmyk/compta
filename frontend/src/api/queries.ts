@@ -1,6 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
-import type { Account, Ecriture, FiscalYear, Journal } from './types';
+import type {
+  Account,
+  AccountLedgerResponse,
+  Ecriture,
+  FiscalYear,
+  Journal,
+  TrialBalanceResponse,
+} from './types';
 import type { CreateEcritureDto, CreateTiersDto, UpdateAccountDto } from './dto';
 
 /**
@@ -9,6 +16,28 @@ import type { CreateEcritureDto, CreateTiersDto, UpdateAccountDto } from './dto'
  * client-side. See CLAUDE.md if that dataset assumption ever stops
  * holding.
  */
+
+interface PeriodParams {
+  fiscalYearId: string | null;
+  periodStart?: string;
+  periodEnd?: string;
+}
+
+function periodQueryString({ fiscalYearId, periodStart, periodEnd }: PeriodParams): string {
+  const entries = Object.entries({ fiscalYearId, periodStart, periodEnd }).filter(
+    (entry): entry is [string, string] => Boolean(entry[1]),
+  );
+  return entries.length === 0
+    ? ''
+    : '?' + entries.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+}
+
+/** Invalidated by every mutation that can move the ledger, so Grand livre never shows stale data. */
+function invalidateEcrituresAndLedger(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: ['ecritures'] });
+  void queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
+  void queryClient.invalidateQueries({ queryKey: ['account-ledger'] });
+}
 
 export function useJournals() {
   return useQuery({
@@ -45,9 +74,7 @@ export function useCreateEcriture() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (dto: CreateEcritureDto) => api.post<Ecriture>('/entries', dto),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['ecritures'] });
-    },
+    onSuccess: () => invalidateEcrituresAndLedger(queryClient),
   });
 }
 
@@ -56,9 +83,7 @@ export function useUpdateEcriture() {
   return useMutation({
     mutationFn: ({ id, dto }: { id: string; dto: CreateEcritureDto }) =>
       api.patch<Ecriture>(`/entries/${id}`, dto),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['ecritures'] });
-    },
+    onSuccess: () => invalidateEcrituresAndLedger(queryClient),
   });
 }
 
@@ -66,9 +91,7 @@ export function useDeleteEcriture() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete<void>(`/entries/${id}`),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['ecritures'] });
-    },
+    onSuccess: () => invalidateEcrituresAndLedger(queryClient),
   });
 }
 
@@ -77,9 +100,40 @@ export function useValidateEcriture() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.post<Ecriture>(`/entries/${id}/validate`, {}),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['ecritures'] });
-    },
+    onSuccess: () => invalidateEcrituresAndLedger(queryClient),
+  });
+}
+
+/**
+ * Trial balance (balance générale). Includes draft écritures as well as
+ * validated ones — see LedgerService.trialBalance on the backend; this is
+ * a working balance for day-to-day use, not FEC export's validated-only
+ * compliance view.
+ */
+export function useTrialBalance(params: PeriodParams) {
+  return useQuery({
+    queryKey: ['trial-balance', params.fiscalYearId, params.periodStart, params.periodEnd],
+    queryFn: () =>
+      api.get<TrialBalanceResponse>(`/ledger/trial-balance${periodQueryString(params)}`),
+    enabled: Boolean(params.fiscalYearId),
+  });
+}
+
+/** One account's grand livre (line-by-line detail with a running balance). */
+export function useAccountLedger(accountId: string | null, params: PeriodParams) {
+  return useQuery({
+    queryKey: [
+      'account-ledger',
+      accountId,
+      params.fiscalYearId,
+      params.periodStart,
+      params.periodEnd,
+    ],
+    queryFn: () =>
+      api.get<AccountLedgerResponse>(
+        `/ledger/accounts/${accountId}${periodQueryString(params)}`,
+      ),
+    enabled: Boolean(accountId && params.fiscalYearId),
   });
 }
 
