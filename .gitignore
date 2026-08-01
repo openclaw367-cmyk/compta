@@ -1,0 +1,4 @@
+# Generated FEC exports — real output from local dev/testing, not fixtures
+# to check in. Real reference FEC samples belong in samples/ but should be
+# added deliberately (git add -f), not swept in by accident.
+samples/*.txt
