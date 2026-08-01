@@ -5,6 +5,7 @@ import { JournalEntriesPage } from './pages/JournalEntriesPage';
 import { TiersPage } from './pages/TiersPage';
 import { GrandLivrePage } from './pages/GrandLivrePage';
 import { ImportExcelPage } from './pages/ImportExcelPage';
+import { FecExportPage } from './pages/FecExportPage';
 
 export default function App() {
   return (
@@ -14,16 +15,7 @@ export default function App() {
         <Route path="/tiers" element={<TiersPage />} />
         <Route path="/grand-livre" element={<GrandLivrePage />} />
         <Route path="/import" element={<ImportExcelPage />} />
-        <Route
-          path="/fec"
-          element={
-            <PlaceholderPage
-              kind="not-built"
-              title="Export FEC"
-              message="Sélection de la période puis génération et téléchargement du fichier — l'export lui-même est déjà conforme côté serveur."
-            />
-          }
-        />
+        <Route path="/fec" element={<FecExportPage />} />
         <Route
           path="/tva"
           element={

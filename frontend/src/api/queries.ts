@@ -196,3 +196,19 @@ export function useConfirmImport() {
     onSuccess: () => invalidateEcrituresAndLedger(queryClient),
   });
 }
+
+/** Fails loudly (see backend) if any écriture in the fiscal year is still a draft, or the company has no SIREN. */
+export function useDownloadFec() {
+  return useMutation({
+    mutationFn: (fiscalYearId: string) =>
+      api.getFile(`/fec/export?fiscalYearId=${encodeURIComponent(fiscalYearId)}`),
+  });
+}
+
+/** The descriptif required alongside the FEC file by Article A47 A-1 §XI. */
+export function useDownloadFecDescription() {
+  return useMutation({
+    mutationFn: (fiscalYearId: string) =>
+      api.getFile(`/fec/export/description?fiscalYearId=${encodeURIComponent(fiscalYearId)}`),
+  });
+}

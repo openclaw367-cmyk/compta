@@ -12,7 +12,11 @@ async function bootstrap(): Promise<void> {
       forbidNonWhitelisted: true,
     }),
   );
-  app.enableCors();
+  // exposedHeaders is required for the FEC export endpoints: browsers only
+  // expose a CORS-safelisted header set to JS by default, and
+  // Content-Disposition (which carries the server-assigned filename,
+  // e.g. "123456789FEC20261231.txt") isn't in that safelist.
+  app.enableCors({ exposedHeaders: ['Content-Disposition'] });
 
   // Mounted at /docs, not /api — /api is reserved for a future global route
   // prefix, and colliding with it would mean either the prefix or the
