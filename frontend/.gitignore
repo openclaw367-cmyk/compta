@@ -1,0 +1,19 @@
+# build output
+/dist
+/node_modules
+
+# env
+.env
+.env.local
+
+# logs
+npm-debug.log*
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea
+
+# OS
+.DS_Store

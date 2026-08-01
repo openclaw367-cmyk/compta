@@ -1,0 +1,127 @@
+@import "tailwindcss";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-sans/700.css";
+
+/*
+ * Design tokens. Light values live in @theme (Tailwind v4 emits these as
+ * real :root custom properties, so utilities like bg-surface / text-ink
+ * resolve through them). Dark mode redefines the same custom property
+ * names — never the utilities themselves — so every component that uses
+ * a token automatically follows the theme without a single dark: variant
+ * anywhere in the component tree.
+ */
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+
+  --color-bg: #f5f6f9;
+  --color-surface: #ffffff;
+  --color-border: #e3e6ec;
+  --color-border-strong: #c9cedb;
+  --color-ink: #1a1d29;
+  --color-ink-muted: #5b6072;
+  --color-ink-faint: #9298a8;
+
+  --color-accent: #33488a;
+  --color-accent-hover: #263569;
+  --color-accent-soft: #eaedf7;
+
+  --color-positive: #1e7a4c;
+  --color-positive-soft: #e5f3ea;
+  --color-negative: #b0281f;
+  --color-negative-soft: #faeae8;
+  --color-warning: #93630b;
+  --color-warning-soft: #faf1e0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #14151d;
+    --color-surface: #1b1d29;
+    --color-border: #2b2e3d;
+    --color-border-strong: #3c4155;
+    --color-ink: #e9eaf0;
+    --color-ink-muted: #a5abbe;
+    --color-ink-faint: #6c7288;
+
+    --color-accent: #8098db;
+    --color-accent-hover: #9cb1e4;
+    --color-accent-soft: #232a45;
+
+    --color-positive: #52b586;
+    --color-positive-soft: #17281f;
+    --color-negative: #e2685f;
+    --color-negative-soft: #301a18;
+    --color-warning: #d9a441;
+    --color-warning-soft: #2e2717;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-bg: #14151d;
+  --color-surface: #1b1d29;
+  --color-border: #2b2e3d;
+  --color-border-strong: #3c4155;
+  --color-ink: #e9eaf0;
+  --color-ink-muted: #a5abbe;
+  --color-ink-faint: #6c7288;
+
+  --color-accent: #8098db;
+  --color-accent-hover: #9cb1e4;
+  --color-accent-soft: #232a45;
+
+  --color-positive: #52b586;
+  --color-positive-soft: #17281f;
+  --color-negative: #e2685f;
+  --color-negative-soft: #301a18;
+  --color-warning: #d9a441;
+  --color-warning-soft: #2e2717;
+}
+
+:root[data-theme="light"] {
+  --color-bg: #f5f6f9;
+  --color-surface: #ffffff;
+  --color-border: #e3e6ec;
+  --color-border-strong: #c9cedb;
+  --color-ink: #1a1d29;
+  --color-ink-muted: #5b6072;
+  --color-ink-faint: #9298a8;
+
+  --color-accent: #33488a;
+  --color-accent-hover: #263569;
+  --color-accent-soft: #eaedf7;
+
+  --color-positive: #1e7a4c;
+  --color-positive-soft: #e5f3ea;
+  --color-negative: #b0281f;
+  --color-negative-soft: #faeae8;
+  --color-warning: #93630b;
+  --color-warning-soft: #faf1e0;
+}
+
+html {
+  font-family: var(--font-sans);
+  color-scheme: light dark;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-ink);
+}
+
+/* Visible keyboard focus everywhere — this app lives or dies on keyboard nav. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
