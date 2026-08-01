@@ -3,6 +3,7 @@ import { api } from './client';
 import type {
   Account,
   AccountLedgerResponse,
+  Company,
   Ecriture,
   FiscalYear,
   ImportBatch,
@@ -10,7 +11,13 @@ import type {
   Journal,
   TrialBalanceResponse,
 } from './types';
-import type { CreateEcritureDto, CreateFiscalYearDto, CreateTiersDto, UpdateAccountDto } from './dto';
+import type {
+  CreateEcritureDto,
+  CreateFiscalYearDto,
+  CreateTiersDto,
+  UpdateAccountDto,
+  UpdateCompanyDto,
+} from './dto';
 
 /**
  * GET /entries has no server-side journal/fiscal-year filter (it's a
@@ -62,6 +69,24 @@ export function useFiscalYears() {
     queryKey: ['fiscal-years'],
     queryFn: () => api.get<FiscalYear[]>('/fiscal-years'),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useCompany() {
+  return useQuery({
+    queryKey: ['company'],
+    queryFn: () => api.get<Company>('/companies/current'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useUpdateCompany() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: UpdateCompanyDto) => api.patch<Company>('/companies/current', dto),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['company'] });
+    },
   });
 }
 

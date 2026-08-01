@@ -3,6 +3,7 @@ import { Company } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { UpdateCompanyDto } from './dto/update-company.dto';
 
 @Injectable()
 export class CompaniesService {
@@ -19,5 +20,10 @@ export class CompaniesService {
       throw new NotFoundException(`Company ${company.companyId} not found`);
     }
     return found;
+  }
+
+  async updateCurrent(company: CompanyContext, dto: UpdateCompanyDto): Promise<Company> {
+    await this.findCurrent(company);
+    return this.prisma.company.update({ where: { id: company.companyId }, data: dto });
   }
 }

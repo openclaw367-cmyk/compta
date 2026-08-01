@@ -12,3 +12,4 @@ export type { CreateEcritureLigneDto } from '../../../backend/src/modules/entrie
 export type { CreateTiersDto } from '../../../backend/src/modules/accounts/dto/create-tiers.dto';
 export type { UpdateAccountDto } from '../../../backend/src/modules/accounts/dto/update-account.dto';
 export type { CreateFiscalYearDto } from '../../../backend/src/modules/fiscal-years/dto/create-fiscal-year.dto';
+export type { UpdateCompanyDto } from '../../../backend/src/modules/companies/dto/update-company.dto';

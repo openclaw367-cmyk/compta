@@ -29,6 +29,19 @@ export interface Account {
   parentId: string | null;
 }
 
+export interface Company {
+  id: string;
+  name: string;
+  jurisdiction: 'FR' | 'MC';
+  siren: string | null;
+  rci: string | null;
+  vatNumber: string | null;
+  addressLine: string | null;
+  postalCode: string | null;
+  city: string | null;
+  country: string;
+}
+
 export interface FiscalYear {
   id: string;
   companyId: string;

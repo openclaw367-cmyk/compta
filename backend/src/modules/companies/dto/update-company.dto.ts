@@ -1,19 +1,22 @@
 import { IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Jurisdiction } from '@prisma/client';
 
-export class CreateCompanyDto {
-  @ApiProperty({ example: 'Société Démo SARL' })
+/** All fields optional — a profile edit may touch just one at a time. */
+export class UpdateCompanyDto {
+  @ApiPropertyOptional({ example: 'Société Démo SARL' })
+  @IsOptional()
   @IsString()
   @MinLength(1)
-  name!: string;
+  name?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     enum: Jurisdiction,
     description: 'FR = France (Article A47 A-1 du LPF rules apply). MC = Monaco.',
   })
+  @IsOptional()
   @IsEnum(Jurisdiction)
-  jurisdiction!: Jurisdiction;
+  jurisdiction?: Jurisdiction;
 
   @ApiPropertyOptional({
     description:
@@ -51,7 +54,7 @@ export class CreateCompanyDto {
   @IsString()
   city?: string;
 
-  @ApiPropertyOptional({ example: 'France', description: 'Defaults to "France" if omitted.' })
+  @ApiPropertyOptional({ example: 'France' })
   @IsOptional()
   @IsString()
   country?: string;

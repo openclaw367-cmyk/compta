@@ -1,6 +1,8 @@
 import { NavLink } from 'react-router-dom';
 import type { SVGProps } from 'react';
+import { useCompany } from '../../api/queries';
 import {
+  IconBuilding,
   IconCalendar,
   IconDocument,
   IconDownload,
@@ -22,6 +24,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Écritures', Icon: IconGrid, end: true },
   { to: '/exercices', label: 'Exercices', Icon: IconCalendar },
   { to: '/tiers', label: 'Tiers', Icon: IconUsers },
+  { to: '/societe', label: 'Société', Icon: IconBuilding },
   { to: '/grand-livre', label: 'Grand livre', Icon: IconLedger },
   { to: '/import', label: 'Import Excel', Icon: IconUpload },
   { to: '/fec', label: 'Export FEC', Icon: IconDownload },
@@ -30,6 +33,8 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export function Sidebar() {
+  const companyQuery = useCompany();
+
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface">
       <div className="flex h-16 items-center gap-2 px-6">
@@ -60,8 +65,8 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="border-t border-border px-6 py-4 text-[12px] text-ink-faint">
-        Société Démo SARL
+      <div className="truncate border-t border-border px-6 py-4 text-[12px] text-ink-faint">
+        {companyQuery.data?.name ?? ' '}
       </div>
     </aside>
   );

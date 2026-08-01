@@ -60,6 +60,14 @@ model Company {
 
   vatNumber String?
 
+  /// Structured, not free-text: the liasse fiscale / CERFA forms on the
+  /// roadmap expect discrete address components, so this avoids parsing a
+  /// blob later once real data exists.
+  addressLine String?
+  postalCode  String?
+  city        String?
+  country     String  @default("France")
+
   /// Next value to assign as Ecriture.ecritureNum (single global sequence —
   /// see CLAUDE.md "Ledger integrity" and EntriesService.validate). Never
   /// derive "next number" from MAX(ecritureNum) once ecritureNum is a
