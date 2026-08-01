@@ -13,8 +13,10 @@ import type {
   VatRate,
 } from './types';
 import type {
+  CreateAccountDto,
   CreateEcritureDto,
   CreateFiscalYearDto,
+  CreateJournalDto,
   CreateTiersDto,
   CreateVatRateDto,
   UpdateAccountDto,
@@ -58,11 +60,32 @@ export function useJournals() {
   });
 }
 
+export function useCreateJournal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateJournalDto) => api.post<Journal>('/journals', dto),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['journals'] });
+    },
+  });
+}
+
 export function useAccounts() {
   return useQuery({
     queryKey: ['accounts'],
     queryFn: () => api.get<Account[]>('/accounts'),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** A plain PCG account (never a tiers) — see useCreateTiers for comptes auxiliaires. */
+export function useCreateAccount() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateAccountDto) => api.post<Account>('/accounts', dto),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
   });
 }
 

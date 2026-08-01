@@ -14,3 +14,5 @@ export type { UpdateAccountDto } from '../../../backend/src/modules/accounts/dto
 export type { CreateFiscalYearDto } from '../../../backend/src/modules/fiscal-years/dto/create-fiscal-year.dto';
 export type { UpdateCompanyDto } from '../../../backend/src/modules/companies/dto/update-company.dto';
 export type { CreateVatRateDto } from '../../../backend/src/modules/vat/dto/create-vat-rate.dto';
+export type { CreateJournalDto } from '../../../backend/src/modules/journals/dto/create-journal.dto';
+export type { CreateAccountDto } from '../../../backend/src/modules/accounts/dto/create-account.dto';

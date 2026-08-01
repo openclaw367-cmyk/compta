@@ -71,6 +71,17 @@ export function IconDocument(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconList(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M7 5.5h9M7 10h9M7 14.5h9" />
+      <circle cx="4" cy="5.5" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="4" cy="10" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="4" cy="14.5" r="0.9" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function IconBuilding(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base(props)}>
