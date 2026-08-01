@@ -107,6 +107,21 @@ export function useValidateEcriture() {
 }
 
 /**
+ * Creates a new draft écriture with debit/credit swapped, referencing the
+ * original via reversesId (contre-passation / extourne) — the only legal
+ * way to correct a validated entry. The original itself is never touched;
+ * the reversal comes back as a fresh draft, to be reviewed and validated
+ * like any other.
+ */
+export function useReverseEcriture() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<Ecriture>(`/entries/${id}/reverse`, {}),
+    onSuccess: () => invalidateEcrituresAndLedger(queryClient),
+  });
+}
+
+/**
  * Trial balance (balance générale). Includes draft écritures as well as
  * validated ones — see LedgerService.trialBalance on the backend; this is
  * a working balance for day-to-day use, not FEC export's validated-only

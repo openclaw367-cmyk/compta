@@ -17,12 +17,14 @@ export function EcrituresList({
   onSelect,
   onDelete,
   onValidate,
+  onReverse,
 }: {
   ecritures: Ecriture[];
   selectedId: string | null;
   onSelect: (ecriture: Ecriture) => void;
   onDelete: (ecriture: Ecriture) => void;
   onValidate: (ecriture: Ecriture) => void;
+  onReverse: (ecriture: Ecriture) => void;
 }) {
   if (ecritures.length === 0) {
     return (
@@ -73,7 +75,20 @@ export function EcrituresList({
                   <StatusBadge validated={Boolean(ecriture.validatedAt)} />
                 </td>
                 <td className="px-1 text-right">
-                  {!ecriture.validatedAt && (
+                  {ecriture.validatedAt ? (
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onReverse(ecriture);
+                        }}
+                        className="rounded px-2 py-1 text-[12px] font-medium text-ink-muted hover:bg-accent-soft hover:text-accent"
+                      >
+                        Contre-passer
+                      </button>
+                    </div>
+                  ) : (
                     <div className="flex items-center justify-end gap-1">
                       <button
                         type="button"

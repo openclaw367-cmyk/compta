@@ -6,6 +6,7 @@ import {
   useEcritures,
   useFiscalYears,
   useJournals,
+  useReverseEcriture,
   useValidateEcriture,
 } from '../api/queries';
 import { ApiError } from '../api/client';
@@ -30,11 +31,13 @@ export function JournalEntriesPage() {
   const ecrituresQuery = useEcritures();
   const deleteEcriture = useDeleteEcriture();
   const validateEcriture = useValidateEcriture();
+  const reverseEcriture = useReverseEcriture();
 
   const [journalId, setJournalId] = useState<string | null>(null);
   const [fiscalYearId, setFiscalYearId] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState>({ mode: 'closed' });
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
   const journals = journalsQuery.data ?? NO_JOURNALS;
   const fiscalYears = fiscalYearsQuery.data ?? NO_FISCAL_YEARS;
@@ -65,6 +68,7 @@ export function JournalEntriesPage() {
       return;
     }
     setActionError(null);
+    setActionSuccess(null);
     try {
       await deleteEcriture.mutateAsync(ecriture.id);
       if (editor.mode === 'edit' && editor.ecriture.id === ecriture.id) {
@@ -86,6 +90,7 @@ export function JournalEntriesPage() {
       return;
     }
     setActionError(null);
+    setActionSuccess(null);
     try {
       await validateEcriture.mutateAsync(ecriture.id);
       if (editor.mode === 'edit' && editor.ecriture.id === ecriture.id) {
@@ -93,6 +98,31 @@ export function JournalEntriesPage() {
       }
     } catch (error) {
       setActionError(error instanceof ApiError ? error.message : 'La validation a échoué.');
+    }
+  }
+
+  async function handleReverse(ecriture: Ecriture) {
+    const label = ecriture.pieceRef ?? ecriture.libelle;
+    if (
+      !window.confirm(
+        `Contre-passer l'écriture « ${label} » ? Une nouvelle écriture de contre-passation ` +
+          '(montants inversés) sera créée en brouillon dans le même journal, datée du jour — ' +
+          "à valider séparément. L'écriture d'origine reste inchangée et définitive : la " +
+          'contre-passation ne la supprime ni ne la modifie.',
+      )
+    ) {
+      return;
+    }
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      const reversal = await reverseEcriture.mutateAsync(ecriture.id);
+      setActionSuccess(
+        `Écriture de contre-passation créée en brouillon (« ${reversal.libelle} ») — ` +
+          'sélectionnez-la dans la liste pour la valider.',
+      );
+    } catch (error) {
+      setActionError(error instanceof ApiError ? error.message : 'La contre-passation a échoué.');
     }
   }
 
@@ -153,6 +183,15 @@ export function JournalEntriesPage() {
         </div>
       )}
 
+      {actionSuccess && (
+        <div className="flex items-center justify-between rounded-md bg-positive-soft px-4 py-2.5 text-[13px] text-positive">
+          <span>{actionSuccess}</span>
+          <button type="button" onClick={() => setActionSuccess(null)} className="font-medium">
+            Fermer
+          </button>
+        </div>
+      )}
+
       {editor.mode !== 'closed' && journalId && fiscalYearId && (
         <EcritureEditor
           key={editor.mode === 'edit' ? editor.ecriture.id : 'new'}
@@ -171,6 +210,7 @@ export function JournalEntriesPage() {
         onSelect={(ecriture) => setEditor({ mode: 'edit', ecriture })}
         onDelete={handleDelete}
         onValidate={handleValidate}
+        onReverse={handleReverse}
       />
     </div>
   );
