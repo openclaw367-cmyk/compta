@@ -280,6 +280,42 @@ assume they're covered either:
   before any `ImportBatch` row exists, so nothing is ever written as
   `FAILED` today.
 
+## Current state & roadmap
+
+**Where things stand (as of 2026-08-01):** all four core frontend screens
+are done — journal entry grid (with inline tiers creation), tiers
+management, grand livre / trial balance, Excel import (preview-then-confirm),
+and FEC export. FEC has passed one structural validation run against
+DGFiP's Test Compta Demat (see "Known scope boundaries" above — one sample
+dataset, not a blanket clearance). Ledger integrity guards are in place at
+the service layer: closed-fiscal-year rejection, refusal to close a year
+with draft écritures, drafts-only deletion (`EntriesService.remove()`
+guards against deleting a validated entry), and FEC export blocking
+entirely (not partially) while any draft exists. VAT and liasse fiscale
+remain stubs — see "Known scope boundaries" below for those and the other
+logged gaps (depreciation not posting to the ledger, `dateLettrage` not
+API-settable, no import-batch listing endpoint, Article A47 A-1 §VIII
+uncross-checked).
+
+**Build order for what's next**, roughly in priority:
+
+1. **VAT (TVA)** — CA3 declaration computation, currently a stub
+   (`src/modules/vat/`). France first; Monaco is a verified divergence
+   layer on top, not a parallel guess — see "Monaco compliance" below,
+   nothing Monaco-specific ships without a cited source.
+2. **Liasse fiscale** — currently a stub (`src/modules/liasse/`).
+3. **Cash flow statement**, plus bilan and compte de résultat if the
+   liasse work above doesn't already cover them.
+4. **Financial analysis** — ratios, free cash flow, and a DCF as an
+   assumptions-driven model (explicit inputs the user can see and change,
+   not a black-box number).
+5. **AI chatbot** — last, after the above give it something real to sit
+   on top of. Propose-don't-post: the LLM drafts, it never posts
+   directly. It writes through the same validation layer the UI uses
+   (the DTOs/service methods, not a shortcut path), and a human confirms
+   every write before it lands — no exception for "obviously correct"
+   changes.
+
 ## Monaco compliance — verify before trusting
 
 Monaco is **not** France; treat Monaco-specific rules as a second,
