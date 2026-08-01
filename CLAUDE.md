@@ -191,13 +191,23 @@ to example; don't treat those as authoritative for column order.
 Things that are deliberately incomplete right now — not bugs, but don't
 assume they're covered either:
 
-- **FEC output has not been run through DGFiP's Test Compta Demat
-  validator.** The export has been checked field-by-field against
-  `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md`, but that's a
-  reading of the legal text, not confirmation from the actual tool the
-  tax administration uses to accept/reject FEC files. Treat the export as
-  spec-compliant, not yet field-validated, until a real file has been run
-  through Test Compta Demat.
+- **FEC structural validation: passed once, on a sample dataset — not a
+  blanket clearance.** On 2026-08-01, the export for the demo company's
+  FY2026 (SIREN `123456789`, `123456789FEC20261231.txt`) was run through
+  DGFiP's official **Test Compta Demat v1_00_10b** validator. The sample
+  dataset covered all five journals (AC, VE, BQ, OD, AN), a lettered pair
+  (EcritureLet/DateLet), and a reversal (contre-passation) — see
+  `backend/prisma/seed-sample.ts`. Result: structurally conforme to
+  Article A.47 A-1 du LPF, all 18 fields detected with the expected names
+  in the expected order, no extra fields. Report saved at
+  `docs/compliance/rapport_123456789FEC20261231_test-compta-demat_1_00_10b.pdf`.
+  Per the tool's own disclaimer, this checks file *structure* only — it
+  "ne présage pas de la régularité de la comptabilité, ni de sa valeur
+  probante" and isn't an official attestation of compliance. It also
+  doesn't cover every shape of data this module can produce (e.g. a real
+  filing's volume, edge-case account numbers, or a Monaco company) — treat
+  each materially different dataset as needing its own run, not covered
+  by this one.
 - **Frontend is not yet scaffolded** — see "Stack" above. Nothing in this
   file about frontend conventions (React app sharing types with the
   backend, single-company UX) has been exercised against real code yet.
