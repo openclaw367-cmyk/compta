@@ -145,6 +145,58 @@ describe('FecExportService', () => {
     });
   });
 
+  describe('auxiliary accounts (tiers)', () => {
+    it(
+      'puts the collectif in CompteNum/CompteLib (fields 5/6) and the tiers in ' +
+        'CompAuxNum/CompAuxLib (fields 7/8) — never the tiers as the posting account',
+      async () => {
+        prisma.ecriture.findMany.mockResolvedValueOnce([
+          makeEcriture({
+            lignes: [
+              {
+                compte: { number: '607000', label: 'Achats de marchandises' },
+                compteAux: null,
+                debit: new Prisma.Decimal('100.00'),
+                credit: new Prisma.Decimal('0.00'),
+                lettrage: null,
+                dateLettrage: null,
+                montantDevise: null,
+                idDevise: null,
+              },
+              {
+                // compteId points at the 401000 collectif; compteAuxId points at
+                // the tiers created under it — see AccountsService.createTiers.
+                compte: { number: '401000', label: 'Fournisseurs' },
+                compteAux: { number: '401001', label: 'Fournisseur Dupont' },
+                debit: new Prisma.Decimal('0.00'),
+                credit: new Prisma.Decimal('100.00'),
+                lettrage: null,
+                dateLettrage: null,
+                montantDevise: null,
+                idDevise: null,
+              },
+            ],
+          }),
+        ]);
+
+        const { content } = await service.generate(company, 'fy-2026');
+        const fields = content.split('\r\n')[2].split('|');
+
+        expect(fields[4]).toBe('401000'); // CompteNum (field 5) — the collectif
+        expect(fields[5]).toBe('Fournisseurs'); // CompteLib (field 6)
+        expect(fields[6]).toBe('401001'); // CompAuxNum (field 7) — the tiers
+        expect(fields[7]).toBe('Fournisseur Dupont'); // CompAuxLib (field 8)
+      },
+    );
+
+    it('leaves CompAuxNum/CompAuxLib blank for an ordinary line with no tiers', async () => {
+      const { content } = await service.generate(company, 'fy-2026');
+      const fields = content.split('\r\n')[1].split('|');
+      expect(fields[6]).toBe('');
+      expect(fields[7]).toBe('');
+    });
+  });
+
   describe('generateDescription', () => {
     it('documents the delimiter, decimal comma, and PieceRef/PieceDate conventions', async () => {
       const { fileName, content } = await service.generateDescription(company, 'fy-2026');
