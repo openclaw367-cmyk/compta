@@ -1,9 +1,30 @@
 import { useState } from 'react';
-import { useCloseFiscalYear, useCreateFiscalYear, useFiscalYears } from '../api/queries';
+import {
+  useCloseFiscalYear,
+  useCreateFiscalYear,
+  useEcritures,
+  useFiscalYears,
+  useGenerateANouveau,
+  useJournals,
+} from '../api/queries';
 import type { CreateFiscalYearDto } from '../api/dto';
+import type { FiscalYear } from '../api/types';
 import { ApiError } from '../api/client';
 
 const NO_FISCAL_YEARS: never[] = [];
+const NO_ECRITURES: never[] = [];
+
+/**
+ * Mirrors ANouveauService.findPriorFiscalYear on the backend: the fiscal
+ * year with the latest endDate strictly before this one's startDate. Used
+ * only to decide whether/how to show the "Générer l'à-nouveau" action —
+ * the backend re-checks this itself at generation time regardless.
+ */
+function findPriorFiscalYear(fiscalYears: FiscalYear[], target: FiscalYear): FiscalYear | null {
+  const candidates = fiscalYears.filter((fy) => fy.id !== target.id && fy.endDate < target.startDate);
+  if (candidates.length === 0) return null;
+  return candidates.reduce((latest, fy) => (fy.endDate > latest.endDate ? fy : latest));
+}
 
 function formatDate(iso: string): string {
   const [year, month, day] = iso.slice(0, 10).split('-');
@@ -16,17 +37,29 @@ function emptyDraft(): CreateFiscalYearDto {
 
 export function FiscalYearsPage() {
   const fiscalYearsQuery = useFiscalYears();
+  const journalsQuery = useJournals();
+  const ecrituresQuery = useEcritures();
   const createFiscalYear = useCreateFiscalYear();
   const closeFiscalYear = useCloseFiscalYear();
+  const generateANouveau = useGenerateANouveau();
 
   const fiscalYears = fiscalYearsQuery.data ?? NO_FISCAL_YEARS;
   const sorted = [...fiscalYears].sort((a, b) => b.startDate.localeCompare(a.startDate));
+
+  const anJournal = journalsQuery.data?.find((j) => j.type === 'A_NOUVEAU') ?? null;
+  const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
+  const generatedFiscalYearIds = new Set(
+    anJournal ? ecritures.filter((e) => e.journalId === anJournal.id).map((e) => e.fiscalYearId) : [],
+  );
 
   const [isCreating, setIsCreating] = useState(false);
   const [draft, setDraft] = useState<CreateFiscalYearDto>(emptyDraft());
   const [createError, setCreateError] = useState<string | null>(null);
   const [closeError, setCloseError] = useState<string | null>(null);
   const [closingId, setClosingId] = useState<string | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [generateSuccess, setGenerateSuccess] = useState<string | null>(null);
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
 
   const canCreate =
     draft.label.trim() !== '' &&
@@ -71,6 +104,34 @@ export function FiscalYearsPage() {
     }
   }
 
+  async function handleGenerate(fy: FiscalYear, prior: FiscalYear) {
+    if (
+      !window.confirm(
+        `Générer l'à-nouveau de « ${fy.label} » à partir de la clôture de « ${prior.label} » ? ` +
+          'Une écriture sera créée et validée immédiatement dans le journal AN : elle reprend, ' +
+          `compte par compte (et tiers par tiers), les soldes de bilan (classes 1 à 5) de « ${prior.label} », ` +
+          "et impute son résultat en 120/129, non affecté — l'affectation par l'assemblée " +
+          "générale se fera plus tard via une écriture séparée. Cette écriture sera définitive : " +
+          'une correction éventuelle passera par une contre-passation.',
+      )
+    ) {
+      return;
+    }
+    setGenerateError(null);
+    setGenerateSuccess(null);
+    setGeneratingId(fy.id);
+    try {
+      const ecriture = await generateANouveau.mutateAsync(fy.id);
+      setGenerateSuccess(
+        `À-nouveau généré pour « ${fy.label} » (écriture n°${ecriture.ecritureNum ?? '?'}).`,
+      );
+    } catch (error) {
+      setGenerateError(error instanceof ApiError ? error.message : "La génération a échoué.");
+    } finally {
+      setGeneratingId(null);
+    }
+  }
+
   if (fiscalYearsQuery.isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-[13px] text-ink-faint">
@@ -105,6 +166,24 @@ export function FiscalYearsPage() {
         <div className="flex items-center justify-between rounded-md bg-negative-soft px-4 py-2.5 text-[13px] text-negative">
           <span>{closeError}</span>
           <button type="button" onClick={() => setCloseError(null)} className="font-medium">
+            Fermer
+          </button>
+        </div>
+      )}
+
+      {generateError && (
+        <div className="flex items-center justify-between rounded-md bg-negative-soft px-4 py-2.5 text-[13px] text-negative">
+          <span>{generateError}</span>
+          <button type="button" onClick={() => setGenerateError(null)} className="font-medium">
+            Fermer
+          </button>
+        </div>
+      )}
+
+      {generateSuccess && (
+        <div className="flex items-center justify-between rounded-md bg-positive-soft px-4 py-2.5 text-[13px] text-positive">
+          <span>{generateSuccess}</span>
+          <button type="button" onClick={() => setGenerateSuccess(null)} className="font-medium">
             Fermer
           </button>
         </div>
@@ -178,51 +257,85 @@ export function FiscalYearsPage() {
               <th className="px-4 py-2.5 font-semibold">Début</th>
               <th className="px-4 py-2.5 font-semibold">Fin</th>
               <th className="px-4 py-2.5 font-semibold">Statut</th>
-              <th className="w-32 px-4 py-2.5" />
+              <th className="px-4 py-2.5 font-semibold">À-nouveau</th>
+              <th className="w-28 px-4 py-2.5" />
             </tr>
           </thead>
           <tbody>
             {sorted.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-10 text-center text-[13px] text-ink-faint">
+                <td colSpan={6} className="px-4 py-10 text-center text-[13px] text-ink-faint">
                   Aucun exercice — créez-en un pour commencer à saisir des écritures.
                 </td>
               </tr>
             ) : (
-              sorted.map((fy) => (
-                <tr key={fy.id} className="border-b border-border last:border-b-0">
-                  <td className="px-4 py-2.5 font-medium text-ink">{fy.label}</td>
-                  <td className="px-4 py-2.5 tabular-nums text-ink-muted">
-                    {formatDate(fy.startDate)}
-                  </td>
-                  <td className="px-4 py-2.5 tabular-nums text-ink-muted">
-                    {formatDate(fy.endDate)}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {fy.closedAt ? (
-                      <span className="inline-flex items-center rounded-full bg-bg px-2 py-0.5 text-[11.5px] font-medium text-ink-muted">
-                        Clôturé le {formatDate(fy.closedAt)}
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center rounded-full bg-positive-soft px-2 py-0.5 text-[11.5px] font-medium text-positive">
-                        Ouvert
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    {!fy.closedAt && (
-                      <button
-                        type="button"
-                        onClick={() => void handleClose(fy.id, fy.label)}
-                        disabled={closingId === fy.id}
-                        className="rounded px-2 py-1 text-[12px] font-medium text-ink-muted hover:bg-negative-soft hover:text-negative disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {closingId === fy.id ? 'Clôture…' : 'Clôturer'}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))
+              sorted.map((fy) => {
+                const prior = findPriorFiscalYear(fiscalYears, fy);
+                const alreadyGenerated = generatedFiscalYearIds.has(fy.id);
+                return (
+                  <tr key={fy.id} className="border-b border-border last:border-b-0">
+                    <td className="px-4 py-2.5 font-medium text-ink">{fy.label}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-ink-muted">
+                      {formatDate(fy.startDate)}
+                    </td>
+                    <td className="px-4 py-2.5 tabular-nums text-ink-muted">
+                      {formatDate(fy.endDate)}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {fy.closedAt ? (
+                        <span className="inline-flex items-center rounded-full bg-bg px-2 py-0.5 text-[11.5px] font-medium text-ink-muted">
+                          Clôturé le {formatDate(fy.closedAt)}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-positive-soft px-2 py-0.5 text-[11.5px] font-medium text-positive">
+                          Ouvert
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {alreadyGenerated ? (
+                        <span className="inline-flex items-center rounded-full bg-bg px-2 py-0.5 text-[11.5px] font-medium text-ink-muted">
+                          Généré
+                        </span>
+                      ) : fy.closedAt ? (
+                        <span className="text-[12px] text-ink-faint">—</span>
+                      ) : !prior ? (
+                        <span className="text-[12px] text-ink-faint" title="Aucun exercice précédent.">
+                          Premier exercice
+                        </span>
+                      ) : !prior.closedAt ? (
+                        <span
+                          className="text-[12px] text-ink-faint"
+                          title={`L'exercice précédent (« ${prior.label} ») n'est pas clôturé.`}
+                        >
+                          Exercice précédent ouvert
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void handleGenerate(fy, prior)}
+                          disabled={generatingId === fy.id}
+                          className="rounded px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {generatingId === fy.id ? 'Génération…' : 'Générer'}
+                        </button>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {!fy.closedAt && (
+                        <button
+                          type="button"
+                          onClick={() => void handleClose(fy.id, fy.label)}
+                          disabled={closingId === fy.id}
+                          className="rounded px-2 py-1 text-[12px] font-medium text-ink-muted hover:bg-negative-soft hover:text-negative disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {closingId === fy.id ? 'Clôture…' : 'Clôturer'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

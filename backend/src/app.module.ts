@@ -10,6 +10,8 @@ import { JournalsModule } from './modules/journals/journals.module';
 import { JournalsController } from './modules/journals/journals.controller';
 import { FiscalYearsModule } from './modules/fiscal-years/fiscal-years.module';
 import { FiscalYearsController } from './modules/fiscal-years/fiscal-years.controller';
+import { ANouveauModule } from './modules/a-nouveau/a-nouveau.module';
+import { ANouveauController } from './modules/a-nouveau/a-nouveau.controller';
 import { EntriesModule } from './modules/entries/entries.module';
 import { EntriesController } from './modules/entries/entries.controller';
 import { FecModule } from './modules/fec/fec.module';
@@ -41,6 +43,7 @@ const isProduction = process.env.NODE_ENV === 'production';
     AccountsModule,
     JournalsModule,
     FiscalYearsModule,
+    ANouveauModule,
     EntriesModule,
     FecModule,
     ImportExcelModule,
@@ -69,6 +72,7 @@ export class AppModule implements NestModule {
         AccountsController,
         JournalsController,
         FiscalYearsController,
+        ANouveauController,
         EntriesController,
         FecController,
         ImportExcelController,

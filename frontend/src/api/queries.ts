@@ -153,6 +153,23 @@ export function useCloseFiscalYear() {
   });
 }
 
+/**
+ * Posts and immediately validates the à-nouveau écriture for a fiscal year,
+ * carrying forward its closed predecessor's balance-sheet balances (classes
+ * 1-5) and folding the predecessor's result into 120/129 — see
+ * ANouveauService.generate on the backend for the full carry rules. Refuses
+ * (with a clear message) if the predecessor isn't closed, doesn't exist, or
+ * à-nouveau entries were already generated for this year.
+ */
+export function useGenerateANouveau() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (fiscalYearId: string) =>
+      api.post<Ecriture>(`/fiscal-years/${fiscalYearId}/a-nouveau`, {}),
+    onSuccess: () => invalidateEcrituresAndLedger(queryClient),
+  });
+}
+
 export function useEcritures() {
   return useQuery({
     queryKey: ['ecritures'],
