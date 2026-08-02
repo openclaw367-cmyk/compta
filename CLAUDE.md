@@ -17,14 +17,19 @@ depreciation (amortissements), VAT (TVA), and liasse fiscale.
   management, grand livre / trial balance, Excel import
   (preview-then-confirm), and FEC export. Five admin/setup screens are also
   built: fiscal-year management (create, close — surfaces the
-  draft-écritures-remaining guard directly), company profile
+  draft-écritures-remaining guard directly, plus a "Générer l'à-nouveau"
+  action per year that posts and validates the opening-balance
+  carry-forward écriture from its closed predecessor), company profile
   (view/edit — name, SIREN/RCI, jurisdiction, structured address), VAT
   rates management (create/list — the CA3 declaration computation itself
   is still a stub, see below), and a combined "Comptes & journaux" screen
-  for creating journals and plain (non-tiers) PCG accounts. Liasse fiscale
-  is the one remaining honest "non implémenté" placeholder, matching its
-  backend stub status — nothing to build there until the backend logic
-  exists.
+  for creating journals and plain (non-tiers) PCG accounts. Immobilisations
+  has its own two screens: an asset list (valeur brute / amortissements
+  cumulés / VNC per asset) and a per-asset detail page showing the plan
+  d'amortissement, where a "Comptabiliser la dotation" action posts each
+  period's dotation as a real validated écriture. Liasse fiscale is the
+  one remaining honest "non implémenté" placeholder, matching its backend
+  stub status — nothing to build there until the backend logic exists.
 - **Package manager**: npm.
 - **Testing**: Jest (unit + e2e, NestJS default).
 - **Validation**: `class-validator` / `class-transformer` on all DTOs.
@@ -49,7 +54,8 @@ docs/        Compliance artifacts (e.g. Test Compta Demat reports)
    instance/service you run locally.
 2. `cd backend && npm install`
 3. `npx prisma migrate dev` — applies `backend/prisma/migrations/` (the
-   `20260711170231_init` baseline plus `20260801195325_add_company_address`)
+   `20260711170231_init` baseline plus `20260801195325_add_company_address`
+   and `20260802175438_add_fixed_asset_cession_fields`)
    and runs `npm run seed` automatically via the `prisma.seed` config in
    `package.json`. Run `npm run seed` on its own to re-seed without a
    migration. On Windows, `prisma generate` can fail with `EPERM` renaming
@@ -284,13 +290,25 @@ assume they're covered either:
   the FEC section above has been verified against
   `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md`; §VIII specifically
   has not.
-- **Depreciation never posts to the ledger.** `DepreciationService.generateSchedule()`
-  computes and persists `DepreciationEntry` rows (the dotation amount per
-  fiscal year), but nothing creates the corresponding écriture (débit
-  681100 dotations aux amortissements / crédit 280xxx). `DepreciationEntry.postedEcritureId`
-  exists in the schema for exactly this and is never set anywhere in
-  `src/`. Until this is wired up, the schedule is a number, not an
-  accounting entry — someone has to post it by hand.
+- **Immobilisations: cession, dégressif, and the 2054/2055 report
+  structure are still deferred.** `FixedAsset` has `cessionDate` /
+  `cessionPrice` columns so disposal doesn't need a schema retrofit later,
+  but no cession logic exists yet (plus/moins-value computation, posting
+  the disposal écriture) — both fields stay null and there's no DTO/UI
+  surface for them. `DepreciationMethod.DECLINING` (dégressif) still
+  throws `NotImplementedException` in `generateSchedule()`; only linéaire
+  is computed. The tableau des immobilisations / tableau des
+  amortissements reports — which double as liasse forms 2054/2055 —
+  haven't been designed yet; that happens once the liasse work starts
+  (roadmap item 2 below), against real field needs from the now-built
+  list/schedule screens rather than guessed in advance. What *is* done
+  (as of 2026-08-02): `DepreciationService.postDotation()` posts a
+  period's dotation (débit compte 681x / crédit compte 28x) through the
+  normal `EntriesService.create()`/`validate()` layer — no privileged
+  write path — and sets `DepreciationEntry.postedEcritureId`; VNC on the
+  list/detail screens is computed from posted entries only, so it ties to
+  the bilan rather than the projected schedule. This closes what was
+  previously logged here as "depreciation never posts to the ledger."
 - **`EcritureLigne.dateLettrage` isn't settable through the API.**
   `lettrage` (EcritureLet) is exposed on `CreateEcritureLigneDto` and
   settable at line-creation time, but there's no lettering
@@ -306,7 +324,7 @@ assume they're covered either:
 
 ## Current state & roadmap
 
-**Where things stand (as of 2026-08-01):** the four core frontend screens
+**Where things stand (as of 2026-08-02):** the four core frontend screens
 are done — journal entry grid (with inline tiers creation and entry
 reversal), tiers management, grand livre / trial balance, Excel import
 (preview-then-confirm), and FEC export. FEC has passed one structural
@@ -322,11 +340,26 @@ layer: closed-fiscal-year rejection, refusal to close a year with draft
 écritures, drafts-only deletion (`EntriesService.remove()` guards against
 deleting a validated entry), and FEC export blocking entirely (not
 partially) while any draft exists — all now reachable from the UI, not
-just the API. Liasse fiscale remains a stub — see "Known scope
-boundaries" below for that and the other logged gaps (depreciation not
-posting to the ledger, `dateLettrage` not API-settable, no import-batch
-listing endpoint, no delete/deactivate on Journal/Account/VatRate/
-FiscalYear, Article A47 A-1 §VIII uncross-checked).
+just the API.
+
+Two more bookkeeper-workflow gaps from that same audit are now closed
+end to end. **À-nouveau** (`src/modules/a-nouveau/`) generates and
+validates, in one action, the opening-balance carry-forward écriture for
+a fiscal year from its closed predecessor — classes 1-5 carried
+account-by-account and tiers-by-tiers, classes 6-7 reset and folded into
+120/129 unaffected, reachable from the fiscal-year management screen.
+**Immobilisations** (`src/modules/depreciation/`) now has a full front
+half (asset list, per-asset plan d'amortissement) and closes the
+previously-logged "depreciation never posts to the ledger" gap: dotations
+post through the normal entries validation layer and VNC is computed
+from posted entries only — see "Known scope boundaries" above for what's
+still deferred there (cession, dégressif, the 2054/2055 report
+structure).
+
+Liasse fiscale remains a stub — see "Known scope boundaries" below for
+that and the other logged gaps (`dateLettrage` not API-settable, no
+import-batch listing endpoint, no delete/deactivate on Journal/Account/
+VatRate/FiscalYear, Article A47 A-1 §VIII uncross-checked).
 
 **Build order for what's next**, roughly in priority:
 
@@ -337,7 +370,10 @@ FiscalYear, Article A47 A-1 §VIII uncross-checked).
    first; Monaco is a verified divergence layer on top, not a parallel
    guess — see "Monaco compliance" below, nothing Monaco-specific ships
    without a cited source.
-2. **Liasse fiscale** — currently a stub (`src/modules/liasse/`).
+2. **Liasse fiscale** — currently a stub (`src/modules/liasse/`). Includes
+   designing the tableau des immobilisations / tableau des amortissements
+   (forms 2054/2055) against the immobilisations module's real fields,
+   now that it exists, rather than guessing the structure in advance.
 3. **Cash flow statement**, plus bilan and compte de résultat if the
    liasse work above doesn't already cover them.
 4. **Financial analysis** — ratios, free cash flow, and a DCF as an
@@ -382,9 +418,9 @@ independently-configured jurisdiction, not "France with a different flag":
   schema for the authoritative naming). General application code (modules,
   controllers, services, DTOs) follows normal NestJS/English conventions.
 - **Modules**: one NestJS module per bounded domain concept under
-  `src/modules/*` (companies, accounts, journals, entries, fec,
-  import-excel, depreciation, vat, liasse, ledger — trial balance / grand
-  livre reporting, reads only, never writes). Cross-cutting concerns
+  `src/modules/*` (companies, accounts, journals, fiscal-years, entries,
+  a-nouveau, fec, import-excel, depreciation, vat, liasse, ledger — trial
+  balance / grand livre reporting, reads only, never writes). Cross-cutting concerns
   (Prisma client, company context, Decimal helpers, ledger guards like
   `assertFiscalYearOpen`) live under `src/common/*`.
 - **DTOs validate at the boundary.** Every controller input is a class
