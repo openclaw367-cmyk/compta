@@ -52,6 +52,40 @@ export interface VatRate {
   validTo: string | null;
 }
 
+/** One collectée rate line (08/09/9B/T6) — see ca3-declaration.ts on the backend. */
+export interface Ca3RateLine {
+  ligne: string;
+  label: string;
+  ratePercent: string;
+  /** Money string, rounded to the nearest euro at the declaration boundary. */
+  baseHT: string;
+  /** Money string, rounded to the nearest euro at the declaration boundary. */
+  taxe: string;
+}
+
+/** Response for POST /vat/declaration — French CA3 (régime réel normal), basic case only. */
+export interface Ca3Declaration {
+  periodStart: string;
+  periodEnd: string;
+  collecteeByRate: Ca3RateLine[];
+  /** Ligne 16 — total de la TVA brute due. Money string. */
+  ligne16: string;
+  /** Ligne 19 — biens constituant des immobilisations. Money string. */
+  ligne19: string;
+  /** Ligne 20 — autres biens et services. Money string. */
+  ligne20: string;
+  /** Ligne 23 — total TVA déductible. Money string. */
+  ligne23: string;
+  /** Ligne 25 — crédit de TVA (23 − 16), only when 23 > 16. Money string, null otherwise. */
+  ligne25: string | null;
+  /** Ligne TD — TVA due (16 − 23), only when 16 ≥ 23. Money string, null otherwise. */
+  ligneTD: string | null;
+  /** Ligne 28 — TVA nette due. Money string. */
+  ligne28: string;
+  /** Ligne 32 — total à payer. Money string. */
+  ligne32: string;
+}
+
 export interface FiscalYear {
   id: string;
   companyId: string;

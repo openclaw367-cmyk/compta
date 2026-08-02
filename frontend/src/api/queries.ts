@@ -3,6 +3,7 @@ import { api } from './client';
 import type {
   Account,
   AccountLedgerResponse,
+  Ca3Declaration,
   Company,
   DepreciationEntry,
   Ecriture,
@@ -114,6 +115,21 @@ export function useCreateVatRate() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['vat-rates'] });
     },
+  });
+}
+
+/**
+ * Computes a CA3 declaration for a period — read-only, never writes to
+ * the ledger. See VatService.computeDeclaration on the backend: refuses
+ * (409) if any écriture dated in the period is still a draft, and throws
+ * (400) on an untagged/unmapped-rate collectée line, an unmapped 4456x
+ * account, or a negative bucket — the page surfaces those messages as-is
+ * rather than showing a blank result.
+ */
+export function useComputeVatDeclaration() {
+  return useMutation({
+    mutationFn: (params: { periodStart: string; periodEnd: string }) =>
+      api.post<Ca3Declaration>('/vat/declaration', params),
   });
 }
 

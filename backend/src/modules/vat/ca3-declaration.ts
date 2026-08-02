@@ -1,3 +1,4 @@
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Money } from '../../common/decimal';
 
@@ -102,7 +103,7 @@ function roundToNearestEuro(amount: Money): Money {
 
 function assertNotNegative(amount: Money, description: string): void {
   if (amount.isNegative()) {
-    throw new Error(
+    throw new ConflictException(
       `${description} computed as ${amount.toApiString()}, which is negative — the CA3 notice is ` +
         'explicit that no line may show a negative amount ("Ne jamais indiquer de sommes ' +
         'négatives"). This usually means a régularisation (deferred, not implemented) is needed.',
@@ -113,7 +114,7 @@ function assertNotNegative(amount: Money, description: string): void {
 function findImplementedRate(ratePercent: Money): ImplementedRate {
   const match = IMPLEMENTED_RATES.find((r) => r.ratePercent.equals(ratePercent));
   if (!match) {
-    throw new Error(
+    throw new BadRequestException(
       `VAT rate ${ratePercent.toApiString()}% is not one of the currently-implemented CA3 rates ` +
         `(${IMPLEMENTED_RATES.map((r) => r.ratePercent.toApiString()).join('%, ')}%) — it falls under ` +
         "a deferred category (DOM, Corse, produits pétroliers, or another taux particulier). See " +
@@ -145,7 +146,7 @@ export function computeCa3Declaration(
   function resolveBucket(vatRateId: string) {
     const ratePercent = ratesById.get(vatRateId);
     if (!ratePercent) {
-      throw new Error(`VAT rate ${vatRateId} referenced by a ledger line was not found.`);
+      throw new BadRequestException(`VAT rate ${vatRateId} referenced by a ledger line was not found.`);
     }
     const implemented = findImplementedRate(ratePercent);
     return buckets.get(implemented.ligne)!;
@@ -163,7 +164,7 @@ export function computeCa3Declaration(
 
     if (isCollectee) {
       if (!ligne.vatRateId) {
-        throw new Error(
+        throw new BadRequestException(
           `Account "${ligne.compteNumber}" (TVA collectée) has a line with no vatRateId — every ` +
             'collectée line must be tagged with a rate before a declaration can be computed.',
         );
@@ -182,7 +183,7 @@ export function computeCa3Declaration(
       continue;
     }
     if (ligne.compteNumber.startsWith(DEDUCTIBLE_PREFIX)) {
-      throw new Error(
+      throw new BadRequestException(
         `Account "${ligne.compteNumber}" is a TVA déductible account not yet mapped to a CA3 line ` +
           `(only ${DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT} and ${DEDUCTIBLE_AUTRES_ACCOUNT} are supported).`,
       );
