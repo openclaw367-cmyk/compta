@@ -21,10 +21,10 @@ depreciation (amortissements), VAT (TVA), and liasse fiscale.
   action per year that posts and validates the opening-balance
   carry-forward écriture from its closed predecessor), company profile
   (view/edit — name, SIREN/RCI, jurisdiction, structured address), VAT
-  rates management (create/list — the CA3 declaration computation itself
-  now has a real backend for the basic French case, see "VAT / CA3
-  declaration" below, but no report screen yet), and a combined "Comptes
-  & journaux" screen
+  rates management plus a CA3 declaration screen that computes and
+  displays the basic French case (see "VAT / CA3 declaration" below —
+  a read-only report, it never writes to the ledger), and a combined
+  "Comptes & journaux" screen
   for creating journals and plain (non-tiers) PCG accounts. Immobilisations
   has its own two screens: an asset list (valeur brute / amortissements
   cumulés / VNC per asset) and a per-asset detail page showing the plan
@@ -331,6 +331,32 @@ misstated twice during development before being pinned down here.
   (taxes assimilées), accise sur les énergies (a different tax bundled
   onto the same form, not VAT at all), réel simplifié / CA12 (a
   different form).
+- **Verified two ways, not just unit-tested.** `ca3-declaration.spec.ts`
+  has a hand-computed-oracle test suite (`computeCa3Declaration()` is a
+  pure function, no I/O — build a dataset, work out the expected CA3 by
+  hand, assert every line). Separately, `backend/prisma/seed-sample.ts`
+  carries a real, rate-tagged April 2026 dataset (two ventes at 20 %/10 %,
+  one immobilisation achat, one autres-biens achat) with the expected
+  result worked out in a comment above `SAMPLE_VAT_RATES` — calling
+  `POST /vat/declaration` with `periodStart: "2026-04-01"`,
+  `periodEnd: "2026-04-30"` against the real dev DB reproduced that
+  comment's numbers exactly (ligne 16 = 250.00, ligne 23 = 150.00, ligne
+  TD = 100.00). The original `SAMPLE-VE-0001`/`0002` lines are
+  deliberately left untagged (no `vatRateId`) — not an oversight, a
+  permanent demonstration that the untagged-collectée-line guard
+  actually refuses real historical data rather than silently passing it.
+- **Guards must throw a NestJS exception, never a plain `Error`.** Found
+  live while verifying the declaration screen: `ca3-declaration.ts`'s
+  guards originally used `throw new Error(...)`, which Nest's default
+  exception filter collapses into a generic 500 "Internal server error"
+  — the actual guard message never reached the client, so the screen
+  showed a blank/unhelpful error instead of the real problem. Fixed to
+  `BadRequestException`/`ConflictException`, matching the pattern
+  already established in `fixed-asset-invariants.ts`. If you add a new
+  guard anywhere in this "pure function, no I/O" style, throw a real
+  `@nestjs/common` exception class — importing it doesn't compromise the
+  "pure" claim (no I/O happens), and a plain `Error` here is a silent-500
+  bug waiting to happen.
 
 ## Known scope boundaries
 
@@ -358,11 +384,10 @@ assume they're covered either:
   "Stack" above. There's nothing to build there until the backend stub
   below is implemented; the nav entry is an honest "non implémenté"
   placeholder, not a faked screen. VAT is further along: rate management
-  has a real screen (`VatPage`), the CA3 computation itself now has a
-  real backend for the basic French case (see "VAT / CA3 declaration"
-  above), and the journal entry grid can tag a line with a rate — but
-  there is no declaration report screen yet, so `computeDeclaration()`
-  is only reachable via the API today.
+  and a CA3 declaration report screen are both real (`VatPage`),
+  computing and displaying the basic French case (see "VAT / CA3
+  declaration" above) — read-only, it never posts to the ledger — and
+  the journal entry grid can tag a line with a rate.
 - **Liasse fiscale (`src/modules/liasse/`) is a stub** — throws
   `NotImplementedException`, not a plausible-looking fake computation.
   Don't build on top of it assuming real logic exists. VAT's
@@ -436,12 +461,18 @@ deleting a validated entry), and FEC export blocking entirely (not
 partially) while any draft exists — all now reachable from the UI, not
 just the API.
 
-Two more bookkeeper-workflow gaps from that same audit are now closed
+Three more bookkeeper-workflow gaps from that same audit are now closed
 end to end. **À-nouveau** (`src/modules/a-nouveau/`) generates and
 validates, in one action, the opening-balance carry-forward écriture for
 a fiscal year from its closed predecessor — classes 1-5 carried
 account-by-account and tiers-by-tiers, classes 6-7 reset and folded into
-120/129 unaffected, reachable from the fiscal-year management screen.
+120/129 unaffected. Exact-to-the-centime by construction and tested
+that way (`a-nouveau.service.spec.ts`): the generated block's débit
+must equal its crédit or the service throws rather than posting an
+unbalanced à-nouveau, and per-account carried amounts are asserted
+against the prior year's exact closing balances, not an approximation.
+Reachable from the fiscal-year management screen.
+
 **Immobilisations** (`src/modules/depreciation/`) now has a full front
 half (asset list, per-asset plan d'amortissement) and closes the
 previously-logged "depreciation never posts to the ledger" gap: dotations
@@ -451,10 +482,16 @@ still deferred there (cession, dégressif, the 2054/2055 report
 structure).
 
 **VAT (TVA)** — `computeDeclaration()` is no longer a stub: it computes
-a real CA3 for the basic French case (see "VAT / CA3 declaration"
-above), backed by a new `EcritureLigne.vatRateId` rate-tracking field
-and an entry-grid rate selector. No report screen yet — reachable via
-the API only.
+and now also *displays* a real CA3 for the basic French case (`VatPage`'s
+new declaration section, see "VAT / CA3 declaration" above), backed by
+a new `EcritureLigne.vatRateId` rate-tracking field and an entry-grid
+rate selector. The account-to-ligne mapping (445662 → ligne 19 "Biens
+constituant des immobilisations", 445660 → ligne 20 "Autres biens et
+services") is confirmed against the rendered CA3 form and the PCG
+regulation text, not memory — see "VAT / CA3 declaration" above before
+ever touching that routing again. The guard that refuses an untagged
+TVA collectée line is real and demonstrated on purpose in the seed
+sample data, not just theoretical.
 
 Liasse fiscale remains a stub — see "Known scope boundaries" below for
 that and the other logged gaps (`dateLettrage` not API-settable, no
@@ -463,25 +500,27 @@ VatRate/FiscalYear, Article A47 A-1 §VIII uncross-checked).
 
 **Build order for what's next**, roughly in priority:
 
-1. **VAT declaration report screen** — `computeDeclaration()` is only
-   reachable via the API today; it needs a screen the way FEC export
-   has one. Widening the computation itself (remaining taux particuliers,
-   AIC/imports, Monaco) is separate follow-on work, not a prerequisite.
-2. **Liasse fiscale** — currently a stub (`src/modules/liasse/`). Includes
+1. **Liasse fiscale** — currently a stub (`src/modules/liasse/`). Includes
    designing the tableau des immobilisations / tableau des amortissements
    (forms 2054/2055) against the immobilisations module's real fields,
    now that it exists, rather than guessing the structure in advance.
-3. **Cash flow statement**, plus bilan and compte de résultat if the
+2. **Cash flow statement**, plus bilan and compte de résultat if the
    liasse work above doesn't already cover them.
-4. **Financial analysis** — ratios, free cash flow, and a DCF as an
+3. **Financial analysis** — ratios, free cash flow, and a DCF as an
    assumptions-driven model (explicit inputs the user can see and change,
    not a black-box number).
-5. **AI chatbot** — last, after the above give it something real to sit
+4. **AI chatbot** — last, after the above give it something real to sit
    on top of. Propose-don't-post: the LLM drafts, it never posts
    directly. It writes through the same validation layer the UI uses
    (the DTOs/service methods, not a shortcut path), and a human confirms
    every write before it lands — no exception for "obviously correct"
    changes.
+
+Not on this numbered list but still open whenever it's picked back up:
+widening the VAT computation itself (remaining taux particuliers beyond
+T6, AIC/imports, groupe TVA, régularisations, annexe 3310-A) and the
+Monaco CA3 pass, which needs the actual Monegasque declaration form
+first — see "VAT / CA3 declaration" above.
 
 ## Monaco compliance — verify before trusting
 
