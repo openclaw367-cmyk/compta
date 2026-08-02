@@ -27,11 +27,18 @@ export class DepreciationController {
     return this.depreciationService.findAll(company);
   }
 
-  @ApiOperation({ summary: 'Get one fixed asset by id.' })
+  @ApiOperation({ summary: 'Get one fixed asset by id, with valeurBrute/amortissementsCumules/vnc.' })
   @ApiParam({ name: 'id' })
   @Get(':id')
   findOne(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
-    return this.depreciationService.findOne(company, id);
+    return this.depreciationService.findOneWithSummary(company, id);
+  }
+
+  @ApiOperation({ summary: "Get the asset's already-computed plan d'amortissement, read-only." })
+  @ApiParam({ name: 'id' })
+  @Get(':id/schedule')
+  findSchedule(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
+    return this.depreciationService.findSchedule(company, id);
   }
 
   @ApiOperation({

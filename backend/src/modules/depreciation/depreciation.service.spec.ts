@@ -75,6 +75,7 @@ function makePrismaMock() {
       })),
     },
     journal: { findFirst: jest.fn() },
+    ecriture: { findMany: jest.fn().mockResolvedValue([]) },
     $transaction: jest.fn(),
   };
   prisma.$transaction.mockImplementation((arg: unknown) =>
@@ -146,6 +147,71 @@ describe('DepreciationService', () => {
     });
   });
 
+  describe('findOneWithSummary', () => {
+    it('computes the same valeurBrute/amortissementsCumules/vnc as findAll, for a single asset', async () => {
+      prisma.fixedAsset.findFirst.mockResolvedValue({
+        ...LINEAR_ASSET,
+        cessionDate: null,
+        cessionPrice: null,
+        depreciationEntries: [{ amount: new Prisma.Decimal('1000.00') }],
+      });
+
+      const row = await service.findOneWithSummary(company, 'asset-1');
+
+      expect(row.vnc).toBe('0.00'); // fully depreciated
+    });
+
+    it('404s when the asset does not belong to the company', async () => {
+      prisma.fixedAsset.findFirst.mockResolvedValue(null);
+      await expect(service.findOneWithSummary(company, 'asset-1')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('findSchedule', () => {
+    it('returns unposted lines with a null postedEcritureNum', async () => {
+      prisma.fixedAsset.findFirst.mockResolvedValue(LINEAR_ASSET);
+      prisma.depreciationEntry.findMany.mockResolvedValue([
+        {
+          id: 'entry-2026',
+          fiscalYearId: 'fy-2026',
+          fiscalYear: FISCAL_YEARS[0],
+          amount: new Prisma.Decimal('333.33'),
+          postedEcritureId: null,
+        },
+      ]);
+
+      const [line] = await service.findSchedule(company, 'asset-1');
+
+      expect(line.fiscalYearLabel).toBe('2026');
+      expect(line.amount).toBe('333.33');
+      expect(line.postedEcritureId).toBeNull();
+      expect(line.postedEcritureNum).toBeNull();
+      expect(prisma.ecriture.findMany).not.toHaveBeenCalled();
+    });
+
+    it('looks up and attaches the EcritureNum for a posted line', async () => {
+      prisma.fixedAsset.findFirst.mockResolvedValue(LINEAR_ASSET);
+      prisma.depreciationEntry.findMany.mockResolvedValue([
+        {
+          id: 'entry-2026',
+          fiscalYearId: 'fy-2026',
+          fiscalYear: FISCAL_YEARS[0],
+          amount: new Prisma.Decimal('333.33'),
+          postedEcritureId: 'ecriture-42',
+        },
+      ]);
+      prisma.ecriture.findMany.mockResolvedValue([{ id: 'ecriture-42', ecritureNum: '42' }]);
+
+      const [line] = await service.findSchedule(company, 'asset-1');
+
+      expect(prisma.ecriture.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['ecriture-42'] } },
+        select: { id: true, ecritureNum: true },
+      });
+      expect(line.postedEcritureNum).toBe('42');
+    });
+  });
+
   describe('generateSchedule', () => {
     it('rejects DECLINING assets outright', async () => {
       prisma.fixedAsset.findFirst.mockResolvedValue({ ...LINEAR_ASSET, method: DepreciationMethod.DECLINING });
@@ -168,15 +234,23 @@ describe('DepreciationService', () => {
         .mockResolvedValueOnce([
           { fiscalYearId: 'fy-2028', amount: new Prisma.Decimal('333.34'), postedEcritureId: 'ecriture-9' },
         ])
-        .mockResolvedValueOnce([]); // final re-fetch for the return value
+        .mockResolvedValueOnce([
+          // Simulates the post-upsert re-fetch inside findSchedule().
+          { id: 'e1', fiscalYearId: 'fy-2026', fiscalYear: FISCAL_YEARS[0], amount: new Prisma.Decimal('333.33'), postedEcritureId: null },
+          { id: 'e2', fiscalYearId: 'fy-2027', fiscalYear: FISCAL_YEARS[1], amount: new Prisma.Decimal('333.33'), postedEcritureId: null },
+          { id: 'e3', fiscalYearId: 'fy-2028', fiscalYear: FISCAL_YEARS[2], amount: new Prisma.Decimal('333.34'), postedEcritureId: 'ecriture-9' },
+        ]);
+      prisma.ecriture.findMany.mockResolvedValue([{ id: 'ecriture-9', ecritureNum: '9' }]);
 
-      await service.generateSchedule(company, 'asset-1');
+      const result = await service.generateSchedule(company, 'asset-1');
 
       expect(prisma.depreciationEntry.upsert).toHaveBeenCalledTimes(2); // fy-2026 and fy-2027 only
       const upsertedYears = prisma.depreciationEntry.upsert.mock.calls.map(
         (call: unknown[]) => (call[0] as { create: { fiscalYearId: string } }).create.fiscalYearId,
       );
       expect(upsertedYears).toEqual(['fy-2026', 'fy-2027']);
+      expect(result).toHaveLength(3);
+      expect(result[2].postedEcritureNum).toBe('9');
     });
   });
 
@@ -196,9 +270,14 @@ describe('DepreciationService', () => {
     }
 
     it('posts through EntriesService.create/validate and records postedEcritureId', async () => {
-      prisma.depreciationEntry.findFirst.mockResolvedValue(depreciationEntry());
+      const entry = depreciationEntry();
+      prisma.depreciationEntry.findFirst.mockResolvedValue(entry);
       prisma.depreciationEntry.findMany.mockResolvedValue([]); // no other posted entries
       prisma.journal.findFirst.mockResolvedValue({ id: 'journal-od', code: 'OD', type: 'OPERATIONS_DIVERSES' });
+      // Prisma's real update() returns the full merged row, not just the changed fields.
+      prisma.depreciationEntry.update.mockImplementation(
+        (args: { where: { id: string }; data: unknown }) => ({ ...entry, ...(args.data as object) }),
+      );
 
       const result = await service.postDotation(company, 'entry-1');
 

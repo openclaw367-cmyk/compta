@@ -13,6 +13,7 @@ import { EntriesService } from '../entries/entries.service';
 import { CreateEcritureDto } from '../entries/dto/create-ecriture.dto';
 import { CreateFixedAssetDto } from './dto/create-fixed-asset.dto';
 import { FixedAssetListItemDto } from './dto/fixed-asset-list-item.dto';
+import { DepreciationEntryDto } from './dto/depreciation-entry.dto';
 import { computeLinearSchedule } from './depreciation-schedule';
 import {
   assertValidAccountTriplet,
@@ -61,33 +62,19 @@ export class DepreciationService {
       orderBy: { acquisitionDate: 'asc' },
       include: { depreciationEntries: { where: { postedEcritureId: { not: null } } } },
     });
+    return assets.map((asset) => this.toListItem(asset));
+  }
 
-    return assets.map((asset) => {
-      const { valeurBrute, amortissementsCumules, vnc } = computeFixedAssetSummary(
-        asset,
-        asset.depreciationEntries,
-      );
-      return {
-        id: asset.id,
-        label: asset.label,
-        accountId: asset.accountId,
-        depreciationAccountId: asset.depreciationAccountId,
-        expenseAccountId: asset.expenseAccountId,
-        acquisitionDate: asset.acquisitionDate.toISOString().slice(0, 10),
-        serviceStartDate: asset.serviceStartDate.toISOString().slice(0, 10),
-        acquisitionValue: Money.fromDecimal(asset.acquisitionValue).toApiString(),
-        residualValue: Money.fromDecimal(asset.residualValue).toApiString(),
-        usefulLifeYears: asset.usefulLifeYears,
-        method: asset.method,
-        cessionDate: asset.cessionDate ? asset.cessionDate.toISOString().slice(0, 10) : null,
-        cessionPrice: asset.cessionPrice
-          ? Money.fromDecimal(asset.cessionPrice).toApiString()
-          : null,
-        valeurBrute: valeurBrute.toApiString(),
-        amortissementsCumules: amortissementsCumules.toApiString(),
-        vnc: vnc.toApiString(),
-      };
+  /** Single-asset counterpart to findAll's enriched shape — same figures, same formula. */
+  async findOneWithSummary(company: CompanyContext, id: string): Promise<FixedAssetListItemDto> {
+    const asset = await this.prisma.fixedAsset.findFirst({
+      where: { id, companyId: company.companyId },
+      include: { depreciationEntries: { where: { postedEcritureId: { not: null } } } },
     });
+    if (!asset) {
+      throw new NotFoundException(`Fixed asset ${id} not found`);
+    }
+    return this.toListItem(asset);
   }
 
   async findOne(company: CompanyContext, id: string): Promise<FixedAsset> {
@@ -98,6 +85,17 @@ export class DepreciationService {
       throw new NotFoundException(`Fixed asset ${id} not found`);
     }
     return asset;
+  }
+
+  /** Read-only: fetches the already-computed schedule without regenerating it. */
+  async findSchedule(company: CompanyContext, fixedAssetId: string): Promise<DepreciationEntryDto[]> {
+    await this.findOne(company, fixedAssetId); // 404s + company-scopes
+    const entries = await this.prisma.depreciationEntry.findMany({
+      where: { fixedAssetId, companyId: company.companyId },
+      include: { fiscalYear: true },
+      orderBy: { fiscalYear: { startDate: 'asc' } },
+    });
+    return this.toScheduleDtos(entries);
   }
 
   /**
@@ -112,7 +110,7 @@ export class DepreciationService {
   async generateSchedule(
     company: CompanyContext,
     fixedAssetId: string,
-  ): Promise<DepreciationEntry[]> {
+  ): Promise<DepreciationEntryDto[]> {
     const asset = await this.findOne(company, fixedAssetId);
     if (asset.method !== 'LINEAR') {
       throw new NotImplementedException(
@@ -164,10 +162,7 @@ export class DepreciationService {
       );
     }
 
-    return this.prisma.depreciationEntry.findMany({
-      where: { fixedAssetId: asset.id },
-      orderBy: { fiscalYear: { startDate: 'asc' } },
-    });
+    return this.findSchedule(company, asset.id);
   }
 
   /**
@@ -178,7 +173,10 @@ export class DepreciationService {
    * numbering. No privileged write path: this method only ever assembles
    * the DTO and calls the normal service, then records the link.
    */
-  async postDotation(company: CompanyContext, depreciationEntryId: string): Promise<DepreciationEntry> {
+  async postDotation(
+    company: CompanyContext,
+    depreciationEntryId: string,
+  ): Promise<DepreciationEntryDto> {
     const entry = await this.prisma.depreciationEntry.findFirst({
       where: { id: depreciationEntryId, companyId: company.companyId },
       include: { fixedAsset: true, fiscalYear: true },
@@ -232,10 +230,76 @@ export class DepreciationService {
     const draft = await this.entriesService.create(company, dto);
     const validated = await this.entriesService.validate(company, draft.id);
 
-    return this.prisma.depreciationEntry.update({
+    const updated = await this.prisma.depreciationEntry.update({
       where: { id: entry.id },
       data: { postedEcritureId: validated.id },
     });
+
+    return {
+      id: updated.id,
+      fiscalYearId: updated.fiscalYearId,
+      fiscalYearLabel: entry.fiscalYear.label,
+      amount: Money.fromDecimal(updated.amount).toApiString(),
+      postedEcritureId: updated.postedEcritureId,
+      postedEcritureNum: validated.ecritureNum ?? null,
+    };
+  }
+
+  private toListItem(
+    asset: FixedAsset & { depreciationEntries: DepreciationEntry[] },
+  ): FixedAssetListItemDto {
+    const { valeurBrute, amortissementsCumules, vnc } = computeFixedAssetSummary(
+      asset,
+      asset.depreciationEntries,
+    );
+    return {
+      id: asset.id,
+      label: asset.label,
+      accountId: asset.accountId,
+      depreciationAccountId: asset.depreciationAccountId,
+      expenseAccountId: asset.expenseAccountId,
+      acquisitionDate: asset.acquisitionDate.toISOString().slice(0, 10),
+      serviceStartDate: asset.serviceStartDate.toISOString().slice(0, 10),
+      acquisitionValue: Money.fromDecimal(asset.acquisitionValue).toApiString(),
+      residualValue: Money.fromDecimal(asset.residualValue).toApiString(),
+      usefulLifeYears: asset.usefulLifeYears,
+      method: asset.method,
+      cessionDate: asset.cessionDate ? asset.cessionDate.toISOString().slice(0, 10) : null,
+      cessionPrice: asset.cessionPrice ? Money.fromDecimal(asset.cessionPrice).toApiString() : null,
+      valeurBrute: valeurBrute.toApiString(),
+      amortissementsCumules: amortissementsCumules.toApiString(),
+      vnc: vnc.toApiString(),
+    };
+  }
+
+  /** Batches the écriture lookup for posted entries' EcritureNum rather than one query per line. */
+  private async toScheduleDtos(
+    entries: (DepreciationEntry & { fiscalYear: { label: string } })[],
+  ): Promise<DepreciationEntryDto[]> {
+    const postedIds = entries
+      .map((e) => e.postedEcritureId)
+      .filter((id): id is string => id !== null);
+    const ecritureNumById = new Map(
+      postedIds.length === 0
+        ? []
+        : (
+            await this.prisma.ecriture.findMany({
+              where: { id: { in: postedIds } },
+              select: { id: true, ecritureNum: true },
+            })
+          ).map((e) => [e.id, e.ecritureNum]),
+    );
+
+    return entries.map((entry) => ({
+      id: entry.id,
+      fiscalYearId: entry.fiscalYearId,
+      fiscalYearLabel: entry.fiscalYear.label,
+      amount: Money.fromDecimal(entry.amount).toApiString(),
+      postedEcritureId: entry.postedEcritureId,
+      postedEcritureNum: entry.postedEcritureId
+        ? ecritureNumById.get(entry.postedEcritureId) ?? null
+        : null,
+    }));
   }
 
   private async loadAccountTriplet(

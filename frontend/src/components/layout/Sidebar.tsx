@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom';
 import type { SVGProps } from 'react';
 import { useCompany } from '../../api/queries';
 import {
+  IconBox,
   IconBuilding,
   IconCalendar,
   IconDocument,
@@ -30,6 +31,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/grand-livre', label: 'Grand livre', Icon: IconLedger },
   { to: '/import', label: 'Import Excel', Icon: IconUpload },
   { to: '/fec', label: 'Export FEC', Icon: IconDownload },
+  { to: '/immobilisations', label: 'Immobilisations', Icon: IconBox },
   { to: '/tva', label: 'TVA', Icon: IconPercent },
   { to: '/liasse', label: 'Liasse fiscale', Icon: IconDocument },
 ];

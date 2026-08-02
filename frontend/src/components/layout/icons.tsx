@@ -100,6 +100,15 @@ export function IconCalendar(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconBox(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M10 3.5 16.5 7 10 10.5 3.5 7Z" />
+      <path d="M3.5 7v6.5L10 17M16.5 7v6.5L10 17M10 10.5V17" />
+    </svg>
+  );
+}
+
 export function IconUsers(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base(props)}>

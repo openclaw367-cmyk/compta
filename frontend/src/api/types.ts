@@ -181,6 +181,43 @@ export interface ImportPreviewResponse {
   rejected: ImportPreviewRejected[];
 }
 
+/** Response shape for GET /depreciation/fixed-assets(/:id) — see FixedAssetListItemDto on the backend. */
+export interface FixedAsset {
+  id: string;
+  label: string;
+  accountId: string;
+  depreciationAccountId: string;
+  expenseAccountId: string;
+  acquisitionDate: string;
+  serviceStartDate: string;
+  /** Money string. */
+  acquisitionValue: string;
+  /** Money string. */
+  residualValue: string;
+  usefulLifeYears: number;
+  method: 'LINEAR' | 'DECLINING';
+  cessionDate: string | null;
+  /** Money string. */
+  cessionPrice: string | null;
+  /** Money string. Equal to acquisitionValue. */
+  valeurBrute: string;
+  /** Money string. Sum of posted dotations only. */
+  amortissementsCumules: string;
+  /** Money string. valeurBrute - amortissementsCumules. */
+  vnc: string;
+}
+
+/** One line of an asset's plan d'amortissement — see DepreciationEntryDto on the backend. */
+export interface DepreciationEntry {
+  id: string;
+  fiscalYearId: string;
+  fiscalYearLabel: string;
+  /** Money string. */
+  amount: string;
+  postedEcritureId: string | null;
+  postedEcritureNum: string | null;
+}
+
 export interface ImportBatch {
   id: string;
   companyId: string;

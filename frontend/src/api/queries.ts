@@ -4,8 +4,10 @@ import type {
   Account,
   AccountLedgerResponse,
   Company,
+  DepreciationEntry,
   Ecriture,
   FiscalYear,
+  FixedAsset,
   ImportBatch,
   ImportPreviewResponse,
   Journal,
@@ -16,6 +18,7 @@ import type {
   CreateAccountDto,
   CreateEcritureDto,
   CreateFiscalYearDto,
+  CreateFixedAssetDto,
   CreateJournalDto,
   CreateTiersDto,
   CreateVatRateDto,
@@ -330,5 +333,73 @@ export function useDownloadFecDescription() {
   return useMutation({
     mutationFn: (fiscalYearId: string) =>
       api.getFile(`/fec/export/description?fiscalYearId=${encodeURIComponent(fiscalYearId)}`),
+  });
+}
+
+/** List view: every asset with valeurBrute/amortissementsCumules/vnc already computed. */
+export function useFixedAssets() {
+  return useQuery({
+    queryKey: ['fixed-assets'],
+    queryFn: () => api.get<FixedAsset[]>('/depreciation/fixed-assets'),
+  });
+}
+
+/** Single-asset counterpart of useFixedAssets, same enriched shape. */
+export function useFixedAsset(id: string | null) {
+  return useQuery({
+    queryKey: ['fixed-assets', id],
+    queryFn: () => api.get<FixedAsset>(`/depreciation/fixed-assets/${id}`),
+    enabled: Boolean(id),
+  });
+}
+
+export function useCreateFixedAsset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateFixedAssetDto) => api.post<FixedAsset>('/depreciation/fixed-assets', dto),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['fixed-assets'] });
+    },
+  });
+}
+
+/** Read-only: the asset's already-computed plan d'amortissement (never regenerates it). */
+export function useSchedule(fixedAssetId: string | null) {
+  return useQuery({
+    queryKey: ['fixed-asset-schedule', fixedAssetId],
+    queryFn: () => api.get<DepreciationEntry[]>(`/depreciation/fixed-assets/${fixedAssetId}/schedule`),
+    enabled: Boolean(fixedAssetId),
+  });
+}
+
+/** Computes and persists the straight-line schedule — safe to call again (no-ops on posted lines, throws on a genuine mismatch). */
+export function useGenerateSchedule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (fixedAssetId: string) =>
+      api.post<DepreciationEntry[]>(`/depreciation/fixed-assets/${fixedAssetId}/schedule`, {}),
+    onSuccess: (_data, fixedAssetId) => {
+      void queryClient.invalidateQueries({ queryKey: ['fixed-asset-schedule', fixedAssetId] });
+    },
+  });
+}
+
+/**
+ * Posts one period's dotation as a real, validated écriture (débit expense
+ * / crédit amortissements) through the normal entries validation layer —
+ * see DepreciationService.postDotation on the backend. Invalidates the
+ * schedule, the asset list (VNC changes), and the ledger/ecritures caches
+ * since a real écriture now exists.
+ */
+export function usePostDotation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (depreciationEntryId: string) =>
+      api.post<DepreciationEntry>(`/depreciation/fixed-assets/entries/${depreciationEntryId}/post`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['fixed-asset-schedule'] });
+      void queryClient.invalidateQueries({ queryKey: ['fixed-assets'] });
+      invalidateEcrituresAndLedger(queryClient);
+    },
   });
 }

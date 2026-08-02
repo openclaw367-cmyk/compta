@@ -10,6 +10,8 @@ import { GrandLivrePage } from './pages/GrandLivrePage';
 import { ImportExcelPage } from './pages/ImportExcelPage';
 import { FecExportPage } from './pages/FecExportPage';
 import { VatPage } from './pages/VatPage';
+import { ImmobilisationsPage } from './pages/ImmobilisationsPage';
+import { FixedAssetDetailPage } from './pages/FixedAssetDetailPage';
 
 export default function App() {
   return (
@@ -23,6 +25,8 @@ export default function App() {
         <Route path="/grand-livre" element={<GrandLivrePage />} />
         <Route path="/import" element={<ImportExcelPage />} />
         <Route path="/fec" element={<FecExportPage />} />
+        <Route path="/immobilisations" element={<ImmobilisationsPage />} />
+        <Route path="/immobilisations/:id" element={<FixedAssetDetailPage />} />
         <Route path="/tva" element={<VatPage />} />
         <Route
           path="/liasse"
