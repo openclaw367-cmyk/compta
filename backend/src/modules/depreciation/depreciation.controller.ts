@@ -43,4 +43,17 @@ export class DepreciationController {
   generateSchedule(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
     return this.depreciationService.generateSchedule(company, id);
   }
+
+  @ApiOperation({
+    summary: "Post a period's dotation aux amortissements as a real, validated écriture.",
+    description:
+      'Goes through EntriesService.create()/validate() — same balance check and fiscal-year-open ' +
+      'guard as any manually-entered écriture. Refuses if this dotation was already posted, or if ' +
+      'posting it would exceed the depreciable base.',
+  })
+  @ApiParam({ name: 'entryId' })
+  @Post('entries/:entryId/post')
+  postDotation(@CurrentCompany() company: CompanyContext, @Param('entryId') entryId: string) {
+    return this.depreciationService.postDotation(company, entryId);
+  }
 }

@@ -274,6 +274,13 @@ model FixedAsset {
   usefulLifeYears  Int
   method           DepreciationMethod @default(LINEAR)
 
+  /// Cession (disposal). Present from the start so the model doesn't need
+  /// retrofitting once disposal is built, but no cession logic (plus/moins-
+  /// value computation, posting the disposal écriture) exists yet — both
+  /// fields stay null until that feature lands. Not exposed on any DTO yet.
+  cessionDate  DateTime?
+  cessionPrice Decimal?  @db.Decimal(15, 2)
+
   depreciationEntries DepreciationEntry[]
 
   createdAt DateTime @default(now())
