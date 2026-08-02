@@ -4,6 +4,7 @@ import { CurrentCompany } from '../../common/tenant/current-company.decorator';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { VatService } from './vat.service';
 import { CreateVatRateDto } from './dto/create-vat-rate.dto';
+import { ComputeVatDeclarationDto } from './dto/compute-vat-declaration.dto';
 
 @ApiTags('vat')
 @ApiHeader({
@@ -35,11 +36,16 @@ export class VatController {
   }
 
   @ApiOperation({
-    summary: 'Compute a CA3-style VAT declaration.',
-    description: 'Not implemented yet — returns 501. See CLAUDE.md "Monaco compliance".',
+    summary: 'Compute a CA3 (régime réel normal) declaration for a period — basic case only.',
+    description:
+      'See specs/vat-ca3-implementation-spec.md for scope. Refuses if any écriture dated in the ' +
+      'period is still a draft. Monaco is not implemented.',
   })
   @Post('declaration')
-  computeDeclaration() {
-    return this.vatService.computeDeclaration();
+  computeDeclaration(
+    @CurrentCompany() company: CompanyContext,
+    @Body() dto: ComputeVatDeclarationDto,
+  ) {
+    return this.vatService.computeDeclaration(company, dto);
   }
 }

@@ -22,7 +22,9 @@ depreciation (amortissements), VAT (TVA), and liasse fiscale.
   carry-forward écriture from its closed predecessor), company profile
   (view/edit — name, SIREN/RCI, jurisdiction, structured address), VAT
   rates management (create/list — the CA3 declaration computation itself
-  is still a stub, see below), and a combined "Comptes & journaux" screen
+  now has a real backend for the basic French case, see "VAT / CA3
+  declaration" below, but no report screen yet), and a combined "Comptes
+  & journaux" screen
   for creating journals and plain (non-tiers) PCG accounts. Immobilisations
   has its own two screens: an asset list (valeur brute / amortissements
   cumulés / VNC per asset) and a per-asset detail page showing the plan
@@ -243,6 +245,93 @@ to example; don't treat those as authoritative for column order.
   before merging — never adjust the test to match new output without
   re-checking it against `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md`.
 
+## VAT / CA3 declaration
+
+`src/modules/vat/` computes a French CA3 (régime réel normal — cerfa
+n°10963*31) for a period, basic case only. Built the same way as FEC:
+against the primary sources in `specs/`, not from memory. Full line
+spec, account-mapping table, and Monaco inventory are in
+`specs/vat-ca3-implementation-spec.md`; this section records the facts
+that must never be re-derived from memory or re-litigated without
+re-checking the source, because this exact mapping was independently
+misstated twice during development before being pinned down here.
+
+- **Account-to-ligne mapping — confirmed against the form and PCG text,
+  not assumed:**
+  - `445662` ("TVA déductible sur immobilisations", per
+    `backend/prisma/seed.ts`) → **ligne 19**, verbatim form label
+    *"Biens constituant des immobilisations"* (`specs/3310-ca3-sd_5377.pdf`,
+    Cadre B, case 0703).
+  - `445660` ("TVA déductible sur autres biens et services") → **ligne
+    20**, verbatim form label *"Autres biens et services"* (same source,
+    case 0702).
+  - Cross-checked against the PCG itself (`specs/Reglt 2014-03_Plan
+    comptable general.pdf`): account class `4456` "Taxes sur le chiffre
+    d'affaires déductibles" subdivides into `44562` "TVA sur
+    immobilisations" and `44566` "TVA sur autres biens et services" —
+    this app's `445662`/`445660` are its own 6-digit numbering, not a
+    literal extension of the PCG's 5-digit codes, but they carry the
+    same category split (immobilisations vs. autres biens et services)
+    and route the same way.
+  - Implemented in `ca3-declaration.ts`: `DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT
+    = '445662'` feeds `ligne19`; `DEDUCTIBLE_AUTRES_ACCOUNT = '445660'`
+    feeds `ligne20`. If you touch this routing, re-check it against the
+    form image (render `specs/3310-ca3-sd_5377.pdf` and read the printed
+    label next to the line number), not against this file's prose or
+    any prior conversation summary.
+- **Rate tracking**: `EcritureLigne.vatRateId` (nullable FK to
+  `VatRate`), tagged at entry time on both a collectée line (a `4457x`
+  account) and its corresponding revenue line (PCG class 7) — one
+  line-level tag drives both the collectée-by-rate and the
+  base-HT-by-rate aggregation, rather than proliferating rate
+  sub-accounts. `EntriesService` validates a tagged `vatRateId` belongs
+  to the company, same rule as every other reference. No accounts exist
+  for TVA à décaisser/crédit à reporter yet — those are declaration
+  *outputs*, not ledger reads; whether/how the result later gets posted
+  as a liquidation écriture is separate, later work (same shape as
+  `DepreciationService.generateSchedule()` vs. `postDotation()`).
+- **Four implemented rates**: 20 %, 10 %, 5,5 % (lignes 08/9B/09), plus
+  **T6 (2,1 % France continentale)** — structurally a "taux particulier"
+  on the real form, deliberately implemented anyway since it's a common
+  mainland rate (presse, médicaments), not a territorial/exotic one.
+  DOM, Corse, produits pétroliers, and the rest of "taux particuliers"
+  are not implemented — `computeCa3Declaration()` throws naming the
+  unmapped rate rather than silently dropping or misbucketing it.
+- **Ligne 25 (crédit) vs. ligne TD (due)**: `ligne25 = ligne23 − ligne16`
+  when 23 > 16; `ligneTD = ligne16 − ligne23` when 16 ≥ 23. **Not**
+  "16 − 24" — 24 is a memo sub-line of 23, never itself subtracted. Get
+  this from the rendered form (Cadre B, "TVA due ou crédit de TVA"), not
+  from recollection.
+- **Rounding**: nearest euro, fractions <0,50 dropped, ≥0,50 rounded up
+  — identical rule independently confirmed on both the French notice
+  (`specs/3310-ca3-sd_5047.pdf`) and the Monaco notice (Ordonnance
+  Souveraine n°13.844, `specs/Monaco notice TVA.pdf`). Applied only at
+  each declaration-line boundary, from full-precision internal sums —
+  never applied to a ledger value, and never derived from another
+  already-rounded output figure.
+- **Guards, all throw rather than guess**: a collectée line with no
+  `vatRateId`; a `vatRateId` resolving to a rate outside the four
+  implemented; a `4456x` account that isn't exactly `445660`/`445662`;
+  any bucket landing negative (the notice is explicit: *"Ne jamais
+  indiquer de sommes négatives"*); any draft écriture dated within the
+  requested period (mirrors `FecExportService.generate()`'s
+  draft-blocking rule).
+- **Monaco is not implemented.** `specs/Monaco notice TVA.pdf` is a
+  2-page *notice* (instructions), not the Monegasque declaration form
+  itself, and doesn't show Monaco's own Cadre B line numbers — it can't
+  confirm whether Monaco mirrors the French 08/09/9B/16/23/25 structure.
+  Confirmed convergence so far: rounding (identical wording) and filing
+  frequency (both cite the same €4 000 annual-VAT-due quarterly
+  threshold). Confirmed divergence: Monaco's notice has an entire extra
+  section (Cadre C, lignes 70-75) breaking deductible TVA down by
+  supplier origin, informational only, not present on the French CA3 at
+  all. The actual Monegasque form is needed before a Monaco pass starts.
+- **Everything else deferred**: AIC/imports beyond the informational
+  lines, groupe TVA / assujetti unique, régularisations, annexe 3310-A
+  (taxes assimilées), accise sur les énergies (a different tax bundled
+  onto the same form, not VAT at all), réel simplifié / CA12 (a
+  different form).
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
@@ -268,14 +357,19 @@ assume they're covered either:
 - **Frontend has no screen for liasse fiscale** — deliberately: see
   "Stack" above. There's nothing to build there until the backend stub
   below is implemented; the nav entry is an honest "non implémenté"
-  placeholder, not a faked screen. VAT is different: rate management is
-  real and has a real screen (`VatPage`), but the CA3 declaration
-  computation itself is still a stub — the page says so directly rather
-  than implying the whole VAT feature works.
-- **Liasse fiscale (`src/modules/liasse/`) is a stub**, and so is VAT's
-  `computeDeclaration()` specifically (`VatRate` CRUD is not — see above).
-  Both throw `NotImplementedException`, not a plausible-looking fake
-  computation. Don't build on top of them assuming real logic exists.
+  placeholder, not a faked screen. VAT is further along: rate management
+  has a real screen (`VatPage`), the CA3 computation itself now has a
+  real backend for the basic French case (see "VAT / CA3 declaration"
+  above), and the journal entry grid can tag a line with a rate — but
+  there is no declaration report screen yet, so `computeDeclaration()`
+  is only reachable via the API today.
+- **Liasse fiscale (`src/modules/liasse/`) is a stub** — throws
+  `NotImplementedException`, not a plausible-looking fake computation.
+  Don't build on top of it assuming real logic exists. VAT's
+  `computeDeclaration()` is no longer a stub (see "VAT / CA3
+  declaration" above) but only covers the basic French case — see that
+  section for exactly what's deferred (taux particuliers beyond T6,
+  AIC/imports, groupe TVA, régularisations, annexe 3310-A, Monaco).
 - **No delete/deactivate endpoint exists for `Journal`, `Account`,
   `VatRate`, or `FiscalYear`.** Each has create + list (+ close, for
   FiscalYear), nothing more — discovered directly while building their
@@ -356,6 +450,12 @@ from posted entries only — see "Known scope boundaries" above for what's
 still deferred there (cession, dégressif, the 2054/2055 report
 structure).
 
+**VAT (TVA)** — `computeDeclaration()` is no longer a stub: it computes
+a real CA3 for the basic French case (see "VAT / CA3 declaration"
+above), backed by a new `EcritureLigne.vatRateId` rate-tracking field
+and an entry-grid rate selector. No report screen yet — reachable via
+the API only.
+
 Liasse fiscale remains a stub — see "Known scope boundaries" below for
 that and the other logged gaps (`dateLettrage` not API-settable, no
 import-batch listing endpoint, no delete/deactivate on Journal/Account/
@@ -363,13 +463,10 @@ VatRate/FiscalYear, Article A47 A-1 §VIII uncross-checked).
 
 **Build order for what's next**, roughly in priority:
 
-1. **VAT (TVA)** — CA3 declaration computation, currently a stub
-   (`src/modules/vat/computeDeclaration()`). Rate management
-   (`VatRate` CRUD) is already real and has a screen; this item is
-   specifically the collected-vs-deductible-TVA computation. France
-   first; Monaco is a verified divergence layer on top, not a parallel
-   guess — see "Monaco compliance" below, nothing Monaco-specific ships
-   without a cited source.
+1. **VAT declaration report screen** — `computeDeclaration()` is only
+   reachable via the API today; it needs a screen the way FEC export
+   has one. Widening the computation itself (remaining taux particuliers,
+   AIC/imports, Monaco) is separate follow-on work, not a prerequisite.
 2. **Liasse fiscale** — currently a stub (`src/modules/liasse/`). Includes
    designing the tableau des immobilisations / tableau des amortissements
    (forms 2054/2055) against the immobilisations module's real fields,

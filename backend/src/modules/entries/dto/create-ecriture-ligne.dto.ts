@@ -40,4 +40,13 @@ export class CreateEcritureLigneDto {
   @IsOptional()
   @IsString()
   idDevise?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'VAT rate id, for lines relevant to a CA3 declaration (a TVA collectée line or its ' +
+      'corresponding revenue line at the same rate). Omit for lines with no VAT relevance.',
+  })
+  @IsOptional()
+  @IsString()
+  vatRateId?: string;
 }

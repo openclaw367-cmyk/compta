@@ -39,6 +39,7 @@ function makePrismaMock() {
       delete: jest.fn(),
     },
     ecritureLigne: { deleteMany: jest.fn() },
+    vatRate: { findMany: jest.fn().mockResolvedValue([]) },
     $transaction: jest.fn(),
   };
   prisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(prisma));
@@ -261,5 +262,38 @@ describe('EntriesService', () => {
     });
     await expect(service.reverse(company, 'ecriture-1')).rejects.toThrow(BadRequestException);
     expect(prisma.ecriture.create).not.toHaveBeenCalled();
+  });
+
+  it('creates an écriture with a vatRateId tag that belongs to the company', async () => {
+    prisma.vatRate.findMany.mockResolvedValue([{ id: 'vat-rate-20', companyId: company.companyId }]);
+    const dto = baseDto({
+      lignes: [
+        { compteId: 'account-707', credit: '100.00', vatRateId: 'vat-rate-20' },
+        { compteId: 'account-44571', credit: '20.00', vatRateId: 'vat-rate-20' },
+        { compteId: 'account-411', debit: '120.00' },
+      ],
+    });
+    await service.create(company, dto);
+    expect(prisma.vatRate.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['vat-rate-20'] }, companyId: company.companyId },
+    });
+    expect(prisma.ecriture.create).toHaveBeenCalled();
+  });
+
+  it('rejects a vatRateId that does not belong to the company', async () => {
+    prisma.vatRate.findMany.mockResolvedValue([]); // lookup scoped to this company finds nothing
+    const dto = baseDto({
+      lignes: [
+        { compteId: 'account-707', credit: '100.00', vatRateId: 'someone-elses-rate' },
+        { compteId: 'account-411', debit: '100.00' },
+      ],
+    });
+    await expect(service.create(company, dto)).rejects.toThrow(BadRequestException);
+    expect(prisma.ecriture.create).not.toHaveBeenCalled();
+  });
+
+  it('does not query vatRate at all when no line carries a vatRateId', async () => {
+    await service.create(company, baseDto());
+    expect(prisma.vatRate.findMany).not.toHaveBeenCalled();
   });
 });

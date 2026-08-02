@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import type { Account, Ecriture } from '../../api/types';
+import type { Account, Ecriture, VatRate } from '../../api/types';
 import type { CreateEcritureDto, CreateEcritureLigneDto, CreateTiersDto } from '../../api/dto';
-import { useCreateEcriture, useCreateTiers, useUpdateEcriture } from '../../api/queries';
+import { useCreateEcriture, useCreateTiers, useUpdateEcriture, useVatRates } from '../../api/queries';
 import { ApiError } from '../../api/client';
 import {
   addMoneyStrings,
@@ -22,6 +22,7 @@ interface DraftLigne {
   debit: string;
   credit: string;
   lettrage: string;
+  vatRateId: string | null;
 }
 
 let keySeq = 0;
@@ -38,7 +39,18 @@ function emptyLigne(): DraftLigne {
     debit: '',
     credit: '',
     lettrage: '',
+    vatRateId: null,
   };
+}
+
+/**
+ * A line's TVA rate only matters for a collectée line (account 4457x)
+ * or a produit line (class 7) — see computeCa3Declaration on the
+ * backend. Shown only then so the column doesn't imply every line needs
+ * a rate.
+ */
+function lineNeedsVatRate(account: Account | undefined): boolean {
+  return Boolean(account && (account.number.startsWith('4457') || account.pcgClass === 7));
 }
 
 function toIsoDate(value: string): string {
@@ -53,7 +65,12 @@ function fromExisting(ecriture: Ecriture): DraftLigne[] {
     debit: isZeroMoney(ligne.debit) ? '' : ligne.debit.replace('.', ','),
     credit: isZeroMoney(ligne.credit) ? '' : ligne.credit.replace('.', ','),
     lettrage: ligne.lettrage ?? '',
+    vatRateId: ligne.vatRateId,
   }));
+}
+
+function formatVatRateOption(rate: VatRate): string {
+  return `${rate.ratePercent.replace('.', ',')} % — ${rate.label}`;
 }
 
 function isRowEmpty(row: DraftLigne): boolean {
@@ -104,6 +121,11 @@ export function EcritureEditor({
   const createEcriture = useCreateEcriture();
   const updateEcriture = useUpdateEcriture();
   const createTiers = useCreateTiers();
+  const vatRatesQuery = useVatRates();
+  const vatRates = useMemo(
+    () => [...(vatRatesQuery.data ?? [])].sort((a, b) => b.validFrom.localeCompare(a.validFrom)),
+    [vatRatesQuery.data],
+  );
   const isSaving = createEcriture.isPending || updateEcriture.isPending;
   const readOnly = Boolean(existing?.validatedAt);
 
@@ -173,6 +195,7 @@ export function EcritureEditor({
       debit: isZeroMoney(row.debit || '0') ? undefined : normalizeMoneyInput(row.debit),
       credit: isZeroMoney(row.credit || '0') ? undefined : normalizeMoneyInput(row.credit),
       lettrage: row.lettrage.trim() === '' ? undefined : row.lettrage.trim(),
+      vatRateId: row.vatRateId ?? undefined,
     }));
     const dto: CreateEcritureDto = {
       journalId,
@@ -238,11 +261,12 @@ export function EcritureEditor({
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-              <th className="w-[30%] px-3 py-2 font-semibold">Compte</th>
-              <th className="w-[20%] px-3 py-2 font-semibold">Tiers</th>
-              <th className="w-[15%] px-3 py-2 text-right font-semibold">Débit</th>
-              <th className="w-[15%] px-3 py-2 text-right font-semibold">Crédit</th>
+              <th className="w-[26%] px-3 py-2 font-semibold">Compte</th>
+              <th className="w-[16%] px-3 py-2 font-semibold">Tiers</th>
+              <th className="w-[13%] px-3 py-2 text-right font-semibold">Débit</th>
+              <th className="w-[13%] px-3 py-2 text-right font-semibold">Crédit</th>
               <th className="w-20 px-3 py-2 font-semibold">Lettrage</th>
+              <th className="w-24 px-3 py-2 font-semibold">TVA</th>
               <th className="w-8 px-2 py-2" />
             </tr>
           </thead>
@@ -256,6 +280,7 @@ export function EcritureEditor({
               const rowAuxAccounts = mainAccount
                 ? accounts.filter((a) => a.isAuxiliary && a.parentId === mainAccount.id)
                 : [];
+              const needsVatRate = lineNeedsVatRate(mainAccount);
               return (
                 <tr key={row.key} className="border-b border-border last:border-b-0 hover:bg-bg/60">
                   <td className="p-0">
@@ -340,6 +365,27 @@ export function EcritureEditor({
                       placeholder="—"
                       className="w-full bg-transparent px-3 py-1.5 text-ink outline-none placeholder:text-ink-faint disabled:text-ink-faint"
                     />
+                  </td>
+                  <td className="p-0">
+                    {needsVatRate ? (
+                      <select
+                        disabled={readOnly}
+                        value={row.vatRateId ?? ''}
+                        onChange={(e) =>
+                          updateRow(index, { vatRateId: e.target.value === '' ? null : e.target.value })
+                        }
+                        className="w-full bg-transparent px-2 py-1.5 text-[13px] text-ink outline-none disabled:text-ink-faint"
+                      >
+                        <option value="">—</option>
+                        {vatRates.map((rate) => (
+                          <option key={rate.id} value={rate.id}>
+                            {formatVatRateOption(rate)}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="block px-2 py-1.5 text-ink-faint">—</span>
+                    )}
                   </td>
                   <td className="px-1 text-center">
                     {!readOnly && (

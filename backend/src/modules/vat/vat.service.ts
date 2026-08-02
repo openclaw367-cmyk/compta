@@ -1,8 +1,10 @@
-import { Injectable, NotFoundException, NotImplementedException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { VatRate } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { CreateVatRateDto } from './dto/create-vat-rate.dto';
+import { ComputeVatDeclarationDto } from './dto/compute-vat-declaration.dto';
+import { Ca3Declaration, computeCa3Declaration } from './ca3-declaration';
 
 @Injectable()
 export class VatService {
@@ -38,14 +40,66 @@ export class VatService {
   }
 
   /**
-   * CA3-style VAT declaration computation (collected vs. deductible TVA,
-   * per-period liability) is not implemented yet: it depends on
-   * account-level TVA tagging conventions and, for Monaco, on rules that
-   * must be verified independently rather than assumed identical to
-   * France — see CLAUDE.md "Monaco compliance". Fails loudly rather than
-   * returning a plausible-looking but unverified number.
+   * French CA3 (régime réel normal), basic-case only — see
+   * specs/vat-ca3-implementation-spec.md for the line spec, account
+   * mapping, and exactly what's implemented vs. deferred. Monaco is not
+   * implemented — see CLAUDE.md "Monaco compliance" and the spec's
+   * Monaco inventory; jurisdiction is not branched on here because only
+   * the FR path exists so far.
+   *
+   * Only validated écritures are read, and the whole computation refuses
+   * if any écriture in the period is still a draft — same rule and same
+   * reasoning as FecExportService.generate(): a declaration computed
+   * around missing drafts would be silently wrong, not just incomplete.
+   * The actual arithmetic lives in the pure, independently-tested
+   * computeCa3Declaration() — this method only fetches and delegates.
    */
-  computeDeclaration(): never {
-    throw new NotImplementedException('VAT declaration computation is not implemented yet.');
+  async computeDeclaration(
+    company: CompanyContext,
+    dto: ComputeVatDeclarationDto,
+  ): Promise<Ca3Declaration> {
+    const periodStart = new Date(dto.periodStart);
+    const periodEnd = new Date(dto.periodEnd);
+
+    const draftCount = await this.prisma.ecriture.count({
+      where: {
+        companyId: company.companyId,
+        ecritureDate: { gte: periodStart, lte: periodEnd },
+        validatedAt: null,
+      },
+    });
+    if (draftCount > 0) {
+      throw new ConflictException(
+        `Cannot compute the VAT declaration: ${draftCount} écriture(s) dated in this period are ` +
+          'still unvalidated (draft). Validate them first.',
+      );
+    }
+
+    const [lignes, vatRates] = await Promise.all([
+      this.prisma.ecritureLigne.findMany({
+        where: {
+          companyId: company.companyId,
+          ecriture: {
+            ecritureDate: { gte: periodStart, lte: periodEnd },
+            validatedAt: { not: null },
+          },
+        },
+        include: { compte: true },
+      }),
+      this.prisma.vatRate.findMany({ where: { companyId: company.companyId } }),
+    ]);
+
+    return computeCa3Declaration(
+      lignes.map((ligne) => ({
+        compteNumber: ligne.compte.number,
+        pcgClass: ligne.compte.pcgClass,
+        debit: ligne.debit,
+        credit: ligne.credit,
+        vatRateId: ligne.vatRateId,
+      })),
+      vatRates.map((rate) => ({ id: rate.id, ratePercent: rate.ratePercent })),
+      dto.periodStart,
+      dto.periodEnd,
+    );
   }
 }

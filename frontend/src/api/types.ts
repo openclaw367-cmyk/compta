@@ -75,6 +75,7 @@ export interface EcritureLigne {
   dateLettrage: string | null;
   montantDevise: string | null;
   idDevise: string | null;
+  vatRateId: string | null;
 }
 
 export interface Ecriture {

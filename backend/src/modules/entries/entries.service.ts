@@ -24,6 +24,7 @@ export class EntriesService {
   async create(company: CompanyContext, dto: CreateEcritureDto): Promise<Ecriture> {
     const lignesData = this.buildBalancedLignes(company, dto.lignes);
     await this.assertReferencesBelongToCompany(company, dto.journalId, dto.fiscalYearId);
+    await this.assertVatRatesBelongToCompany(company, dto.lignes);
 
     return this.prisma.ecriture.create({
       data: {
@@ -66,6 +67,7 @@ export class EntriesService {
 
     const lignesData = this.buildBalancedLignes(company, dto.lignes);
     await this.assertReferencesBelongToCompany(company, dto.journalId, dto.fiscalYearId);
+    await this.assertVatRatesBelongToCompany(company, dto.lignes);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.ecritureLigne.deleteMany({ where: { ecritureId: id } });
@@ -175,6 +177,7 @@ export class EntriesService {
             credit: ligne.debit,
             idDevise: ligne.idDevise ?? undefined,
             montantDevise: ligne.montantDevise ?? undefined,
+            vatRateId: ligne.vatRateId ?? undefined,
           })),
         },
       },
@@ -219,6 +222,7 @@ export class EntriesService {
           ? Money.fromString(ligne.montantDevise).toDecimal()
           : undefined,
         idDevise: ligne.idDevise,
+        vatRateId: ligne.vatRateId,
       };
     });
 
@@ -249,5 +253,30 @@ export class EntriesService {
       throw new NotFoundException(`Fiscal year ${fiscalYearId} not found`);
     }
     assertFiscalYearOpen(fiscalYear);
+  }
+
+  /**
+   * A tagged vatRateId must belong to this company — same multi-tenant
+   * scoping rule as every other reference, see CLAUDE.md. Cheap to check
+   * since most lines won't carry one.
+   */
+  private async assertVatRatesBelongToCompany(
+    company: CompanyContext,
+    lignes: CreateEcritureLigneDto[],
+  ): Promise<void> {
+    const vatRateIds = [
+      ...new Set(lignes.map((l) => l.vatRateId).filter((id): id is string => Boolean(id))),
+    ];
+    if (vatRateIds.length === 0) {
+      return;
+    }
+    const rates = await this.prisma.vatRate.findMany({
+      where: { id: { in: vatRateIds }, companyId: company.companyId },
+    });
+    if (rates.length !== vatRateIds.length) {
+      throw new BadRequestException(
+        'One or more VAT rate references do not belong to this company.',
+      );
+    }
   }
 }

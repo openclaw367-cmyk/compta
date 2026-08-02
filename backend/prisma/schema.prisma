@@ -246,6 +246,18 @@ model EcritureLigne {
   montantDevise Decimal? @db.Decimal(15, 2)
   idDevise      String?
 
+  /// The rate this line is taxed/taxable at, for VAT declaration purposes
+  /// (see src/modules/vat/ca3-declaration.ts). Tags both the TVA line
+  /// itself (a 4457x collectée account) and the corresponding revenue
+  /// line at the same rate — one line-level tag drives both the
+  /// collectée-by-rate and the base-HT-by-rate aggregation, rather than
+  /// proliferating rate sub-accounts. Null on lines with no VAT relevance
+  /// (bank, tiers, ...) and on historical lines predating this field —
+  /// computeDeclaration() refuses to compute a period containing an
+  /// untagged line on a VAT account rather than silently omitting it.
+  vatRateId String?
+  vatRate   VatRate? @relation(fields: [vatRateId], references: [id])
+
   createdAt DateTime @default(now())
 
   @@index([companyId, ecritureId])
@@ -322,6 +334,8 @@ model VatRate {
   ratePercent Decimal   @db.Decimal(5, 2)
   validFrom   DateTime
   validTo     DateTime?
+
+  ecritureLignes EcritureLigne[]
 
   @@index([companyId])
 }
