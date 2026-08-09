@@ -374,10 +374,69 @@ export interface Tableau2055 {
   totalGeneral: string;
 }
 
+/** One 2056 row — see tableau-2056.ts's doc comment for how début/dotations/reprises are derived (no dedicated domain model, split by à-nouveau vs. non-à-nouveau journal lines). */
+export interface Tableau2056Ligne {
+  code: string;
+  label: string;
+  montantDebut: string;
+  dotations: string;
+  reprises: string;
+  montantFin: string;
+}
+
+/** Response shape for the 2056 half of POST /liasse/generate — see tableau-2056.ts on the backend. */
+export interface Tableau2056 {
+  lignes: Tableau2056Ligne[];
+  /** TOTAL I (fin) — provisions réglementées. */
+  totalReglementees: string;
+  /** TOTAL II (fin) — provisions pour risques et charges. */
+  totalRisquesCharges: string;
+  /** TOTAL III (fin) — provisions pour dépréciation. */
+  totalDepreciation: string;
+  /** TOTAL GÉNÉRAL (I+II+III), fin. */
+  totalGeneral: string;
+  /** UE/UF, UG/UH, UJ/UK — dont dotations/reprises par nature. Never computed, see tableau-2056.ts's doc comment. */
+  dontDotationsReprisesParNature: null;
+}
+
+/** Cadre A row shape (valeur résiduelle des éléments cédés) — defined for forward-compatibility, never populated until cession support exists. */
+export interface Tableau2059ACadreARow {
+  accountNumber: string;
+  valeurOrigine: string;
+  amortissements: string;
+  valeurResiduelle: string;
+}
+
+/** Cadre B row shape (plus-values/moins-values) — same forward-compatibility note as Cadre A. */
+export interface Tableau2059ACadreBRow {
+  accountNumber: string;
+  prixDeVente: string;
+  plusOuMoinsValue: string;
+  qualification: 'COURT_TERME' | 'LONG_TERME';
+}
+
+/**
+ * Response shape for the 2059-A half of POST /liasse/generate — see
+ * tableau-2059.ts on the backend. Structurally empty this pass: cession
+ * logic doesn't exist yet, so cadreA/cadreB are always [] and both
+ * totals are always "0.00" — not a partial table, see `note`.
+ */
+export interface Tableau2059A {
+  cadreA: Tableau2059ACadreARow[];
+  cadreB: Tableau2059ACadreBRow[];
+  /** CADRE A total — plus/moins-value nette à court terme. Always "0.00" this pass. */
+  totalCourtTerme: string;
+  /** CADRE B total — plus/moins-value nette à long terme. Always "0.00" this pass. */
+  totalLongTerme: string;
+  note: string;
+}
+
 /** Response for POST /liasse/generate — régime réel normal (2050-series) only, see LiasseService.generate. */
 export interface LiasseResult {
   bilan: Bilan2050;
   compteResultat: CompteResultat2052_2053;
   tableau2054: Tableau2054;
   tableau2055: Tableau2055;
+  tableau2056: Tableau2056;
+  tableau2059: Tableau2059A;
 }

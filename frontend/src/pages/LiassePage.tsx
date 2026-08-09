@@ -10,6 +10,9 @@ import type {
   Tableau2054Ligne,
   Tableau2055,
   Tableau2055Ligne,
+  Tableau2056,
+  Tableau2056Ligne,
+  Tableau2059A,
 } from '../api/types';
 import { ApiError } from '../api/client';
 import { addMoneyStrings, formatMoneyFr, subtractMoneyStrings } from '../lib/money';
@@ -89,6 +92,40 @@ const TABLEAU_2055_SECTIONS: { title: string; codes: string[] }[] = [
 /** Every bilan Actif line that's an immobilisation — see liasse-articulation.ts's IMMOBILISATION_BILAN_CODES on the backend (kept in sync by hand, same list). */
 const IMMOBILISATION_BILAN_CODES = [
   'AB', 'CX', 'AF', 'AH', 'AJ', 'AL', 'AN', 'AP', 'AR', 'AT', 'AV', 'CS', 'CU', 'BB', 'BD', 'BF', 'BH',
+];
+
+/**
+ * 2056 row grouping — mirrors tableau-2056.ts's TOTAL_I_CODES/
+ * TOTAL_II_CODES/TOTAL_III_CODES on the backend (see
+ * specs/liasse-2056-2059-implementation-spec.md §2), in the CERFA
+ * form's own section order (provisions réglementées, provisions pour
+ * risques et charges, provisions pour dépréciation).
+ */
+const TABLEAU_2056_SECTIONS: { title: string; totalCode: 'totalReglementees' | 'totalRisquesCharges' | 'totalDepreciation'; totalLabel: string; codes: string[] }[] = [
+  {
+    title: 'Provisions réglementées',
+    totalCode: 'totalReglementees',
+    totalLabel: 'TOTAL I',
+    codes: ['RECONSTITUTION_GISEMENTS', 'INVESTISSEMENT', 'HAUSSE_PRIX', 'AMORTISSEMENTS_DEROGATOIRES', 'AUTRES_REGLEMENTEES'],
+  },
+  {
+    title: 'Provisions pour risques et charges',
+    totalCode: 'totalRisquesCharges',
+    totalLabel: 'TOTAL II',
+    codes: [
+      'LITIGES', 'GARANTIES_CLIENTS', 'AMENDES_PENALITES', 'PERTES_CHANGE', 'PENSIONS',
+      'IMPOTS', 'RENOUVELLEMENT_IMMOBILISATIONS', 'GROS_ENTRETIEN', 'AUTRES_RISQUES_CHARGES',
+    ],
+  },
+  {
+    title: 'Provisions pour dépréciation',
+    totalCode: 'totalDepreciation',
+    totalLabel: 'TOTAL III',
+    codes: [
+      'DEPREC_INCORPORELLES', 'DEPREC_CORPORELLES', 'DEPREC_TITRES_PARTICIPATION',
+      'DEPREC_AUTRES_IMMO_FINANCIERES', 'DEPREC_STOCKS_EN_COURS', 'DEPREC_COMPTES_CLIENTS', 'DEPREC_AUTRES',
+    ],
+  },
 ];
 
 export function LiassePage() {
@@ -223,6 +260,8 @@ export function LiassePage() {
           />
           <Tableau2054Section tableau2054={result.tableau2054} />
           <Tableau2055Section tableau2055={result.tableau2055} />
+          <Tableau2056Section tableau2056={result.tableau2056} />
+          <Tableau2059Section tableau2059={result.tableau2059} />
         </>
       )}
     </div>
@@ -787,6 +826,152 @@ function Tableau2055Row({ ligne }: { ligne: Tableau2055Ligne }) {
         {formatMoneyFr(ligne.montantFin)}
       </td>
     </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 2056 (Provisions inscrites au bilan) — movement table, same shape as
+// 2054/2055 (début/dotations/reprises/fin) but with no dedicated domain
+// model behind it: début/dotations/reprises are derived from the ledger
+// by journal type (à-nouveau lines = début, everything else = movement)
+// rather than a FixedAsset-equivalent — see tableau-2056.ts. No client-
+// side articulation banner here (unlike 2054/2055): its tie-out compares
+// against a raw trial-balance sum the API never serializes, so there's
+// nothing to recompute in the browser — the note below states that the
+// check runs, and passed, server-side.
+// ---------------------------------------------------------------------------
+
+function Tableau2056Section({ tableau2056 }: { tableau2056: Tableau2056 }) {
+  const byCode = new Map(tableau2056.lignes.map((l) => [l.code, l]));
+
+  return (
+    <section className="flex flex-col gap-4">
+      <div>
+        <h2 className="text-[14px] font-semibold text-ink">2056 — Provisions</h2>
+        <p className="mt-0.5 text-[12.5px] text-ink-muted">
+          Mouvements de l'exercice sur les provisions inscrites au bilan.
+        </p>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <table className="w-full border-collapse text-[13px]">
+          <thead>
+            <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              <th className="px-4 py-2.5 font-semibold">Nature des provisions</th>
+              <th className="px-4 py-2.5 text-right font-semibold">Début d'exercice</th>
+              <th className="px-4 py-2.5 text-right font-semibold">Dotations</th>
+              <th className="px-4 py-2.5 text-right font-semibold">Reprises</th>
+              <th className="px-4 py-2.5 text-right font-semibold">Fin d'exercice</th>
+            </tr>
+          </thead>
+          <tbody>
+            {TABLEAU_2056_SECTIONS.map((section) => (
+              <SectionRows key={section.title} title={section.title} colSpan={5}>
+                {section.codes.map((code) => {
+                  const ligne = byCode.get(code);
+                  if (!ligne) return null;
+                  return <Tableau2056Row key={code} ligne={ligne} />;
+                })}
+                <tr className="border-b border-border bg-bg">
+                  <td className="px-4 py-2.5 font-semibold text-ink">{section.totalLabel}</td>
+                  <td className="px-4 py-2.5" />
+                  <td className="px-4 py-2.5" />
+                  <td className="px-4 py-2.5" />
+                  <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
+                    {formatMoneyFr(tableau2056[section.totalCode])}
+                  </td>
+                </tr>
+              </SectionRows>
+            ))}
+            <tr className="bg-bg">
+              <td className="px-4 py-2.5 font-semibold text-ink">TOTAL GÉNÉRAL (I + II + III)</td>
+              <td className="px-4 py-2.5" />
+              <td className="px-4 py-2.5" />
+              <td className="px-4 py-2.5" />
+              <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
+                {formatMoneyFr(tableau2056.totalGeneral)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-[12px] text-ink-faint">
+        La ventilation « dont dotations et reprises d'exploitation / financières / exceptionnelles »
+        du formulaire n'est pas calculée : elle nécessiterait de retrouver, pour chaque mouvement, le
+        compte de charge ou de produit utilisé en contrepartie — une jointure par écriture que le
+        moteur ne fait pas aujourd'hui. La cohérence de ce tableau avec le bilan est vérifiée côté
+        serveur à chaque calcul (voir CLAUDE.md, « Liasse fiscale annexes 2056/2059 »).
+      </p>
+    </section>
+  );
+}
+
+function Tableau2056Row({ ligne }: { ligne: Tableau2056Ligne }) {
+  return (
+    <tr className="border-b border-border last:border-b-0">
+      <td className="px-4 py-2 text-ink">{ligne.label}</td>
+      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+        {formatMoneyFr(ligne.montantDebut)}
+      </td>
+      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+        {formatMoneyFr(ligne.dotations)}
+      </td>
+      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+        {formatMoneyFr(ligne.reprises)}
+      </td>
+      <td className="px-4 py-2 text-right tabular-nums text-ink">
+        {formatMoneyFr(ligne.montantFin)}
+      </td>
+    </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 2059-A (Détermination des plus et moins-values) — structurally empty,
+// not a table with empty rows: every line on the real form is a
+// per-disposal line item, and no cession has ever been posted through
+// this app (see tableau-2059.ts). Rendered as a status card rather than
+// a table with nothing in it.
+// ---------------------------------------------------------------------------
+
+function Tableau2059Section({ tableau2059 }: { tableau2059: Tableau2059A }) {
+  return (
+    <section className="flex flex-col gap-4">
+      <div>
+        <h2 className="text-[14px] font-semibold text-ink">2059-A — Plus et moins-values</h2>
+        <p className="mt-0.5 text-[12.5px] text-ink-muted">
+          Détermination des plus et moins-values sur cessions d'éléments d'actif.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
+        <p className="text-[13px] text-ink-muted">{tableau2059.note}</p>
+        <div className="flex flex-wrap gap-8 border-t border-border pt-4">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              Plus/moins-value nette à court terme
+            </div>
+            <div className="mt-1 text-[16px] font-semibold tabular-nums text-ink">
+              {formatMoneyFr(tableau2059.totalCourtTerme)}
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              Plus/moins-value nette à long terme
+            </div>
+            <div className="mt-1 text-[16px] font-semibold tabular-nums text-ink">
+              {formatMoneyFr(tableau2059.totalLongTerme)}
+            </div>
+          </div>
+        </div>
+        <p className="text-[12px] text-ink-faint">
+          Cohérence avec le compte de résultat (lignes 775/675) vérifiée côté serveur à chaque
+          calcul — si une cession était enregistrée sans être reflétée ici, ou l'inverse, le calcul
+          échouerait plutôt que d'afficher un tableau silencieusement faux.
+        </p>
+      </div>
+    </section>
   );
 }
 
