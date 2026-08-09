@@ -1,15 +1,46 @@
 import { ConflictException } from '@nestjs/common';
 import { Money } from '../../common/decimal';
 import { Bilan2050 } from './bilan-2050';
+import { Tableau2054 } from './tableau-2054';
+import { Tableau2055 } from './tableau-2055';
 
 /**
- * The oracle — see specs/liasse-2050-implementation-spec.md §5. Only two
- * of the originally-considered checks remain genuinely independent
- * cross-checks after the DI correction (§5.2): Actif = Passif (this
- * module) and the VNC tie-out (also this module). Everything else
- * (subtotal formulas, HN feeding DI) is enforced by construction inside
- * the compute functions themselves, not re-verified here.
+ * The oracle — see specs/liasse-2050-implementation-spec.md §5 and
+ * specs/liasse-2054-2055-implementation-spec.md §6. Only three checks
+ * remain genuinely independent cross-checks: Actif = Passif, the VNC
+ * tie-out, and (once 2054/2055 are wired into LiasseService.generate())
+ * the 2054/2055 movement-table tie-out. Everything else (subtotal
+ * formulas, HN feeding DI) is enforced by construction inside the
+ * compute functions themselves, not re-verified here.
  */
+
+/**
+ * Every bilan Actif line that's an immobilisation (brut/amort pair
+ * sourced from class 2, before Stocks/Créances/Disponibilités start) —
+ * see bilan-2050.ts's ACTIF_ROWS. Used to sum "total immobilisations
+ * net" for the 2054/2055 tie-out below, since Bilan2050 doesn't expose
+ * that subtotal directly (only the grand Actif total, which also
+ * includes non-immobilisation lines).
+ */
+const IMMOBILISATION_BILAN_CODES = [
+  'AB',
+  'CX',
+  'AF',
+  'AH',
+  'AJ',
+  'AL',
+  'AN',
+  'AP',
+  'AR',
+  'AT',
+  'AV',
+  'CS',
+  'CU',
+  'BB',
+  'BD',
+  'BF',
+  'BH',
+];
 
 export interface VncCheckLine {
   /** The bilan Actif line code this group of FixedAssets rolls up to (e.g. "AP" for Constructions). */
@@ -80,4 +111,41 @@ export function assertLiasseArticulation(input: {
 }): void {
   assertBilanBalances(input.bilan);
   assertVncTiesToLedger(input.bilan, input.vncByLine);
+}
+
+/**
+ * The annexe's version of Actif=Passif: 2054's ending brut minus 2055's
+ * ending amortissements, summed across every category (incorporelles +
+ * corporelles + financières), must equal the bilan's total
+ * immobilisations net. One aggregate identity, not a per-line check —
+ * 2054/2055 group several categories differently than bilan-2050.ts
+ * does (see specs/liasse-2054-2055-implementation-spec.md §3c/§3d), so
+ * comparing per-bilan-line would mean re-deriving that same grouping
+ * logic a second time for no extra rigor. This doesn't need its own
+ * separate tie to the immobilisations module's VNC either: VNC already
+ * ties to the bilan via assertVncTiesToLedger above, so tying 2054/2055
+ * to that same bilan figure closes the loop transitively.
+ */
+export function assertTableauxTieToBilan(input: {
+  bilan: Bilan2050;
+  tableau2054: Tableau2054;
+  tableau2055: Tableau2055;
+}): void {
+  const bilanImmobilisationsNet = input.bilan.actif
+    .filter((l) => IMMOBILISATION_BILAN_CODES.includes(l.code))
+    .reduce((sum, l) => sum.plus(Money.fromString(l.net)), Money.zero());
+
+  const tableauxNet = Money.fromString(input.tableau2054.totalGeneral).minus(
+    Money.fromString(input.tableau2055.totalGeneral),
+  );
+
+  if (!bilanImmobilisationsNet.equals(tableauxNet)) {
+    throw new ConflictException(
+      `2054 (${input.tableau2054.totalGeneral}) − 2055 (${input.tableau2055.totalGeneral}) = ` +
+        `${tableauxNet.toApiString()}, which does not equal the bilan's total immobilisations net ` +
+        `(${bilanImmobilisationsNet.toApiString()}). This means the 2054/2055 movement data and the ` +
+        "ledger have drifted apart — an acquisition or dotation didn't post consistently on both " +
+        'sides.',
+    );
+  }
 }
