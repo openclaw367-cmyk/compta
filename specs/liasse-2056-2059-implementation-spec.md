@@ -3,11 +3,11 @@
 Companion to `specs/liasse-2050-implementation-spec.md` and
 `specs/liasse-2054-2055-implementation-spec.md`, same discipline: built
 against the actual forms in `specs/2050-liasse_5320.pdf` (a bundled
-2050-series PDF; `specs/2050-liasse_5320.txt` is its `pdftotext -layout`
-extraction) and the PCG account nomenclature in
-`specs/Reglt 2014-03_Plan comptable general.pdf`
-(`specs/pcg-reglt.txt`), never from memory. 2058-A/2058-B (résultat
-fiscal) are explicitly out of scope — judgment-heavy, a separate pass.
+2050-series PDF — 2056 at its page for DGFiP N° 2056-SD, 2057 at N°
+2057-SD, 2059-A at N° 2059-A-SD) and the PCG account nomenclature in
+`specs/Reglt 2014-03_Plan comptable general.pdf`, never from memory.
+2058-A/2058-B (résultat fiscal) are explicitly out of scope —
+judgment-heavy, a separate pass.
 
 ## §1 — Status
 

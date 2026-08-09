@@ -5,11 +5,34 @@ import { LiasseLigne, buildTrialBalance } from './trial-balance-engine';
 import { ORACLE_BILAN_LIGNES, ORACLE_HN } from './liasse-oracle-fixture';
 import { ProvisionMovementLigne, computeTableau2056 } from './tableau-2056';
 import { ORACLE_2056_LIGNES } from './tableau-2056-oracle-fixture';
+import { computeTableau2059A } from './tableau-2059';
+import { CompteResultat2052_2053, CompteResultatLigne } from './compte-resultat-2052-2053';
 import {
   VncCheckLine,
   assertLiasseArticulation,
   assertTableau2056TiesToBilan,
+  assertTableau2059TiesToCompteResultat,
 } from './liasse-articulation';
+
+/** Minimal fake compte de résultat — only `lignes` is read by assertTableau2059TiesToCompteResultat. */
+function fakeCompteResultat(lignes: CompteResultatLigne[]): CompteResultat2052_2053 {
+  return {
+    lignes,
+    totalProduitsExploitation: '0.00',
+    totalChargesExploitation: '0.00',
+    resultatExploitation: '0.00',
+    beneficeAttribueOuPerteTransferee: null,
+    perteSupporteeOuBeneficeTransfere: null,
+    totalProduitsFinanciers: '0.00',
+    totalChargesFinancieres: '0.00',
+    resultatFinancier: '0.00',
+    resultatCourantAvantImpots: '0.00',
+    resultatExceptionnel: '0.00',
+    totalProduits: '0.00',
+    totalCharges: '0.00',
+    beneficeOuPerte: '0.00',
+  };
+}
 
 /**
  * ORACLE_2056_LIGNES as raw ledger lines, for a trial balance that
@@ -174,5 +197,41 @@ describe('assertTableau2056TiesToBilan', () => {
     ]);
     expect(() => assertTableau2056TiesToBilan({ trialBalance, tableau2056 })).not.toThrow();
     expect(tableau2056.totalGeneral).toBe('5000.00');
+  });
+});
+
+describe('assertTableau2059TiesToCompteResultat', () => {
+  it('passes when both sides are 0,00 (no cessions posted, no cession écritures either)', () => {
+    const compteResultat = fakeCompteResultat([
+      { code: 'F1', label: '', montant: '0.00' },
+      { code: 'G2', label: '', montant: '0.00' },
+      { code: 'HD', label: '', montant: '0.00' },
+      { code: 'G1', label: '', montant: '0.00' },
+      { code: 'G3', label: '', montant: '0.00' },
+      { code: 'HH', label: '', montant: '0.00' },
+    ]);
+    const tableau2059 = computeTableau2059A([]);
+    expect(() =>
+      assertTableau2059TiesToCompteResultat({ compteResultat, tableau2059 }),
+    ).not.toThrow();
+  });
+
+  it('tolerates missing cession lines (a compte de résultat where none of those accounts were ever used)', () => {
+    const compteResultat = fakeCompteResultat([{ code: 'FC', label: '', montant: '1000.00' }]);
+    const tableau2059 = computeTableau2059A([]);
+    expect(() =>
+      assertTableau2059TiesToCompteResultat({ compteResultat, tableau2059 }),
+    ).not.toThrow();
+  });
+
+  it('throws when a cession écriture was posted (F1/775) with no matching 2059-A entry — an orphaned cession', () => {
+    const compteResultat = fakeCompteResultat([
+      { code: 'F1', label: '', montant: '5000.00' },
+      { code: 'G1', label: '', montant: '0.00' },
+    ]);
+    const tableau2059 = computeTableau2059A([]); // no cessionDate anywhere → still the empty table
+    expect(() => assertTableau2059TiesToCompteResultat({ compteResultat, tableau2059 })).toThrow(
+      /does not equal the compte de résultat's net cession result/,
+    );
   });
 });

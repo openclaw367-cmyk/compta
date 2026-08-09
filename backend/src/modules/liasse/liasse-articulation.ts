@@ -4,6 +4,8 @@ import { Bilan2050 } from './bilan-2050';
 import { Tableau2054 } from './tableau-2054';
 import { Tableau2055 } from './tableau-2055';
 import { Tableau2056 } from './tableau-2056';
+import { Tableau2059A } from './tableau-2059';
+import { CompteResultat2052_2053 } from './compte-resultat-2052-2053';
 import { TrialBalanceAccount } from './trial-balance-engine';
 import { PROVISION_ACCOUNT_CLASS_PREFIXES } from './provision-categories';
 
@@ -192,4 +194,48 @@ export function assertTableau2056TiesToBilan(input: {
   tableau2056: Tableau2056;
 }): void {
   assertTableau2056TiesToTrialBalance(input.trialBalance, input.tableau2056);
+}
+
+/**
+ * Every compte-de-résultat line 775/675 (produits/charges des cessions
+ * d'éléments d'actif) routes to — see CLAUDE.md's "775/675 splits
+ * across three different compte-de-résultat sections by sub-account".
+ */
+const CESSION_PRODUIT_CODES = ['F1', 'G2', 'HD'];
+const CESSION_CHARGE_CODES = ['G1', 'G3', 'HH'];
+
+/**
+ * 2059-A's own tie-out: CADRE A + CADRE B (always 0,00 while the guard
+ * in computeTableau2059A holds — see that module's doc comment) must
+ * equal the compte de résultat's own net cession result (775 produits
+ * minus 675 charges). Both sides are 0,00 today for the same underlying
+ * reason (no cession logic exists), but this is a real, independent
+ * check: it would catch a manually-posted 775/675 écriture with no
+ * corresponding FixedAsset.cessionDate (or vice versa) the same way
+ * the 2054/2055 tie-out catches an "orphaned immobilisation".
+ */
+export function assertTableau2059TiesToCompteResultat(input: {
+  compteResultat: CompteResultat2052_2053;
+  tableau2059: Tableau2059A;
+}): void {
+  const montantByCode = new Map(input.compteResultat.lignes.map((l) => [l.code, l.montant]));
+  const sum = (codes: string[]) =>
+    codes.reduce(
+      (total, code) => total.plus(Money.fromString(montantByCode.get(code) ?? '0.00')),
+      Money.zero(),
+    );
+
+  const netCession = sum(CESSION_PRODUIT_CODES).minus(sum(CESSION_CHARGE_CODES));
+  const tableau2059Net = Money.fromString(input.tableau2059.totalCourtTerme).plus(
+    Money.fromString(input.tableau2059.totalLongTerme),
+  );
+
+  if (!netCession.equals(tableau2059Net)) {
+    throw new ConflictException(
+      `2059-A's CADRE A + CADRE B (${tableau2059Net.toApiString()}) does not equal the compte de ` +
+        `résultat's net cession result (${netCession.toApiString()}, from lignes F1/G2/HD minus ` +
+        'G1/G3/HH). This means a cession was posted to the ledger without going through 2059-A, or ' +
+        'vice versa.',
+    );
+  }
 }

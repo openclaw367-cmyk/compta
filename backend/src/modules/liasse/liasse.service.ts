@@ -20,6 +20,7 @@ import {
   assertLiasseArticulation,
   assertTableauxTieToBilan,
   assertTableau2056TiesToBilan,
+  assertTableau2059TiesToCompteResultat,
 } from './liasse-articulation';
 import { ImmobilisationMovementAsset, Tableau2054, computeTableau2054 } from './tableau-2054';
 import {
@@ -29,6 +30,7 @@ import {
 } from './tableau-2055';
 import { ProvisionMovementLigne, Tableau2056, computeTableau2056 } from './tableau-2056';
 import { PROVISION_ACCOUNT_CLASS_PREFIXES } from './provision-categories';
+import { Tableau2059A, computeTableau2059A } from './tableau-2059';
 
 export interface LiasseResult {
   bilan: Bilan2050;
@@ -36,6 +38,7 @@ export interface LiasseResult {
   tableau2054: Tableau2054;
   tableau2055: Tableau2055;
   tableau2056: Tableau2056;
+  tableau2059: Tableau2059A;
 }
 
 /**
@@ -159,7 +162,16 @@ export class LiasseService {
     const tableau2056 = computeTableau2056(provisionLignes);
     assertTableau2056TiesToBilan({ trialBalance: bilanAccounts, tableau2056 });
 
-    return { bilan, compteResultat, tableau2054, tableau2055, tableau2056 };
+    const tableau2059 = computeTableau2059A(
+      assets.map((asset) => ({
+        id: asset.id,
+        accountNumber: asset.account.number,
+        cessionDate: asset.cessionDate,
+      })),
+    );
+    assertTableau2059TiesToCompteResultat({ compteResultat, tableau2059 });
+
+    return { bilan, compteResultat, tableau2054, tableau2055, tableau2056, tableau2059 };
   }
 
   /**
