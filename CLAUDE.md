@@ -30,11 +30,13 @@ depreciation (amortissements), VAT (TVA), and liasse fiscale.
   cumulés / VNC per asset) and a per-asset detail page showing the plan
   d'amortissement, where a "Comptabiliser la dotation" action posts each
   period's dotation as a real validated écriture. Liasse fiscale now has
-  a real screen too (`LiassePage`) — bilan (2050/2051) and compte de
-  résultat (2052/2053), régime réel normal only, read-only report, see
-  "Liasse fiscale / bilan & compte de résultat" below. The 2054–2059
-  annex forms and the régime réel simplifié (2033-series) variant remain
-  honest "non implémenté" territory, matching the backend's own scope.
+  a real screen too (`LiassePage`) — bilan (2050/2051), compte de
+  résultat (2052/2053), and the 2054/2055 movement annexes
+  (immobilisations/amortissements), régime réel normal only, read-only
+  report, see "Liasse fiscale / bilan & compte de résultat" below. The
+  2056–2059 annex forms and the régime réel simplifié (2033-series)
+  variant remain honest "non implémenté" territory, matching the
+  backend's own scope.
 - **Package manager**: npm.
 - **Testing**: Jest (unit + e2e, NestJS default).
 - **Validation**: `class-validator` / `class-transformer` on all DTOs.
@@ -546,14 +548,28 @@ facts that must never be re-derived from memory.
   totals rather than just asserting equality. Same drafts-block guard
   as FEC/CA3 (client-side, names the count, mirrors the backend's
   refusal rather than letting the button hit a 409).
-- **Remaining liasse work, roughly in order**: the 2054–2059 annex
-  forms (2054/2055 — tableau des immobilisations / amortissements —
-  are the most scaffolded, since the immobilisations module's real
-  fields already exist; 2056–2059 not started at all), then the
-  2033-series (régime réel simplifié) mapping as a second pass over
-  the same shared engine — the concrete test of whether the engine
-  shape actually supports a second mapping layer the way it was
-  designed to.
+- **2054 (immobilisations) and 2055 (amortissements) are now built
+  too** (as of 2026-08-09) — see
+  `specs/liasse-2054-2055-implementation-spec.md`. Movement tables, not
+  closing-balance tables: `immobilisation-categories.ts` resolves each
+  account to a finer category than `bilan-2050.ts`'s coarser lines via
+  longest-prefix-match (a bare `213` defaults to "sur sol propre", a
+  documented convention, not a silent guess; a specific `2135`/`214`
+  always wins over that default), and `tableau-2054.ts`/
+  `tableau-2055.ts` split "début" from "this year's movement" using
+  `FixedAsset.acquisitionDate` and `DepreciationEntry.fiscalYearId`
+  respectively — both already shaped for exactly this. Cessions,
+  virements de poste à poste, and 2055's Cadre B are all genuinely
+  N/A/zero, not faked — see "Known scope boundaries" below.
+  `assertTableauxTieToBilan()` is the annexe's version of Actif=Passif:
+  one aggregate identity (2054 fin − 2055 fin = bilan's total
+  immobilisations net), verified on a hand-traced, multi-asset,
+  multi-year oracle. `LiassePage` renders both tables in form order
+  with a matching articulation banner. Remaining liasse work: 2056–2059
+  (not started at all), then the 2033-series (régime réel simplifié)
+  mapping as a second pass over the same shared engine — the concrete
+  test of whether the engine shape actually supports a second mapping
+  layer the way it was designed to.
 
 ## Known scope boundaries
 
@@ -577,14 +593,16 @@ assume they're covered either:
   filing's volume, edge-case account numbers, or a Monaco company) — treat
   each materially different dataset as needing its own run, not covered
   by this one.
-- **Liasse fiscale covers its two foundational forms only — the rest
-  is still a stub.** `computeBilan2050()`/`computeCompteResultat2052_2053()`
-  are real (see "Liasse fiscale / bilan & compte de résultat" above),
-  but `LiasseService.generate()` only ever produces those two forms:
-  no 2054–2059 annexes, and `REEL_SIMPLIFIE` companies are refused
-  outright (`NotImplementedException`), not handed a wrong liasse.
-  `LiassePage` renders only what the backend produces — don't assume
-  a fuller liasse exists because the route is no longer a placeholder.
+- **Liasse fiscale covers bilan, compte de résultat, and the 2054/2055
+  annexes — 2056–2059 and the 2033-series remain a stub.**
+  `computeBilan2050()`/`computeCompteResultat2052_2053()`/
+  `computeTableau2054()`/`computeTableau2055()` are all real (see
+  "Liasse fiscale / bilan & compte de résultat" above), and
+  `LiasseService.generate()` returns all four; `REEL_SIMPLIFIE`
+  companies are refused outright (`NotImplementedException`), not
+  handed a wrong liasse. `LiassePage` renders only what the backend
+  produces — don't assume 2056–2059 exist because the route is no
+  longer a placeholder.
 - **VAT's `computeDeclaration()` is no longer a stub for either
   jurisdiction** — it branches to `computeCa3Declaration()` (FR) or
   `computeMonacoDeclaration()` (MC) — but each only covers its own
@@ -622,27 +640,47 @@ assume they're covered either:
   the FEC section above has been verified against
   `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md`; §VIII specifically
   has not.
-- **Immobilisations: cession, dégressif, and the 2054/2055 report
-  structure are still deferred.** `FixedAsset` has `cessionDate` /
-  `cessionPrice` columns so disposal doesn't need a schema retrofit later,
-  but no cession logic exists yet (plus/moins-value computation, posting
-  the disposal écriture) — both fields stay null and there's no DTO/UI
-  surface for them. `DepreciationMethod.DECLINING` (dégressif) still
-  throws `NotImplementedException` in `generateSchedule()`; only linéaire
-  is computed. The tableau des immobilisations / tableau des
-  amortissements reports — which double as liasse forms 2054/2055 —
-  still haven't been designed, even though the two foundational liasse
-  forms (bilan/compte de résultat) are now done — see "Liasse fiscale /
-  bilan & compte de résultat" above and its "remaining work" note.
-  Design them against real field needs from the now-built
-  list/schedule screens rather than guessed in advance. What *is* done
-  (as of 2026-08-02): `DepreciationService.postDotation()` posts a
-  period's dotation (débit compte 681x / crédit compte 28x) through the
-  normal `EntriesService.create()`/`validate()` layer — no privileged
-  write path — and sets `DepreciationEntry.postedEcritureId`; VNC on the
-  list/detail screens is computed from posted entries only, so it ties to
-  the bilan rather than the projected schedule. This closes what was
-  previously logged here as "depreciation never posts to the ledger."
+- **Immobilisations: cession and dégressif are still deferred; 2054/2055
+  are now built.** `FixedAsset` has `cessionDate` / `cessionPrice`
+  columns so disposal doesn't need a schema retrofit later, but no
+  cession logic exists yet (plus/moins-value computation, posting the
+  disposal écriture) — both fields stay null and there's no DTO/UI
+  surface for them. This is exactly why 2054's Cessions column and
+  2055's Reprises column always compute to 0.00 (see "Liasse fiscale /
+  bilan & compte de résultat" above) — not a mapping gap, a real
+  upstream one. `DepreciationMethod.DECLINING` (dégressif) still throws
+  `NotImplementedException` in `generateSchedule()`; only linéaire is
+  computed — which is also why 2055's Cadre B (amortissements
+  dérogatoires) isn't represented at all: it only exists when the tax
+  method diverges from the book method, which can't happen here. What
+  *is* done (as of 2026-08-02): `DepreciationService.postDotation()`
+  posts a period's dotation (débit compte 681x / crédit compte 28x)
+  through the normal `EntriesService.create()`/`validate()` layer — no
+  privileged write path — and sets `DepreciationEntry.postedEcritureId`;
+  VNC on the list/detail screens is computed from posted entries only,
+  so it ties to the bilan rather than the projected schedule.
+- **Nothing stops a class-2 immobilisation from being posted through
+  the journal grid without a `FixedAsset` record — an "orphaned
+  immobilisation."** The journal entry grid lets you debit any account,
+  including class 2 (excluding 28x/29x contra-accounts), with no check
+  that a `FixedAsset` exists for it. Found live (2026-08-09): the FR
+  demo company had exactly this — a validated écriture debiting 218300
+  for 450,00 € with no `FixedAsset` behind it at all. The *old* VNC
+  check (`assertVncTiesToLedger`) never caught it, because it only
+  validates lines that already have `FixedAsset` data — a line with
+  none is silently skipped, not flagged as missing. The 2054/2055
+  tie-out (`assertTableauxTieToBilan`, exhaustive by construction) does
+  catch it, refusing to generate the liasse — which is how this one was
+  found and fixed (a `FixedAsset` created for the existing asset via
+  the real API, not a raw DB edit). **That tie-out is a backstop at
+  liasse-generation time, not a guard at entry time** — a company can
+  still post an orphaned immobilisation any time between now and the
+  next liasse run with no warning. The real fix belongs in the journal
+  grid / entries flow: warn (or block) when a line debits a class-2
+  immobilisation account with no linked `FixedAsset`, surfacing the
+  risk when the écriture is created rather than months later when the
+  liasse refuses to generate. Not built — logged here as a known gap /
+  future feature, not a bug to silently work around.
 - **`EcritureLigne.dateLettrage` isn't settable through the API.**
   `lettrage` (EcritureLet) is exposed on `CreateEcritureLigneDto` and
   settable at line-creation time, but there's no lettering
@@ -693,8 +731,10 @@ half (asset list, per-asset plan d'amortissement) and closes the
 previously-logged "depreciation never posts to the ledger" gap: dotations
 post through the normal entries validation layer and VNC is computed
 from posted entries only — see "Known scope boundaries" above for what's
-still deferred there (cession, dégressif, the 2054/2055 report
-structure).
+still deferred there (cession, dégressif) and for the newly-logged
+"orphaned immobilisation" gap (a class-2 écriture with no `FixedAsset`
+behind it, currently only caught at liasse-generation time by the
+2054/2055 tie-out, not at entry time).
 
 **VAT (TVA)** — `computeDeclaration()` is no longer a stub: it computes
 and now also *displays* a real CA3 for the basic French case (`VatPage`'s
@@ -726,28 +766,31 @@ filing-frequency mechanics, the cross-border memo-line question) are
 listed in that section and in `specs/vat-monaco-implementation-spec.md`
 — not yet resolved from the source documents.
 
-**Liasse fiscale** — the two foundational forms are done (as of
-2026-08-09): bilan (2050/2051) and compte de résultat (2052/2053),
-régime réel normal, computed by a shared trial-balance engine plus a
-2050-series mapping layer, verified by a hand-traced oracle and a live
-run against the FR demo company, and displayed read-only by
-`LiassePage` in the real form's layout. See "Liasse fiscale / bilan &
+**Liasse fiscale** — bilan (2050/2051), compte de résultat
+(2052/2053), and the 2054/2055 movement annexes are all done (as of
+2026-08-09), régime réel normal, computed by a shared trial-balance
+engine plus 2050-series mapping layers, verified by hand-traced oracles
+and live runs against the FR demo company, and displayed read-only by
+`LiassePage` in the real forms' layout. See "Liasse fiscale / bilan &
 compte de résultat" above for the architecture (the Actif=Passif
-independent check, DI constructed from HN, the confirmed overdraft and
-775/675 regroupings) and exactly what's still deferred (2054–2059
-annexes, the 2033-series régime réel simplifié mapping). Other logged
-gaps remain open too (`dateLettrage` not API-settable, no import-batch
-listing endpoint, no delete/deactivate on Journal/Account/VatRate/
-FiscalYear, Article A47 A-1 §VIII uncross-checked) — see "Known scope
-boundaries" below.
+independent check, DI constructed from HN, the confirmed overdraft/
+775-675/immobilisation-category regroupings, the 2054/2055 tie-out) and
+exactly what's still deferred (2056–2059, the 2033-series régime réel
+simplifié mapping). Verifying 2054/2055 live also surfaced and closed a
+real, structural gap — see "Known scope boundaries" below,
+"orphaned immobilisation." Other logged gaps remain open too
+(`dateLettrage` not API-settable, no import-batch listing endpoint, no
+delete/deactivate on Journal/Account/VatRate/FiscalYear, Article A47
+A-1 §VIII uncross-checked).
 
 **Build order for what's next**, roughly in priority:
 
-1. **Liasse fiscale annexes** — 2054/2055 (tableau des immobilisations
-   / tableau des amortissements) against the immobilisations module's
-   real fields, now that both it and the shared liasse engine exist;
-   then 2056–2059; then the 2033-series (régime réel simplifié) mapping
-   as a second pass over the same engine.
+1. **Liasse fiscale annexes** — 2056–2059, then the 2033-series
+   (régime réel simplifié) mapping as a second pass over the same
+   shared engine. Separately, worth picking up soon: the "orphaned
+   immobilisation" guard logged in "Known scope boundaries" — warning
+   at journal-entry time rather than relying on the liasse tie-out as
+   the only backstop.
 2. **Cash flow statement** — bilan and compte de résultat are already
    covered by the liasse work above.
 3. **Financial analysis** — ratios, free cash flow, and a DCF as an
