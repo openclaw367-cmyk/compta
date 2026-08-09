@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotImplementedException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { VatService } from './vat.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -8,6 +8,7 @@ const company: CompanyContext = { companyId: 'company-1' };
 
 function makePrismaMock() {
   return {
+    company: { findFirst: jest.fn().mockResolvedValue({ id: company.companyId, jurisdiction: 'FR' }) },
     ecriture: { count: jest.fn().mockResolvedValue(0) },
     ecritureLigne: { findMany: jest.fn().mockResolvedValue([]) },
     vatRate: { findMany: jest.fn().mockResolvedValue([]) },
@@ -21,6 +22,47 @@ describe('VatService.computeDeclaration', () => {
   beforeEach(() => {
     prisma = makePrismaMock();
     service = new VatService(prisma as unknown as PrismaService);
+  });
+
+  it('refuses to compute for a non-FR (Monaco) company rather than silently running French logic', async () => {
+    prisma.company.findFirst.mockResolvedValue({ id: company.companyId, jurisdiction: 'MC' });
+    await expect(
+      service.computeDeclaration(company, { periodStart: '2026-01-01', periodEnd: '2026-01-31' }),
+    ).rejects.toThrow(NotImplementedException);
+    await expect(
+      service.computeDeclaration(company, { periodStart: '2026-01-01', periodEnd: '2026-01-31' }),
+    ).rejects.toThrow(/monégasque/);
+    expect(prisma.ecriture.count).not.toHaveBeenCalled();
+    expect(prisma.ecritureLigne.findMany).not.toHaveBeenCalled();
+  });
+
+  it('computes normally for an FR company (unaffected by the jurisdiction guard)', async () => {
+    prisma.ecritureLigne.findMany.mockResolvedValue([
+      {
+        compteId: 'account-707',
+        compte: { number: '707000', pcgClass: 7 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('100.00'),
+        vatRateId: 'rate-20',
+      },
+      {
+        compteId: 'account-44571',
+        compte: { number: '445710', pcgClass: 4 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('20.00'),
+        vatRateId: 'rate-20',
+      },
+    ]);
+    prisma.vatRate.findMany.mockResolvedValue([
+      { id: 'rate-20', ratePercent: new Prisma.Decimal('20.00') },
+    ]);
+
+    const result = await service.computeDeclaration(company, {
+      periodStart: '2026-01-01',
+      periodEnd: '2026-01-31',
+    });
+
+    expect(result.ligneTD).toBe('20.00');
   });
 
   it('refuses to compute while a draft écriture exists in the period', async () => {

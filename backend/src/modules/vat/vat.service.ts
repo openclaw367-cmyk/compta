@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  NotImplementedException,
+} from '@nestjs/common';
 import { VatRate } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
@@ -42,10 +47,12 @@ export class VatService {
   /**
    * French CA3 (régime réel normal), basic-case only — see
    * specs/vat-ca3-implementation-spec.md for the line spec, account
-   * mapping, and exactly what's implemented vs. deferred. Monaco is not
-   * implemented — see CLAUDE.md "Monaco compliance" and the spec's
-   * Monaco inventory; jurisdiction is not branched on here because only
-   * the FR path exists so far.
+   * mapping, and exactly what's implemented vs. deferred. Monaco (see
+   * specs/vat-monaco-implementation-spec.md) is a genuinely different
+   * declaration — different form, different line numbers, filed with a
+   * different tax authority — not a variant of the French computation,
+   * so this refuses outright for a non-FR company rather than silently
+   * running French logic against Monaco's chart of accounts.
    *
    * Only validated écritures are read, and the whole computation refuses
    * if any écriture in the period is still a draft — same rule and same
@@ -58,6 +65,20 @@ export class VatService {
     company: CompanyContext,
     dto: ComputeVatDeclarationDto,
   ): Promise<Ca3Declaration> {
+    const companyRecord = await this.prisma.company.findFirst({
+      where: { id: company.companyId },
+    });
+    if (!companyRecord) {
+      throw new NotFoundException(`Company ${company.companyId} not found`);
+    }
+    if (companyRecord.jurisdiction !== 'FR') {
+      throw new NotImplementedException(
+        `Déclaration TVA monégasque pas encore implémentée (jurisdiction ${companyRecord.jurisdiction}). ` +
+          'Seule la déclaration CA3 française (jurisdiction FR) est disponible pour le moment — ' +
+          'voir specs/vat-monaco-implementation-spec.md.',
+      );
+    }
+
     const periodStart = new Date(dto.periodStart);
     const periodEnd = new Date(dto.periodEnd);
 
