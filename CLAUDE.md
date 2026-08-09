@@ -316,16 +316,18 @@ misstated twice during development before being pinned down here.
   indiquer de sommes négatives"*); any draft écriture dated within the
   requested period (mirrors `FecExportService.generate()`'s
   draft-blocking rule).
-- **Monaco is not implemented.** `specs/Monaco notice TVA.pdf` is a
-  2-page *notice* (instructions), not the Monegasque declaration form
-  itself, and doesn't show Monaco's own Cadre B line numbers — it can't
-  confirm whether Monaco mirrors the French 08/09/9B/16/23/25 structure.
-  Confirmed convergence so far: rounding (identical wording) and filing
-  frequency (both cite the same €4 000 annual-VAT-due quarterly
-  threshold). Confirmed divergence: Monaco's notice has an entire extra
-  section (Cadre C, lignes 70-75) breaking deductible TVA down by
-  supplier origin, informational only, not present on the French CA3 at
-  all. The actual Monegasque form is needed before a Monaco pass starts.
+- **Monaco is a separate declaration, not a CA3 variant — see "VAT /
+  Monaco declaration (Case B)" below.** Two distinct cross-border cases,
+  kept strictly separate (per `specs/vat-ca3-implementation-spec.md`
+  §4b): **Case A** — a *French*-jurisdiction entity with some
+  Monaco-destined operations still files the French CA3, with a memo
+  sub-line (ligne 18, *"Dont TVA sur opérations à destination de
+  Monaco"*) reserved for it — **documented in the spec but not yet
+  implemented**; `ca3-declaration.ts` has no `ligne18` today. **Case
+  B** — a *Monaco*-jurisdiction (`Company.jurisdiction === 'MC'`)
+  entity files its own Monegasque DSF declaration, a genuinely
+  different form with different line numbers — **implemented**, see
+  below.
 - **Everything else deferred**: AIC/imports beyond the informational
   lines, groupe TVA / assujetti unique, régularisations, annexe 3310-A
   (taxes assimilées), accise sur les énergies (a different tax bundled
@@ -357,6 +359,87 @@ misstated twice during development before being pinned down here.
   `@nestjs/common` exception class — importing it doesn't compromise the
   "pure" claim (no I/O happens), and a plain `Error` here is a silent-500
   bug waiting to happen.
+
+## VAT / Monaco declaration (Case B)
+
+`src/modules/vat/monaco-declaration.ts` computes the Monegasque DSF
+declaration (basic case) for a Monaco-jurisdiction company filing its
+own return — Case B above, distinct from Case A's not-yet-built ligne
+18 memo line on the French CA3. Full line spec, three-bucket divergence
+table vs. France, and account-mapping analysis are in
+`specs/vat-monaco-implementation-spec.md`; built against that document's
+primary sources (the actual DSF form + its notice), never inferred from
+the French form or "the convention probably says."
+
+- **Jurisdiction drives both the account structure and the declaration
+  module — one switch, `Company.jurisdiction` (`FR`|`MC`).**
+  `VatService.computeDeclaration()` looks up the company, then branches:
+  `FR` → `computeCa3Declaration()`, `MC` → `computeMonacoDeclaration()`,
+  anything else throws `NotImplementedException`. This closed a real gap
+  — the method previously had no jurisdiction check at all and would
+  silently compute a French CA3 for a Monaco company.
+- **Account scheme: Monaco reuses the same account numbers as France**
+  (`445710` collectée, `445662` immobilisations déductible, `445660`
+  autres-biens déductible) — same numbers and labels, not a parallel
+  Monaco-specific chart. This is safe because the scoping is per
+  company, not global: an MC-jurisdiction company only ever has its own
+  accounts (seeded by `backend/prisma/seed-monaco.ts`, sharing
+  `PCG_ACCOUNTS`/`JOURNALS` from `backend/prisma/pcg-accounts.ts` with
+  the FR seed), so there's no collision — a given `445710` row always
+  belongs to exactly one company, whichever jurisdiction it's in.
+  `computeCa3Declaration()` is untouched by any of this; the FR path
+  reads the same accounts it always did.
+- **Four rates implemented, same as the CA3 side**: the three named on
+  ligne 32 (5,5 % réduit, 10 % intermédiaire, 20 % normal) **plus 2,1 %
+  via ligne 30.** Ligne 31 ("anciens taux") stays deferred — no taxonomy
+  for what it contains is shown in either Monaco document.
+  - **The 2,1 % rate was dropped once, then corrected — don't
+    re-litigate this without re-reading the source.** An earlier pass
+    concluded 2,1 % was unconfirmed for Monaco because the form has no
+    pre-printed 2,1 % line the way France names T6. That reasoning
+    conflated *how* a rate is declared with *whether* it exists: ligne
+    30 reads *"Taux particuliers ___%"* — a blank, fillable field,
+    Monaco's generic slot for a non-standard rate, functionally
+    equivalent to France giving each taux particulier its own named
+    sub-line instead of one blank one. Monaco's rate set is confirmed
+    to include 2,1 % (presse, médicaments, same as France, under the
+    1963 Franco-Monégasque convention — see "Monaco compliance"
+    below). **Do not drop a rate just because a given form variant
+    doesn't print a dedicated line for it** — check whether it's
+    declared through a generic field first.
+- **Verified two ways, same discipline as the CA3.** Hand-computed
+  oracle in `monaco-declaration.spec.ts` covering all four rates
+  together (ligneB1/ligne48 assembled from all four buckets, not just
+  the three named ones). Separately, live-verified against the seeded
+  Monaco demo company (`seed-monaco.ts`): a real 2,1 %-tagged, validated
+  écriture reported correctly under `ligne: "30"` and fed `ligneB1`/
+  `ligne48`, via `POST /vat/declaration` against the real dev DB — not
+  just the unit test. Test data was cleaned up afterward (temp Prisma
+  script pattern, same as the CA3 verification).
+- **Open items, not yet resolved from the documents** (see
+  `specs/vat-monaco-implementation-spec.md` §4c/§7 for the full list):
+  - **"TMP" (ligne 49, taxes assimilées)** — undefined in both the form
+    and the notice; full name and computation basis unknown.
+  - **"Acomptes provisionnels" (ligne 52)** — referenced but not
+    explained by either source.
+  - **Filing-frequency mechanics.** Monthly is the general/default
+    filing case; quarterly or annual are requested exceptions (the
+    notice ties this to an annual-VAT-due threshold). The exact
+    administrative mechanics of qualifying for or requesting the
+    exception — and how that reconciles with the example form's own
+    period field reading "AN" (apparently annual) — are not confirmed
+    from the documents themselves. Treat as open, not settled.
+  - **The cross-border/account-mapping line was never fully resolved.**
+    Whether a Monaco-jurisdiction company's declaration needs its own
+    equivalent of France's Case A ligne-18 memo line (for the mirror
+    case: Monaco entity with French-destined activity) isn't addressed
+    by either Monaco source document — neither confirmed present nor
+    confirmed absent. Don't assume symmetry with Case A without a cited
+    source.
+- **Everything else deferred**, same categories as the CA3 side where
+  applicable: régularisations, groupe TVA / assujetti unique equivalent,
+  Cadre C (lignes 70-75, supplier-origin breakdown of déductible TVA —
+  informational only per the form's own note, doesn't feed B1/B2/B3/48).
 
 ## Known scope boundaries
 
@@ -391,10 +474,15 @@ assume they're covered either:
 - **Liasse fiscale (`src/modules/liasse/`) is a stub** — throws
   `NotImplementedException`, not a plausible-looking fake computation.
   Don't build on top of it assuming real logic exists. VAT's
-  `computeDeclaration()` is no longer a stub (see "VAT / CA3
-  declaration" above) but only covers the basic French case — see that
-  section for exactly what's deferred (taux particuliers beyond T6,
-  AIC/imports, groupe TVA, régularisations, annexe 3310-A, Monaco).
+  `computeDeclaration()` is no longer a stub for either jurisdiction —
+  it branches to `computeCa3Declaration()` (FR) or
+  `computeMonacoDeclaration()` (MC) — but each only covers its own
+  basic case; see "VAT / CA3 declaration" and "VAT / Monaco declaration
+  (Case B)" above for exactly what's deferred on each side (taux
+  particuliers beyond T6/2,1 %, AIC/imports, groupe TVA,
+  régularisations, annexe 3310-A on the FR side; TMP, acomptes
+  provisionnels, filing-frequency mechanics, and the cross-border
+  memo-line question on the MC side).
 - **No delete/deactivate endpoint exists for `Journal`, `Account`,
   `VatRate`, or `FiscalYear`.** Each has create + list (+ close, for
   FiscalYear), nothing more — discovered directly while building their
@@ -402,8 +490,22 @@ assume they're covered either:
   instead of the API. `Account` and `Journal` also have no update beyond
   `Account.rename()`. If a future screen needs to remove or correct one
   of these, that's new backend work, not existing-but-unwired UI.
-- **Monaco rules are unverified** — see "Monaco compliance" below. Nothing
-  Monaco-specific should be treated as settled without a cited source.
+- **`VatPage.tsx` only renders the CA3 shape — it doesn't handle Monaco
+  yet.** The frontend declaration screen is typed and hardcoded to
+  `Ca3Declaration` (`ligne16`/`ligne19`/`ligne20`/`ligne23`/`ligne25`/
+  `ligneTD`, ...); `computeMonacoDeclaration()`'s response uses different
+  field names entirely (`ligneB1`/`ligne44`/`ligne45`/`ligneB2`/`ligne48`,
+  ...). Pointing this screen at an MC-jurisdiction company today would
+  render `undefined` values, not a correct Monaco declaration — the
+  backend computation is done and verified (see "VAT / Monaco
+  declaration (Case B)" above), the frontend consumption of it is not.
+  New work, not existing-but-unwired UI.
+- **Monaco rules are largely unverified, VAT (Case B) is the exception.**
+  See "Monaco compliance" below. Nothing Monaco-specific should be
+  treated as settled without a cited source — with the narrow exception
+  of "VAT / Monaco declaration (Case B)" above, which is built and
+  verified against Monaco's own primary documents. That section's own
+  "open items" list still applies; verified doesn't mean complete.
 - **Article A47 A-1 §VIII** (simplified/micro-BIC reporting variants) has
   not been cross-checked against `src/modules/fec/`. Everything else in
   the FEC section above has been verified against
@@ -493,6 +595,24 @@ ever touching that routing again. The guard that refuses an untagged
 TVA collectée line is real and demonstrated on purpose in the seed
 sample data, not just theoretical.
 
+**Monaco VAT (Case B)** is also done and verified (as of 2026-08-09) —
+see "VAT / Monaco declaration (Case B)" above. `Company.jurisdiction`
+now drives both the account structure and the declaration module:
+`VatService.computeDeclaration()` branches FR → `computeCa3Declaration()`,
+MC → `computeMonacoDeclaration()` (closing a real gap — it previously had
+no jurisdiction check and would silently run the French CA3 for a Monaco
+company). Monaco reuses the same account numbers as France
+(`445710`/`445662`/`445660`), company-scoped so there's no collision;
+the FR CA3 path is confirmed untouched. `computeMonacoDeclaration()`
+implements four rates (5,5 %/10 %/20 % on ligne 32, plus **2,1 % via
+ligne 30** — a rate dropped in an earlier pass and then corrected, see
+that section for why), verified both by a hand-computed oracle covering
+all four rates and by a live run against the seeded Monaco demo company
+(`seed-monaco.ts`). Open items (TMP, acomptes provisionnels,
+filing-frequency mechanics, the cross-border memo-line question) are
+listed in that section and in `specs/vat-monaco-implementation-spec.md`
+— not yet resolved from the source documents.
+
 Liasse fiscale remains a stub — see "Known scope boundaries" below for
 that and the other logged gaps (`dateLettrage` not API-settable, no
 import-batch listing endpoint, no delete/deactivate on Journal/Account/
@@ -517,10 +637,13 @@ VatRate/FiscalYear, Article A47 A-1 §VIII uncross-checked).
    changes.
 
 Not on this numbered list but still open whenever it's picked back up:
-widening the VAT computation itself (remaining taux particuliers beyond
-T6, AIC/imports, groupe TVA, régularisations, annexe 3310-A) and the
-Monaco CA3 pass, which needs the actual Monegasque declaration form
-first — see "VAT / CA3 declaration" above.
+widening either VAT computation — FR: remaining taux particuliers beyond
+T6, AIC/imports, groupe TVA, régularisations, annexe 3310-A; MC: TMP,
+acomptes provisionnels, filing-frequency mechanics, the cross-border
+memo-line question — and building Case A's ligne 18 memo line on the
+French CA3 for a French entity with Monaco-destined activity, which is
+documented but not implemented. See "VAT / CA3 declaration" and "VAT /
+Monaco declaration (Case B)" above.
 
 ## Monaco compliance — verify before trusting
 
@@ -543,7 +666,17 @@ independently-configured jurisdiction, not "France with a different flag":
 - The `Company.jurisdiction` field (`FR` | `MC`) is the single switch that
   selects which compliance ruleset (chart-of-accounts template, VAT rules,
   export formats) applies. New jurisdiction-sensitive logic must branch on
-  this field explicitly rather than assuming France.
+  this field explicitly rather than assuming France. VAT is the first
+  fully worked example of this pattern end to end — see "VAT / Monaco
+  declaration (Case B)" above for how `VatService.computeDeclaration()`
+  branches on it.
+- **A documented absence isn't the same as a confirmed absence.** Lesson
+  learned the hard way on the 2,1 % VAT rate (see "VAT / Monaco
+  declaration (Case B)" above): a Monaco source document not printing a
+  dedicated line for something is not, by itself, evidence that thing
+  doesn't apply to Monaco — it may just be declared through a different,
+  more generic mechanism than France uses. Check for that before
+  concluding a rule doesn't exist for Monaco.
 
 ## Conventions
 
