@@ -348,6 +348,13 @@ describe('LiasseService.generate', () => {
     expect(clients).toMatchObject({ brut: '5000.00', amortissements: '1200.00', net: '3800.00' });
 
     expect(result.bilan.totalActifNet).toBe(result.bilan.totalPassif);
+
+    // 2057 reproduces the same 5 000,00 clients brut as its own BX row (no fournisseurs/emprunts/
+    // dettes fiscales posted in this fixture, so Cadre B stays entirely at 0,00).
+    const bx = result.tableau2057.cadreA.find((l) => l.code === 'BX')!;
+    expect(bx.montantBrut).toBe('5000.00');
+    expect(result.tableau2057.totalCreances).toBe('5000.00');
+    expect(result.tableau2057.totalDettes).toBe('0.00');
   });
 });
 

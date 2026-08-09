@@ -5,12 +5,14 @@ import { LiasseLigne, buildTrialBalance } from './trial-balance-engine';
 import { ORACLE_BILAN_LIGNES, ORACLE_HN } from './liasse-oracle-fixture';
 import { ProvisionMovementLigne, computeTableau2056 } from './tableau-2056';
 import { ORACLE_2056_LIGNES } from './tableau-2056-oracle-fixture';
+import { computeTableau2057 } from './tableau-2057';
 import { computeTableau2059A } from './tableau-2059';
 import { CompteResultat2052_2053, CompteResultatLigne } from './compte-resultat-2052-2053';
 import {
   VncCheckLine,
   assertLiasseArticulation,
   assertTableau2056TiesToBilan,
+  assertTableau2057TiesToBilan,
   assertTableau2059TiesToCompteResultat,
 } from './liasse-articulation';
 
@@ -232,6 +234,41 @@ describe('assertTableau2059TiesToCompteResultat', () => {
     const tableau2059 = computeTableau2059A([]); // no cessionDate anywhere → still the empty table
     expect(() => assertTableau2059TiesToCompteResultat({ compteResultat, tableau2059 })).toThrow(
       /does not equal the compte de résultat's net cession result/,
+    );
+  });
+});
+
+describe('assertTableau2057TiesToBilan', () => {
+  it('passes for the oracle bilan — 2057 is a pure regrouping of it, so this always holds by construction', () => {
+    const bilan = computeBilan2050(
+      buildTrialBalance(ORACLE_BILAN_LIGNES),
+      Money.fromString(ORACLE_HN),
+    );
+    const tableau2057 = computeTableau2057(bilan);
+    expect(() => assertTableau2057TiesToBilan({ bilan, tableau2057 })).not.toThrow();
+  });
+
+  it('throws when Cadre A has drifted from the bilan lines it should reproduce', () => {
+    const bilan = computeBilan2050(
+      buildTrialBalance(ORACLE_BILAN_LIGNES),
+      Money.fromString(ORACLE_HN),
+    );
+    const tableau2057 = computeTableau2057(bilan);
+    const broken = { ...tableau2057, totalCreances: '999999.99' };
+    expect(() => assertTableau2057TiesToBilan({ bilan, tableau2057: broken })).toThrow(
+      /Cadre A total .* does not equal the sum of the bilan lines/,
+    );
+  });
+
+  it('throws when Cadre B has drifted from the bilan lines it should reproduce', () => {
+    const bilan = computeBilan2050(
+      buildTrialBalance(ORACLE_BILAN_LIGNES),
+      Money.fromString(ORACLE_HN),
+    );
+    const tableau2057 = computeTableau2057(bilan);
+    const broken = { ...tableau2057, totalDettes: '999999.99' };
+    expect(() => assertTableau2057TiesToBilan({ bilan, tableau2057: broken })).toThrow(
+      /Cadre B total .* does not equal the sum of the bilan lines/,
     );
   });
 });

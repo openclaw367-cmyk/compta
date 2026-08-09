@@ -20,6 +20,7 @@ import {
   assertLiasseArticulation,
   assertTableauxTieToBilan,
   assertTableau2056TiesToBilan,
+  assertTableau2057TiesToBilan,
   assertTableau2059TiesToCompteResultat,
 } from './liasse-articulation';
 import { ImmobilisationMovementAsset, Tableau2054, computeTableau2054 } from './tableau-2054';
@@ -30,6 +31,7 @@ import {
 } from './tableau-2055';
 import { ProvisionMovementLigne, Tableau2056, computeTableau2056 } from './tableau-2056';
 import { PROVISION_ACCOUNT_CLASS_PREFIXES } from './provision-categories';
+import { Tableau2057, computeTableau2057 } from './tableau-2057';
 import { Tableau2059A, computeTableau2059A } from './tableau-2059';
 
 export interface LiasseResult {
@@ -38,22 +40,23 @@ export interface LiasseResult {
   tableau2054: Tableau2054;
   tableau2055: Tableau2055;
   tableau2056: Tableau2056;
+  tableau2057: Tableau2057;
   tableau2059: Tableau2059A;
 }
 
 /**
  * Liasse fiscale, régime réel normal (2050-series) — bilan, compte de
  * résultat, the 2054/2055 immobilisations/amortissements movement
- * annexes, and 2056 (provisions). See
- * specs/liasse-2050-implementation-spec.md,
+ * annexes, 2056 (provisions), 2057 (état des créances et des dettes,
+ * montant brut only — see tableau-2057.ts for why the maturity split is
+ * blocked), and 2059-A (plus/moins-values, a guarded always-empty
+ * stub). See specs/liasse-2050-implementation-spec.md,
  * specs/liasse-2054-2055-implementation-spec.md, and
- * specs/liasse-2056-2059-implementation-spec.md. 2057 (état des
- * créances et des dettes) and 2059 (plus/moins-values) are separately
- * scoped — see those specs for exactly what's built vs. deferred/
- * blocked. The 2033-series (régime réel simplifié) mapping doesn't
- * exist yet — a REEL_SIMPLIFIE company is refused explicitly rather
- * than silently handed a réel-normal liasse, same discipline as
- * VatService.computeDeclaration()'s jurisdiction guard.
+ * specs/liasse-2056-2059-implementation-spec.md for exactly what's
+ * built vs. deferred on each. The 2033-series (régime réel simplifié)
+ * mapping doesn't exist yet — a REEL_SIMPLIFIE company is refused
+ * explicitly rather than silently handed a réel-normal liasse, same
+ * discipline as VatService.computeDeclaration()'s jurisdiction guard.
  *
  * Only validated écritures are read, and the whole computation refuses
  * if any écriture in the fiscal year is still a draft — same rule as
@@ -162,6 +165,9 @@ export class LiasseService {
     const tableau2056 = computeTableau2056(provisionLignes);
     assertTableau2056TiesToBilan({ trialBalance: bilanAccounts, tableau2056 });
 
+    const tableau2057 = computeTableau2057(bilan);
+    assertTableau2057TiesToBilan({ bilan, tableau2057 });
+
     const tableau2059 = computeTableau2059A(
       assets.map((asset) => ({
         id: asset.id,
@@ -171,7 +177,15 @@ export class LiasseService {
     );
     assertTableau2059TiesToCompteResultat({ compteResultat, tableau2059 });
 
-    return { bilan, compteResultat, tableau2054, tableau2055, tableau2056, tableau2059 };
+    return {
+      bilan,
+      compteResultat,
+      tableau2054,
+      tableau2055,
+      tableau2056,
+      tableau2057,
+      tableau2059,
+    };
   }
 
   /**

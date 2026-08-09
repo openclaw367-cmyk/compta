@@ -12,6 +12,8 @@ import type {
   Tableau2055Ligne,
   Tableau2056,
   Tableau2056Ligne,
+  Tableau2057,
+  Tableau2057Ligne,
   Tableau2059A,
 } from '../api/types';
 import { ApiError } from '../api/client';
@@ -93,6 +95,18 @@ const TABLEAU_2055_SECTIONS: { title: string; codes: string[] }[] = [
 const IMMOBILISATION_BILAN_CODES = [
   'AB', 'CX', 'AF', 'AH', 'AJ', 'AL', 'AN', 'AP', 'AR', 'AT', 'AV', 'CS', 'CU', 'BB', 'BD', 'BF', 'BH',
 ];
+
+/**
+ * DK (provisions réglementées) + DP (provisions pour risques) + DQ
+ * (provisions pour charges) on the bilan passif = 2056's TOTAL I +
+ * TOTAL II exactly (provisions réglementées, and risques et charges).
+ * TOTAL III (dépréciations) has no equivalent here — it's embedded in
+ * the bilan's actif "amortissements" columns mixed with ordinary 28x
+ * amortissement, so there's no clean bilan-only figure to compare
+ * against in the browser (see tableau-2056.ts's doc comment on the
+ * backend); that portion is verified server-side only.
+ */
+const PROVISION_BILAN_CODES = ['DK', 'DP', 'DQ'];
 
 /**
  * 2056 row grouping — mirrors tableau-2056.ts's TOTAL_I_CODES/
@@ -260,7 +274,10 @@ export function LiassePage() {
           />
           <Tableau2054Section tableau2054={result.tableau2054} />
           <Tableau2055Section tableau2055={result.tableau2055} />
+          <Tableau2056ArticulationBanner bilan={result.bilan} tableau2056={result.tableau2056} />
           <Tableau2056Section tableau2056={result.tableau2056} />
+          <Tableau2057ArticulationBanner bilan={result.bilan} tableau2057={result.tableau2057} />
+          <Tableau2057Section tableau2057={result.tableau2057} />
           <Tableau2059Section tableau2059={result.tableau2059} />
         </>
       )}
@@ -834,12 +851,82 @@ function Tableau2055Row({ ligne }: { ligne: Tableau2055Ligne }) {
 // 2054/2055 (début/dotations/reprises/fin) but with no dedicated domain
 // model behind it: début/dotations/reprises are derived from the ledger
 // by journal type (à-nouveau lines = début, everything else = movement)
-// rather than a FixedAsset-equivalent — see tableau-2056.ts. No client-
-// side articulation banner here (unlike 2054/2055): its tie-out compares
-// against a raw trial-balance sum the API never serializes, so there's
-// nothing to recompute in the browser — the note below states that the
-// check runs, and passed, server-side.
+// rather than a FixedAsset-equivalent — see tableau-2056.ts. The
+// articulation banner below only covers TOTAL I + TOTAL II (provisions
+// réglementées, risques et charges) against the bilan's DK+DP+DQ — the
+// full backend tie-out (assertTableau2056TiesToBilan) also covers TOTAL
+// III (dépréciations), but that portion has no bilan-only figure the
+// browser can recompute (the bilan's amortissements column mixes 28x
+// with 29x per asset line) — see the banner and the note below the table.
 // ---------------------------------------------------------------------------
+
+/**
+ * Partial client-side check: bilan DK+DP+DQ (provisions réglementées +
+ * pour risques + pour charges) must equal 2056's TOTAL I + TOTAL II.
+ * Deliberately doesn't cover TOTAL III (dépréciations) — see the
+ * section doc comment above for why no bilan-only figure exists for it;
+ * that portion is verified server-side only
+ * (assertTableau2056TiesToBilan), same "shown as confirmation, not a
+ * live check" convention as every other banner on this page.
+ */
+function Tableau2056ArticulationBanner({
+  bilan,
+  tableau2056,
+}: {
+  bilan: Bilan2050;
+  tableau2056: Tableau2056;
+}) {
+  const bilanProvisions = bilan.passif
+    .filter((l) => PROVISION_BILAN_CODES.includes(l.code))
+    .reduce((sum, l) => addMoneyStrings(sum, l.montant), '0.00');
+  const tableauReglementeesEtRisques = addMoneyStrings(
+    tableau2056.totalReglementees,
+    tableau2056.totalRisquesCharges,
+  );
+  const ties = bilanProvisions === tableauReglementeesEtRisques;
+
+  return (
+    <div
+      className={[
+        'flex items-center justify-between rounded-lg border p-5',
+        ties ? 'border-positive-soft bg-positive-soft' : 'border-negative-soft bg-negative-soft',
+      ].join(' ')}
+    >
+      <div>
+        <div
+          className={[
+            'text-[11px] font-semibold uppercase tracking-wide',
+            ties ? 'text-positive' : 'text-negative',
+          ].join(' ')}
+        >
+          {ties
+            ? 'Annexe 2056 (I + II) cohérente avec le bilan'
+            : 'Annexe 2056 (I + II) incohérente avec le bilan'}
+        </div>
+        <p className="mt-1 text-[12.5px] text-ink-muted">
+          2056 (TOTAL I + TOTAL II) {ties ? '=' : '≠'} bilan (provisions réglementées + pour risques
+          et charges — DK + DP + DQ). TOTAL III (dépréciations) est vérifié côté serveur uniquement.
+        </p>
+      </div>
+      <div className="flex items-baseline gap-3">
+        <span className="text-[15px] tabular-nums text-ink-muted">
+          {formatMoneyFr(tableauReglementeesEtRisques)}
+        </span>
+        <span className={['text-[15px]', ties ? 'text-positive' : 'text-negative'].join(' ')}>
+          {ties ? '=' : '≠'}
+        </span>
+        <span
+          className={[
+            'text-[22px] font-semibold tabular-nums',
+            ties ? 'text-positive' : 'text-negative',
+          ].join(' ')}
+        >
+          {formatMoneyFr(bilanProvisions)}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function Tableau2056Section({ tableau2056 }: { tableau2056: Tableau2056 }) {
   const byCode = new Map(tableau2056.lignes.map((l) => [l.code, l]));
@@ -900,8 +987,9 @@ function Tableau2056Section({ tableau2056 }: { tableau2056: Tableau2056 }) {
         La ventilation « dont dotations et reprises d'exploitation / financières / exceptionnelles »
         du formulaire n'est pas calculée : elle nécessiterait de retrouver, pour chaque mouvement, le
         compte de charge ou de produit utilisé en contrepartie — une jointure par écriture que le
-        moteur ne fait pas aujourd'hui. La cohérence de ce tableau avec le bilan est vérifiée côté
-        serveur à chaque calcul (voir CLAUDE.md, « Liasse fiscale annexes 2056/2059 »).
+        moteur ne fait pas aujourd'hui. La cohérence de TOTAL III (dépréciations) avec le bilan est
+        vérifiée côté serveur uniquement, à chaque calcul — voir CLAUDE.md, « Liasse fiscale annexes
+        2056/2059 ».
       </p>
     </section>
   );
@@ -922,6 +1010,168 @@ function Tableau2056Row({ ligne }: { ligne: Tableau2056Ligne }) {
       </td>
       <td className="px-4 py-2 text-right tabular-nums text-ink">
         {formatMoneyFr(ligne.montantFin)}
+      </td>
+    </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 2057 (État des échéances des créances et des dettes) — montant brut
+// only, per nature line; the échéance (maturity) split the form's own
+// name is built around is blocked, not just undisplayed — no due-date
+// field exists anywhere in the schema (see tableau-2057.ts's doc
+// comment, and CLAUDE.md's "Liasse fiscale annexes 2056/2059"). Every
+// row here reproduces exactly one bilan actif/passif line, relabeled —
+// not the CERFA form's own finer subdivisions (see that same doc
+// comment for which splits the chart of accounts can't currently make).
+// ---------------------------------------------------------------------------
+
+function Tableau2057ArticulationBanner({
+  bilan,
+  tableau2057,
+}: {
+  bilan: Bilan2050;
+  tableau2057: Tableau2057;
+}) {
+  const bilanCreances = bilan.actif
+    .filter((l) => ['BB', 'BF', 'BH', 'BV', 'BX', 'BZ', 'CH'].includes(l.code))
+    .reduce((sum, l) => addMoneyStrings(sum, l.brut), '0.00');
+  const bilanDettes = bilan.passif
+    .filter((l) => ['DS', 'DT', 'DU', 'DV', 'DW', 'DX', 'DY', 'DZ', 'EA', 'EB'].includes(l.code))
+    .reduce((sum, l) => addMoneyStrings(sum, l.montant), '0.00');
+  const tiesCreances = bilanCreances === tableau2057.totalCreances;
+  const tiesDettes = bilanDettes === tableau2057.totalDettes;
+  const ties = tiesCreances && tiesDettes;
+
+  return (
+    <div
+      className={[
+        'flex items-center justify-between rounded-lg border p-5',
+        ties ? 'border-positive-soft bg-positive-soft' : 'border-negative-soft bg-negative-soft',
+      ].join(' ')}
+    >
+      <div>
+        <div
+          className={[
+            'text-[11px] font-semibold uppercase tracking-wide',
+            ties ? 'text-positive' : 'text-negative',
+          ].join(' ')}
+        >
+          {ties ? 'Annexe 2057 cohérente avec le bilan' : 'Annexe 2057 incohérente avec le bilan'}
+        </div>
+        <p className="mt-1 text-[12.5px] text-ink-muted">
+          Cadre A (créances) {tiesCreances ? '=' : '≠'} bilan · Cadre B (dettes) {tiesDettes ? '=' : '≠'}{' '}
+          bilan
+        </p>
+      </div>
+      <div className="flex items-baseline gap-6">
+        <div className="flex items-baseline gap-3">
+          <span className="text-[13px] tabular-nums text-ink-muted">
+            {formatMoneyFr(tableau2057.totalCreances)}
+          </span>
+          <span className={['text-[13px]', tiesCreances ? 'text-positive' : 'text-negative'].join(' ')}>
+            {tiesCreances ? '=' : '≠'}
+          </span>
+          <span
+            className={[
+              'text-[16px] font-semibold tabular-nums',
+              tiesCreances ? 'text-positive' : 'text-negative',
+            ].join(' ')}
+          >
+            {formatMoneyFr(bilanCreances)}
+          </span>
+        </div>
+        <div className="flex items-baseline gap-3">
+          <span className="text-[13px] tabular-nums text-ink-muted">
+            {formatMoneyFr(tableau2057.totalDettes)}
+          </span>
+          <span className={['text-[13px]', tiesDettes ? 'text-positive' : 'text-negative'].join(' ')}>
+            {tiesDettes ? '=' : '≠'}
+          </span>
+          <span
+            className={[
+              'text-[16px] font-semibold tabular-nums',
+              tiesDettes ? 'text-positive' : 'text-negative',
+            ].join(' ')}
+          >
+            {formatMoneyFr(bilanDettes)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
+  return (
+    <section className="flex flex-col gap-4">
+      <div>
+        <h2 className="text-[14px] font-semibold text-ink">
+          2057 — État des créances et des dettes
+        </h2>
+        <p className="mt-0.5 text-[12.5px] text-ink-muted">
+          Montant brut par nature à la clôture de l'exercice.
+        </p>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <table className="w-full border-collapse text-[13px]">
+          <thead>
+            <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              <th className="px-4 py-2.5 font-semibold">Cadre A — État des créances</th>
+              <th className="px-4 py-2.5 text-right font-semibold">Montant brut</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tableau2057.cadreA.map((ligne) => (
+              <Tableau2057Row key={ligne.code} ligne={ligne} />
+            ))}
+            <tr className="bg-bg">
+              <td className="px-4 py-2.5 font-semibold text-ink">TOTAUX</td>
+              <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
+                {formatMoneyFr(tableau2057.totalCreances)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <table className="w-full border-collapse text-[13px]">
+          <thead>
+            <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              <th className="px-4 py-2.5 font-semibold">Cadre B — État des dettes</th>
+              <th className="px-4 py-2.5 text-right font-semibold">Montant brut</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tableau2057.cadreB.map((ligne) => (
+              <Tableau2057Row key={ligne.code} ligne={ligne} />
+            ))}
+            <tr className="bg-bg">
+              <td className="px-4 py-2.5 font-semibold text-ink">TOTAUX</td>
+              <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
+                {formatMoneyFr(tableau2057.totalDettes)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-[12px] text-ink-faint">{tableau2057.note}</p>
+    </section>
+  );
+}
+
+function Tableau2057Row({ ligne }: { ligne: Tableau2057Ligne }) {
+  return (
+    <tr className="border-b border-border last:border-b-0">
+      <td className="px-4 py-2 text-ink">
+        <span className="mr-2 font-medium tabular-nums text-ink-faint">{ligne.code}</span>
+        {ligne.label}
+      </td>
+      <td className="px-4 py-2 text-right tabular-nums text-ink">
+        {formatMoneyFr(ligne.montantBrut)}
       </td>
     </tr>
   );

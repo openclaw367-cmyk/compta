@@ -4,6 +4,7 @@ import { Bilan2050 } from './bilan-2050';
 import { Tableau2054 } from './tableau-2054';
 import { Tableau2055 } from './tableau-2055';
 import { Tableau2056 } from './tableau-2056';
+import { Tableau2057 } from './tableau-2057';
 import { Tableau2059A } from './tableau-2059';
 import { CompteResultat2052_2053 } from './compte-resultat-2052-2053';
 import { TrialBalanceAccount } from './trial-balance-engine';
@@ -194,6 +195,53 @@ export function assertTableau2056TiesToBilan(input: {
   tableau2056: Tableau2056;
 }): void {
   assertTableau2056TiesToTrialBalance(input.trialBalance, input.tableau2056);
+}
+
+const CADRE_A_BILAN_CODES = ['BB', 'BF', 'BH', 'BV', 'BX', 'BZ', 'CH'];
+const CADRE_B_BILAN_CODES = ['DS', 'DT', 'DU', 'DV', 'DW', 'DX', 'DY', 'DZ', 'EA', 'EB'];
+
+/**
+ * 2057 is a pure regrouping of Bilan2050 (see tableau-2057.ts's doc
+ * comment) — this doesn't independently re-derive the numbers from raw
+ * ledger accounts the way 2054/2055's tie-out does, but re-summing the
+ * SAME bilan lines a second time here, separately from
+ * computeTableau2057()'s own construction, still catches a real class
+ * of bug: a future edit to CADRE_A_ROWS/CADRE_B_ROWS or this list
+ * drifting out of sync with each other (a code added to one but not the
+ * other, a typo'd code, a line silently dropped).
+ */
+export function assertTableau2057TiesToBilan(input: {
+  bilan: Bilan2050;
+  tableau2057: Tableau2057;
+}): void {
+  const actifByCode = new Map(input.bilan.actif.map((l) => [l.code, l.brut]));
+  const passifByCode = new Map(input.bilan.passif.map((l) => [l.code, l.montant]));
+
+  const sum = (codes: string[], byCode: Map<string, string>) =>
+    codes.reduce(
+      (total, code) => total.plus(Money.fromString(byCode.get(code) ?? '0.00')),
+      Money.zero(),
+    );
+
+  const bilanCreances = sum(CADRE_A_BILAN_CODES, actifByCode);
+  const tableauCreances = Money.fromString(input.tableau2057.totalCreances);
+  if (!bilanCreances.equals(tableauCreances)) {
+    throw new ConflictException(
+      `2057 Cadre A total (${tableauCreances.toApiString()}) does not equal the sum of the bilan ` +
+        `lines it reproduces (${bilanCreances.toApiString()}). This is a mapping bug in tableau-2057.ts, ` +
+        'not a data problem.',
+    );
+  }
+
+  const bilanDettes = sum(CADRE_B_BILAN_CODES, passifByCode);
+  const tableauDettes = Money.fromString(input.tableau2057.totalDettes);
+  if (!bilanDettes.equals(tableauDettes)) {
+    throw new ConflictException(
+      `2057 Cadre B total (${tableauDettes.toApiString()}) does not equal the sum of the bilan ` +
+        `lines it reproduces (${bilanDettes.toApiString()}). This is a mapping bug in tableau-2057.ts, ` +
+        'not a data problem.',
+    );
+  }
 }
 
 /**

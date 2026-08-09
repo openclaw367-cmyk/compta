@@ -399,6 +399,27 @@ export interface Tableau2056 {
   dontDotationsReprisesParNature: null;
 }
 
+/** One 2057 row — montant brut only, no maturity split. See tableau-2057.ts's doc comment: every row reproduces one Bilan2050 actif/passif line. */
+export interface Tableau2057Ligne {
+  code: string;
+  label: string;
+  montantBrut: string;
+}
+
+/**
+ * Response shape for the 2057 half of POST /liasse/generate — see
+ * tableau-2057.ts on the backend. Maturity (à plus/moins d'un an) is
+ * genuinely blocked — no due-date field exists anywhere in the schema —
+ * see `note`.
+ */
+export interface Tableau2057 {
+  cadreA: Tableau2057Ligne[];
+  totalCreances: string;
+  cadreB: Tableau2057Ligne[];
+  totalDettes: string;
+  note: string;
+}
+
 /** Cadre A row shape (valeur résiduelle des éléments cédés) — defined for forward-compatibility, never populated until cession support exists. */
 export interface Tableau2059ACadreARow {
   accountNumber: string;
@@ -438,5 +459,6 @@ export interface LiasseResult {
   tableau2054: Tableau2054;
   tableau2055: Tableau2055;
   tableau2056: Tableau2056;
+  tableau2057: Tableau2057;
   tableau2059: Tableau2059A;
 }
