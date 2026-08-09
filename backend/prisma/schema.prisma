@@ -21,6 +21,17 @@ enum Jurisdiction {
   MC
 }
 
+/// Which liasse fiscale is this company's official/fileable one —
+/// REEL_NORMAL (2050-series) or REEL_SIMPLIFIE (2033-series). Both remain
+/// available as display views regardless of this value; it only selects
+/// which one is authoritative. Same role as Jurisdiction for VAT: a real
+/// schema field the liasse module branches on explicitly, not inferred —
+/// see specs/liasse-2050-implementation-spec.md.
+enum Regime {
+  REEL_NORMAL
+  REEL_SIMPLIFIE
+}
+
 enum JournalType {
   ACHATS
   VENTES
@@ -51,6 +62,12 @@ model Company {
   id           String       @id @default(cuid())
   name         String
   jurisdiction Jurisdiction
+
+  /// Selects which liasse fiscale (2050-series vs. 2033-series) is this
+  /// company's official/fileable one — see the Regime enum doc comment.
+  /// Defaults to REEL_NORMAL (the regime this app's first liasse pass
+  /// implements) so existing companies aren't left null.
+  regime Regime @default(REEL_NORMAL)
 
   /// French SIREN (9 digits). Required to produce a FEC export for a FR company.
   siren String?
