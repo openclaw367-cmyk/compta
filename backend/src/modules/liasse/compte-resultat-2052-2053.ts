@@ -218,7 +218,15 @@ const CDR_RULES: LineRule[] = [
   { code: 'HK', label: 'Impôts sur les bénéfices', prefixes: ['695'], direction: 'debit' },
 ];
 
+export interface CompteResultatLigne {
+  code: string;
+  label: string;
+  montant: string;
+}
+
 export interface CompteResultat2052_2053 {
+  /** Every CDR_RULES line, in form order (produits d'exploitation, charges d'exploitation, produits/charges financiers, produits/charges exceptionnels) — the itemized figures behind the totals below, for a screen that needs to show the real form's line codes. */
+  lignes: CompteResultatLigne[];
   /** FR — total des produits d'exploitation (I). */
   totalProduitsExploitation: string;
   /** GF — total des charges d'exploitation (II). */
@@ -322,6 +330,11 @@ export function computeCompteResultat2052_2053(
   const beneficeOuPerte = totalProduits.minus(totalCharges);
 
   return {
+    lignes: CDR_RULES.map((rule) => ({
+      code: rule.code,
+      label: rule.label,
+      montant: get(rule.code).toApiString(),
+    })),
     totalProduitsExploitation: totalProduitsExploitation.toApiString(),
     totalChargesExploitation: totalChargesExploitation.toApiString(),
     resultatExploitation: resultatExploitation.toApiString(),

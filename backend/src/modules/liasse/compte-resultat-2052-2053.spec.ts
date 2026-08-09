@@ -27,6 +27,40 @@ describe('computeCompteResultat2052_2053', () => {
     const trialBalance = buildTrialBalance(ORACLE_CDR_LIGNES);
     const result = computeCompteResultat2052_2053(trialBalance);
 
+    const ligne = (code: string) => result.lignes.find((l) => l.code === code)?.montant;
+    expect(ligne('FC')).toBe('30000.00');
+    expect(ligne('FU')).toBe('9000.00');
+    expect(ligne('FW')).toBe('11000.00');
+    expect(ligne('FY')).toBe('21000.00');
+    expect(ligne('FZ')).toBe('8000.00');
+    expect(ligne('GA')).toBe('8000.00');
+    expect(ligne('GD')).toBe('5000.00');
+    expect(ligne('GL')).toBe('900.00');
+    expect(ligne('GR')).toBe('1200.00');
+    expect(ligne('HD')).toBe('500.00');
+    expect(ligne('HH')).toBe('300.00');
+    expect(ligne('HK')).toBe('4000.00');
+    // Every other line should be zero — the fixture doesn't touch them.
+    const populated = new Set([
+      'FC',
+      'FU',
+      'FW',
+      'FY',
+      'FZ',
+      'GA',
+      'GD',
+      'GL',
+      'GR',
+      'HD',
+      'HH',
+      'HK',
+    ]);
+    for (const l of result.lignes) {
+      if (!populated.has(l.code)) {
+        expect(l.montant).toBe('0.00');
+      }
+    }
+
     expect(result.totalProduitsExploitation).toBe('30000.00'); // FR
     expect(result.totalChargesExploitation).toBe('62000.00'); // GF
     expect(result.resultatExploitation).toBe('-32000.00'); // GG
