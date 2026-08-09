@@ -31,17 +31,15 @@ depreciation (amortissements), VAT (TVA), and liasse fiscale.
   d'amortissement, where a "Comptabiliser la dotation" action posts each
   period's dotation as a real validated écriture. Liasse fiscale now has
   a real screen too (`LiassePage`) — bilan (2050/2051), compte de
-  résultat (2052/2053), and the 2054/2055 movement annexes
-  (immobilisations/amortissements), régime réel normal only, read-only
-  report, see "Liasse fiscale / bilan & compte de résultat" below. The
-  backend also now computes 2056 (provisions) and 2059-A (plus/moins-
-  values, a guarded always-empty stub pending cession support) — see
-  "Liasse fiscale annexes 2056/2059" below — but `LiassePage` doesn't
-  render either yet, display is separate follow-up work, not
-  existing-but-unwired UI. 2057 (état des créances et des dettes) is
-  blocked, not just undisplayed — see that same section for why. The
-  régime réel simplifié (2033-series) variant remains honest "non
-  implémenté" territory, matching the backend's own scope.
+  résultat (2052/2053), the 2054/2055 movement annexes
+  (immobilisations/amortissements), 2056 (provisions), and 2059-A
+  (plus/moins-values, a guarded always-empty stub pending cession
+  support), régime réel normal only, read-only report — see "Liasse
+  fiscale / bilan & compte de résultat" and "Liasse fiscale annexes
+  2056/2059" below. 2057 (état des créances et des dettes) is blocked,
+  not just undisplayed — see that same section for why. The régime réel
+  simplifié (2033-series) variant remains honest "non implémenté"
+  territory, matching the backend's own scope.
 - **Package manager**: npm.
 - **Testing**: Jest (unit + e2e, NestJS default).
 - **Validation**: `class-validator` / `class-transformer` on all DTOs.
@@ -626,12 +624,22 @@ facts that must never be re-derived from memory.
   multi-year oracle. `LiassePage` renders both tables in form order
   with a matching articulation banner.
 - **2056 (provisions) and 2059-A (plus/moins-values) are computed by
-  the backend too** (as of 2026-08-09) — see
-  `specs/liasse-2056-2059-implementation-spec.md`. Neither has a
-  `LiassePage` display yet (compute-and-verify was this pass's scope,
-  display is separate follow-up work, same staged order 2054/2055
-  followed). **2056** is a movement table with no dedicated domain
-  model behind it (unlike 2054/2055's `FixedAsset`/`DepreciationEntry`)
+  the backend and displayed by `LiassePage`** (as of 2026-08-09) — see
+  `specs/liasse-2056-2059-implementation-spec.md`. **2056** renders as
+  a movement table in the same shape as 2054/2055, grouped into the
+  CERFA form's three sections (TOTAL I/II/III) with subtotal rows — but
+  with no client-side articulation banner, unlike 2054/2055: its tie-out
+  compares against a raw trial-balance prefix-sum the API never
+  serializes, so there's nothing for the browser to recompute (a note
+  states the check runs, and passed, server-side). **2059-A** renders as
+  a status card, not a table with nothing in it — every row on the real
+  form is a per-disposal line item and none exist yet, so an empty table
+  would look broken rather than informative; the card shows the
+  backend's note plus both totals (always 0,00 today). Both verified
+  live against the "Société Test Multi-Année" fixture, matching the
+  backend verification exactly. **2056** is a movement table with no
+  dedicated domain model behind it (unlike 2054/2055's
+  `FixedAsset`/`DepreciationEntry`)
   — "début" and "dotations"/"reprises" are derived straight from the
   ledger by journal type (`A_NOUVEAU` lines are "début", everything
   else is in-year movement, credit lines are dotations and debit lines
@@ -691,20 +699,18 @@ assume they're covered either:
   filing's volume, edge-case account numbers, or a Monaco company) — treat
   each materially different dataset as needing its own run, not covered
   by this one.
-- **Liasse fiscale's backend covers bilan, compte de résultat, 2054/
-  2055, and 2056/2059 — but `LiassePage` only renders the first four,
-  and 2057 doesn't exist at all.** `computeBilan2050()`/
-  `computeCompteResultat2052_2053()`/`computeTableau2054()`/
-  `computeTableau2055()`/`computeTableau2056()`/`computeTableau2059A()`
-  are all real (see "Liasse fiscale / bilan & compte de résultat" and
-  "Liasse fiscale annexes 2056/2059" above), and
-  `LiasseService.generate()` returns all six; `REEL_SIMPLIFIE`
-  companies are refused outright (`NotImplementedException`), not
-  handed a wrong liasse. `LiassePage` renders only bilan/compte de
-  résultat/2054/2055 — 2056 and 2059 are computed but not yet
-  displayed, and 2057 has no compute function at all (blocked on a
-  maturity-tracking gap, not scheduled). Don't assume any of the three
-  are covered because the API route returns them.
+- **Liasse fiscale covers bilan, compte de résultat, 2054/2055, and
+  2056/2059, both computed and displayed — 2057 doesn't exist at all.**
+  `computeBilan2050()`/`computeCompteResultat2052_2053()`/
+  `computeTableau2054()`/`computeTableau2055()`/`computeTableau2056()`/
+  `computeTableau2059A()` are all real (see "Liasse fiscale / bilan &
+  compte de résultat" and "Liasse fiscale annexes 2056/2059" above), and
+  `LiasseService.generate()` returns all six; `REEL_SIMPLIFIE` companies
+  are refused outright (`NotImplementedException`), not handed a wrong
+  liasse. `LiassePage` renders all six. 2057 has no compute function and
+  no screen at all (blocked on a maturity-tracking gap, not scheduled —
+  see that same section). Don't assume it's covered because the other
+  five are.
 - **VAT's `computeDeclaration()` is no longer a stub for either
   jurisdiction** — it branches to `computeCa3Declaration()` (FR) or
   `computeMonacoDeclaration()` (MC) — but each only covers its own
@@ -869,18 +875,17 @@ listed in that section and in `specs/vat-monaco-implementation-spec.md`
 — not yet resolved from the source documents.
 
 **Liasse fiscale** — bilan (2050/2051), compte de résultat
-(2052/2053), the 2054/2055 movement annexes, and now 2056 (provisions)
-and 2059-A (plus/moins-values, a guarded N/A stub) are all computed (as
-of 2026-08-09), régime réel normal, by a shared trial-balance engine
-plus 2050-series mapping layers, verified by hand-traced oracles and
-live runs against the FR demo company / the multi-year fixture company.
-`LiassePage` displays only bilan/compte de résultat/2054/2055 — 2056/
-2059's display is separate follow-up work (see "Liasse fiscale annexes
-2056/2059" above). See "Liasse fiscale / bilan & compte de résultat"
-above for the core architecture (the Actif=Passif independent check, DI
-constructed from HN, the confirmed overdraft/775-675/immobilisation-
-category regroupings, the 2054/2055 tie-out). **2057 (état des créances
-et des dettes) is blocked**, not deferred by priority — both its cadres
+(2052/2053), the 2054/2055 movement annexes, 2056 (provisions), and
+2059-A (plus/moins-values, a guarded N/A stub) are all computed AND
+displayed (as of 2026-08-09), régime réel normal, by a shared
+trial-balance engine plus 2050-series mapping layers, verified by
+hand-traced oracles and live runs against the FR demo company / the
+multi-year fixture company. See "Liasse fiscale / bilan & compte de
+résultat" and "Liasse fiscale annexes 2056/2059" above for the core
+architecture (the Actif=Passif independent check, DI constructed from
+HN, the confirmed overdraft/775-675/immobilisation-category
+regroupings, the 2054/2055 tie-out). **2057 (état des créances et des
+dettes) is blocked**, not deferred by priority — both its cadres
 need a maturity/échéance split nothing in the schema can produce; see
 "Liasse fiscale annexes 2056/2059" above and
 `specs/liasse-2056-2059-implementation-spec.md` §3. Verifying 2054/2055
@@ -892,15 +897,13 @@ Article A47 A-1 §VIII uncross-checked).
 
 **Build order for what's next**, roughly in priority:
 
-1. **Liasse fiscale**: a `LiassePage` display for 2056/2059 (the
-   computation is done, same staged order 2054/2055 followed); then
-   the 2057 maturity-tracking decision (new schema field + UI, or a
-   deliberate brut-only reduced version — needs a product call, see
-   above); then the 2033-series (régime réel simplifié) mapping as a
-   second pass over the same shared engine. Separately, worth picking
-   up soon: the "orphaned immobilisation" guard logged in "Known scope
-   boundaries" — warning at journal-entry time rather than relying on
-   the liasse tie-out as the only backstop.
+1. **Liasse fiscale**: the 2057 maturity-tracking decision (new schema
+   field + UI, or a deliberate brut-only reduced version — needs a
+   product call, see above); then the 2033-series (régime réel
+   simplifié) mapping as a second pass over the same shared engine.
+   Separately, worth picking up soon: the "orphaned immobilisation"
+   guard logged in "Known scope boundaries" — warning at journal-entry
+   time rather than relying on the liasse tie-out as the only backstop.
 2. **Cash flow statement** — bilan and compte de résultat are already
    covered by the liasse work above.
 3. **Financial analysis** — ratios, free cash flow, and a DCF as an
