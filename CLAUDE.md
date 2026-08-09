@@ -29,9 +29,12 @@ depreciation (amortissements), VAT (TVA), and liasse fiscale.
   has its own two screens: an asset list (valeur brute / amortissements
   cumulés / VNC per asset) and a per-asset detail page showing the plan
   d'amortissement, where a "Comptabiliser la dotation" action posts each
-  period's dotation as a real validated écriture. Liasse fiscale is the
-  one remaining honest "non implémenté" placeholder, matching its backend
-  stub status — nothing to build there until the backend logic exists.
+  period's dotation as a real validated écriture. Liasse fiscale now has
+  a real screen too (`LiassePage`) — bilan (2050/2051) and compte de
+  résultat (2052/2053), régime réel normal only, read-only report, see
+  "Liasse fiscale / bilan & compte de résultat" below. The 2054–2059
+  annex forms and the régime réel simplifié (2033-series) variant remain
+  honest "non implémenté" territory, matching the backend's own scope.
 - **Package manager**: npm.
 - **Testing**: Jest (unit + e2e, NestJS default).
 - **Validation**: `class-validator` / `class-transformer` on all DTOs.
@@ -441,6 +444,117 @@ the French form or "the convention probably says."
   Cadre C (lignes 70-75, supplier-origin breakdown of déductible TVA —
   informational only per the form's own note, doesn't feed B1/B2/B3/48).
 
+## Liasse fiscale / bilan & compte de résultat
+
+`src/modules/liasse/` computes the two foundational forms of the régime
+réel normal liasse — **bilan (2050 Actif / 2051 Passif)** and **compte
+de résultat (2052/2053)** — and `LiassePage` displays them, read-only,
+in the real form's own layout. Built the same way as FEC/CA3/Monaco:
+against the primary forms in `specs/`, mapping confirmed and reviewed
+before any computation was written. Full line spec, account mapping,
+and the ten flagged mapping gaps are in
+`specs/liasse-2050-implementation-spec.md`; this section records the
+facts that must never be re-derived from memory.
+
+- **`Company.regime` (`REEL_NORMAL` | `REEL_SIMPLIFIE`) selects which
+  liasse is official**, same role as `Jurisdiction` for VAT — defaults
+  to `REEL_NORMAL`, the regime this pass implements. `LiasseService`
+  refuses (`NotImplementedException`) for a `REEL_SIMPLIFIE` company
+  rather than silently handing it a réel-normal liasse. No delete/
+  update surface for this field yet beyond what `CreateCompanyDto`/
+  `UpdateCompanyDto` already expose.
+- **One shared, regime-agnostic engine; a mapping layer on top.**
+  `trial-balance-engine.ts` aggregates validated-only ledger lines into
+  one signed balance per account — the same shape a future 2033-series
+  (régime réel simplifié) mapping would consume, unbuilt so far.
+  `liasse-line-rules.ts`'s `classifyAccounts()` is the actual
+  enforcement: every account is assigned to **exactly one** line, with
+  the line's own sign convention (a contra account like `6091` "rabais
+  obtenus" nets against its parent `601` "achats" automatically, no
+  per-account special-casing needed). **An account matching zero lines,
+  or more than one, throws** — never guesses, never silently drops a
+  balance. `bilan-2050.ts` / `compte-resultat-2052-2053.ts` hold the
+  2050-series rule tables and the pure compute functions.
+- **Actif = Passif is the one real independent articulation check** —
+  not a tautology. Actif is summed only from asset-nature accounts,
+  Passif only from liability/equity-nature accounts: two disjoint
+  partitions of the same trial balance via separate rule sets. It only
+  holds if `classifyAccounts` partitions every account exactly once
+  with the correct sign — get the overdraft case below wrong, or drop
+  an account, and it breaks. `liasse-articulation.ts` asserts this
+  (`ConflictException`, not silently accepted).
+- **DI (bilan's "Résultat de l'exercice") is not a ledger read — it's
+  constructed from the compte de résultat's HN.** Account 120/129
+  reads 0.00 within the fiscal year itself in this app:
+  `a-nouveau.service.ts` only posts a year's result into 120/129 as
+  part of the *following* year's opening écriture. This makes the
+  compute order load-bearing, not incidental —
+  `computeCompteResultat2052_2053()` must run before
+  `computeBilan2050()`, which takes the résultat as a parameter rather
+  than deriving it. An earlier draft of this design treated `HN ===
+  DI` as an independent cross-check; that was wrong (it would have
+  trivially compared HN to a hardcoded zero) and was caught and fixed
+  before anything shipped.
+- **The immobilisations module's VNC still ties out as a genuine
+  cross-check** — `fixed-asset-invariants.ts`'s `valeurBrute`/
+  `amortissementsCumules` (independently sourced from
+  `FixedAsset.acquisitionValue` and posted `DepreciationEntry.amount`,
+  never from re-reading the ledger's 21x/28x balances) must equal the
+  same lines' ledger-derived Brut/Amortissements, grouped via
+  `resolveImmobilisationLineCode()`. Scoped to depreciation entries
+  posted in or before the reported fiscal year, so it stays comparable
+  to a trial balance scoped the same way.
+- **Two confirmed high-risk regroupings, verified against the rendered
+  form images, not assumed:**
+  - **Bank overdrafts sign-reclassify from Actif to Passif.** A
+    class-5 account (512/514/516/517) with a net *credit* balance
+    routes to passif **DU** ("Emprunts et dettes auprès des
+    établissements de crédit"), not netted against **CF**
+    (Disponibilités) — confirmed by the 2051 form's own memo line EH
+    ("dont concours bancaires courants, et soldes créditeurs de
+    banques et CCP"). `DualNatureRule`s in `liasse-line-rules.ts`
+    route by the account's *own* balance sign, bypassing normal
+    per-line rule matching entirely. Same mechanism covers the
+    personnel/social "charges à payer" family (428/438/448 → DY) and
+    the associés-divers family (455/458/467/468 → EA).
+  - **775/675 "cessions d'éléments d'actif" splits across three
+    different compte-de-résultat sections by sub-account, not by PCG
+    class.** 7751/7752 (incorporelles/corporelles) → **F1**, inside
+    *produits d'exploitation*; 7756 (financières) → **G2**, inside
+    *produits financiers*; only 7758 stays in **HD**, *produits
+    exceptionnels* — confirmed from where F1/G2 actually sit on the
+    rendered form. Mirrored on charges (675 → G1/G3/HH). These lines
+    compute to 0.00 today regardless, since cession isn't implemented
+    in the immobilisations module yet (see "Known scope boundaries").
+- **Verified two ways.** A hand-computed oracle
+  (`liasse-oracle-fixture.ts`, 26 tests across four spec files) — a
+  23-transaction dataset, individually balanced by construction, hand-
+  traced line by line including the overdraft and dual-nature cases,
+  landing on Actif net = Passif total = 200 900,00 and a loss of
+  36 100,00. Separately, a live call against the seeded FR demo
+  company balanced on real data too (21 855,00 = 21 855,00). One real
+  gap was caught while building the oracle: account 764 (Revenus des
+  VMP) was missing from the compte de résultat mapping entirely —
+  fixed, routed to `GL`.
+- **`LiassePage` renders in the real form's layout**, not just a data
+  dump: Actif's three columns grouped into the form's own rubriques,
+  Passif with DI inserted at its actual position (between Report à
+  nouveau and Subventions d'investissement) even though it's a
+  separate field on the wire, and the compte de résultat's subtotal/
+  résultat rows visually distinguished from the itemized lines feeding
+  them. The Actif=Passif balance is its own banner, showing both
+  totals rather than just asserting equality. Same drafts-block guard
+  as FEC/CA3 (client-side, names the count, mirrors the backend's
+  refusal rather than letting the button hit a 409).
+- **Remaining liasse work, roughly in order**: the 2054–2059 annex
+  forms (2054/2055 — tableau des immobilisations / amortissements —
+  are the most scaffolded, since the immobilisations module's real
+  fields already exist; 2056–2059 not started at all), then the
+  2033-series (régime réel simplifié) mapping as a second pass over
+  the same shared engine — the concrete test of whether the engine
+  shape actually supports a second mapping layer the way it was
+  designed to.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
@@ -463,19 +577,16 @@ assume they're covered either:
   filing's volume, edge-case account numbers, or a Monaco company) — treat
   each materially different dataset as needing its own run, not covered
   by this one.
-- **Frontend has no screen for liasse fiscale** — deliberately: see
-  "Stack" above. There's nothing to build there until the backend stub
-  below is implemented; the nav entry is an honest "non implémenté"
-  placeholder, not a faked screen. VAT is further along: rate management
-  and a CA3 declaration report screen are both real (`VatPage`),
-  computing and displaying the basic French case (see "VAT / CA3
-  declaration" above) — read-only, it never posts to the ledger — and
-  the journal entry grid can tag a line with a rate.
-- **Liasse fiscale (`src/modules/liasse/`) is a stub** — throws
-  `NotImplementedException`, not a plausible-looking fake computation.
-  Don't build on top of it assuming real logic exists. VAT's
-  `computeDeclaration()` is no longer a stub for either jurisdiction —
-  it branches to `computeCa3Declaration()` (FR) or
+- **Liasse fiscale covers its two foundational forms only — the rest
+  is still a stub.** `computeBilan2050()`/`computeCompteResultat2052_2053()`
+  are real (see "Liasse fiscale / bilan & compte de résultat" above),
+  but `LiasseService.generate()` only ever produces those two forms:
+  no 2054–2059 annexes, and `REEL_SIMPLIFIE` companies are refused
+  outright (`NotImplementedException`), not handed a wrong liasse.
+  `LiassePage` renders only what the backend produces — don't assume
+  a fuller liasse exists because the route is no longer a placeholder.
+- **VAT's `computeDeclaration()` is no longer a stub for either
+  jurisdiction** — it branches to `computeCa3Declaration()` (FR) or
   `computeMonacoDeclaration()` (MC) — but each only covers its own
   basic case; see "VAT / CA3 declaration" and "VAT / Monaco declaration
   (Case B)" above for exactly what's deferred on each side (taux
@@ -520,8 +631,10 @@ assume they're covered either:
   throws `NotImplementedException` in `generateSchedule()`; only linéaire
   is computed. The tableau des immobilisations / tableau des
   amortissements reports — which double as liasse forms 2054/2055 —
-  haven't been designed yet; that happens once the liasse work starts
-  (roadmap item 2 below), against real field needs from the now-built
+  still haven't been designed, even though the two foundational liasse
+  forms (bilan/compte de résultat) are now done — see "Liasse fiscale /
+  bilan & compte de résultat" above and its "remaining work" note.
+  Design them against real field needs from the now-built
   list/schedule screens rather than guessed in advance. What *is* done
   (as of 2026-08-02): `DepreciationService.postDotation()` posts a
   period's dotation (débit compte 681x / crédit compte 28x) through the
@@ -613,19 +726,30 @@ filing-frequency mechanics, the cross-border memo-line question) are
 listed in that section and in `specs/vat-monaco-implementation-spec.md`
 — not yet resolved from the source documents.
 
-Liasse fiscale remains a stub — see "Known scope boundaries" below for
-that and the other logged gaps (`dateLettrage` not API-settable, no
-import-batch listing endpoint, no delete/deactivate on Journal/Account/
-VatRate/FiscalYear, Article A47 A-1 §VIII uncross-checked).
+**Liasse fiscale** — the two foundational forms are done (as of
+2026-08-09): bilan (2050/2051) and compte de résultat (2052/2053),
+régime réel normal, computed by a shared trial-balance engine plus a
+2050-series mapping layer, verified by a hand-traced oracle and a live
+run against the FR demo company, and displayed read-only by
+`LiassePage` in the real form's layout. See "Liasse fiscale / bilan &
+compte de résultat" above for the architecture (the Actif=Passif
+independent check, DI constructed from HN, the confirmed overdraft and
+775/675 regroupings) and exactly what's still deferred (2054–2059
+annexes, the 2033-series régime réel simplifié mapping). Other logged
+gaps remain open too (`dateLettrage` not API-settable, no import-batch
+listing endpoint, no delete/deactivate on Journal/Account/VatRate/
+FiscalYear, Article A47 A-1 §VIII uncross-checked) — see "Known scope
+boundaries" below.
 
 **Build order for what's next**, roughly in priority:
 
-1. **Liasse fiscale** — currently a stub (`src/modules/liasse/`). Includes
-   designing the tableau des immobilisations / tableau des amortissements
-   (forms 2054/2055) against the immobilisations module's real fields,
-   now that it exists, rather than guessing the structure in advance.
-2. **Cash flow statement**, plus bilan and compte de résultat if the
-   liasse work above doesn't already cover them.
+1. **Liasse fiscale annexes** — 2054/2055 (tableau des immobilisations
+   / tableau des amortissements) against the immobilisations module's
+   real fields, now that both it and the shared liasse engine exist;
+   then 2056–2059; then the 2033-series (régime réel simplifié) mapping
+   as a second pass over the same engine.
+2. **Cash flow statement** — bilan and compte de résultat are already
+   covered by the liasse work above.
 3. **Financial analysis** — ratios, free cash flow, and a DCF as an
    assumptions-driven model (explicit inputs the user can see and change,
    not a black-box number).
