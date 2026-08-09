@@ -3,6 +3,9 @@ import { Money } from '../../common/decimal';
 import { Bilan2050 } from './bilan-2050';
 import { Tableau2054 } from './tableau-2054';
 import { Tableau2055 } from './tableau-2055';
+import { Tableau2056 } from './tableau-2056';
+import { TrialBalanceAccount } from './trial-balance-engine';
+import { PROVISION_ACCOUNT_CLASS_PREFIXES } from './provision-categories';
 
 /**
  * The oracle — see specs/liasse-2050-implementation-spec.md §5 and
@@ -148,4 +151,45 @@ export function assertTableauxTieToBilan(input: {
         'sides.',
     );
   }
+}
+
+/**
+ * 2056's own version of the same idea, but comparing two INDEPENDENT
+ * derivations of the same number rather than tying to a bilan subtotal
+ * (the bilan doesn't expose one — its "amortissements" column mixes 28x
+ * amortissement with 29x dépréciation per asset line, e.g. AO combines
+ * 2811+2911, so there is no clean bilan figure to tie to the way 2054/
+ * 2055 tie to "total immobilisations net"). Path A: 2056's own
+ * TOTAL GÉNÉRAL, built by classifying every provision/dépréciation
+ * account into a nature line (provision-categories.ts). Path B: a flat
+ * sum of the SAME accounts' closing balances straight off the trial
+ * balance, by prefix only, with no classification logic at all. If a
+ * provision account were ever double-counted or dropped by the
+ * classification, the two paths would disagree — same spirit as
+ * assertVncTiesToLedger's two-independently-sourced-numbers check.
+ */
+function assertTableau2056TiesToTrialBalance(
+  trialBalance: TrialBalanceAccount[],
+  tableau2056: Tableau2056,
+): void {
+  const rawTotal = trialBalance
+    .filter((a) => PROVISION_ACCOUNT_CLASS_PREFIXES.some((p) => a.accountNumber.startsWith(p)))
+    .reduce((sum, a) => sum.minus(a.balance), Money.zero()); // credit direction: −(debit−credit)
+
+  const tableauTotal = Money.fromString(tableau2056.totalGeneral);
+  if (!rawTotal.equals(tableauTotal)) {
+    throw new ConflictException(
+      `2056's TOTAL GÉNÉRAL (${tableauTotal.toApiString()}) does not equal the raw trial-balance sum ` +
+        `of every provision/dépréciation account (${rawTotal.toApiString()}). This means the 2056 ` +
+        'nature-line classification double-counted, dropped, or misdirected an account — a mapping ' +
+        'bug, not a data problem.',
+    );
+  }
+}
+
+export function assertTableau2056TiesToBilan(input: {
+  trialBalance: TrialBalanceAccount[];
+  tableau2056: Tableau2056;
+}): void {
+  assertTableau2056TiesToTrialBalance(input.trialBalance, input.tableau2056);
 }

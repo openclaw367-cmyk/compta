@@ -19,6 +19,7 @@ import {
   VncCheckLine,
   assertLiasseArticulation,
   assertTableauxTieToBilan,
+  assertTableau2056TiesToBilan,
 } from './liasse-articulation';
 import { ImmobilisationMovementAsset, Tableau2054, computeTableau2054 } from './tableau-2054';
 import {
@@ -26,22 +27,29 @@ import {
   Tableau2055,
   computeTableau2055,
 } from './tableau-2055';
+import { ProvisionMovementLigne, Tableau2056, computeTableau2056 } from './tableau-2056';
+import { PROVISION_ACCOUNT_CLASS_PREFIXES } from './provision-categories';
 
 export interface LiasseResult {
   bilan: Bilan2050;
   compteResultat: CompteResultat2052_2053;
   tableau2054: Tableau2054;
   tableau2055: Tableau2055;
+  tableau2056: Tableau2056;
 }
 
 /**
  * Liasse fiscale, régime réel normal (2050-series) — bilan, compte de
- * résultat, and the 2054/2055 immobilisations/amortissements movement
- * annexes. See specs/liasse-2050-implementation-spec.md and
- * specs/liasse-2054-2055-implementation-spec.md. The 2033-series
- * (régime réel simplifié) mapping and the remaining annexes (2056-2059)
- * don't exist yet — a REEL_SIMPLIFIE company is refused explicitly
- * rather than silently handed a réel-normal liasse, same discipline as
+ * résultat, the 2054/2055 immobilisations/amortissements movement
+ * annexes, and 2056 (provisions). See
+ * specs/liasse-2050-implementation-spec.md,
+ * specs/liasse-2054-2055-implementation-spec.md, and
+ * specs/liasse-2056-2059-implementation-spec.md. 2057 (état des
+ * créances et des dettes) and 2059 (plus/moins-values) are separately
+ * scoped — see those specs for exactly what's built vs. deferred/
+ * blocked. The 2033-series (régime réel simplifié) mapping doesn't
+ * exist yet — a REEL_SIMPLIFIE company is refused explicitly rather
+ * than silently handed a réel-normal liasse, same discipline as
  * VatService.computeDeclaration()'s jurisdiction guard.
  *
  * Only validated écritures are read, and the whole computation refuses
@@ -90,7 +98,7 @@ export class LiasseService {
         companyId: company.companyId,
         ecriture: { fiscalYearId: fiscalYear.id, validatedAt: { not: null } },
       },
-      include: { compte: true },
+      include: { compte: true, ecriture: { include: { journal: true } } },
     });
     const mappedLignes: LiasseLigne[] = lignes.map((ligne) => ({
       compteNumber: ligne.compte.number,
@@ -138,7 +146,20 @@ export class LiasseService {
 
     assertTableauxTieToBilan({ bilan, tableau2054, tableau2055 });
 
-    return { bilan, compteResultat, tableau2054, tableau2055 };
+    const provisionLignes: ProvisionMovementLigne[] = lignes
+      .filter((ligne) =>
+        PROVISION_ACCOUNT_CLASS_PREFIXES.some((prefix) => ligne.compte.number.startsWith(prefix)),
+      )
+      .map((ligne) => ({
+        accountNumber: ligne.compte.number,
+        isOpeningBalance: ligne.ecriture.journal.type === 'A_NOUVEAU',
+        debit: Money.fromDecimal(ligne.debit),
+        credit: Money.fromDecimal(ligne.credit),
+      }));
+    const tableau2056 = computeTableau2056(provisionLignes);
+    assertTableau2056TiesToBilan({ trialBalance: bilanAccounts, tableau2056 });
+
+    return { bilan, compteResultat, tableau2054, tableau2055, tableau2056 };
   }
 
   /**

@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, JournalType } from '@prisma/client';
 import { LiasseService } from './liasse.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
@@ -10,6 +10,7 @@ import {
   ORACLE_DEPRECIATION_ENTRIES,
   ORACLE_HN,
 } from './tableau-2054-2055-oracle-fixture';
+import { ORACLE_2056_TOTALS } from './tableau-2056-oracle-fixture';
 
 const company: CompanyContext = { companyId: 'company-1' };
 
@@ -244,6 +245,108 @@ describe('LiasseService.generate', () => {
     expect(
       result.tableau2055.lignes.find((l) => l.code === 'CONSTRUCTIONS_SOL_PROPRE'),
     ).toMatchObject({ montantDebut: '10000.00', dotations: '10000.00', montantFin: '20000.00' });
+    expect(result.bilan.totalActifNet).toBe(result.bilan.totalPassif);
+  });
+
+  it('wires 2056 end to end — a fresh provision (dotation + partial reprise) and a fresh dépréciation (dotation only), no immobilisations involved', async () => {
+    const prisma = makePrismaMock();
+    prisma.fiscalYear.findFirst.mockResolvedValue(FY_2026);
+    const nonAn = { journal: { type: JournalType.OPERATIONS_DIVERSES } };
+    prisma.ecritureLigne.findMany = jest.fn().mockResolvedValue([
+      // Minimal balanced base — capital apport in cash. Deliberately no immobilisation accounts, so
+      // tableau2054/2055 (fed by fixedAsset.findMany, left at its default empty mock here) stay
+      // trivially 0.00 = 0.00 and don't interfere with this test's actual subject, 2056.
+      {
+        compteId: '512000',
+        compte: { number: '512000', pcgClass: 5 },
+        debit: new Prisma.Decimal('10000.00'),
+        credit: new Prisma.Decimal('0.00'),
+        ecriture: nonAn,
+      },
+      {
+        compteId: '101000',
+        compte: { number: '101000', pcgClass: 1 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('10000.00'),
+        ecriture: nonAn,
+      },
+      // Vente à crédit — gives the clients dépréciation below a real receivable to net against.
+      {
+        compteId: '411000',
+        compte: { number: '411000', pcgClass: 4 },
+        debit: new Prisma.Decimal('5000.00'),
+        credit: new Prisma.Decimal('0.00'),
+        ecriture: nonAn,
+      },
+      {
+        compteId: '706000',
+        compte: { number: '706000', pcgClass: 7 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('5000.00'),
+        ecriture: nonAn,
+      },
+      // Dotation provisions pour garanties clients.
+      {
+        compteId: '151200',
+        compte: { number: '151200', pcgClass: 1 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('5000.00'),
+        ecriture: nonAn,
+      },
+      {
+        compteId: '681500',
+        compte: { number: '681500', pcgClass: 6 },
+        debit: new Prisma.Decimal('5000.00'),
+        credit: new Prisma.Decimal('0.00'),
+        ecriture: nonAn,
+      },
+      // Reprise partielle sur cette même provision.
+      {
+        compteId: '151200',
+        compte: { number: '151200', pcgClass: 1 },
+        debit: new Prisma.Decimal('2000.00'),
+        credit: new Prisma.Decimal('0.00'),
+        ecriture: nonAn,
+      },
+      {
+        compteId: '781000',
+        compte: { number: '781000', pcgClass: 7 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('2000.00'),
+        ecriture: nonAn,
+      },
+      // Dotation dépréciation clients douteux.
+      {
+        compteId: '491000',
+        compte: { number: '491000', pcgClass: 4 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('1200.00'),
+        ecriture: nonAn,
+      },
+      {
+        compteId: '681700',
+        compte: { number: '681700', pcgClass: 6 },
+        debit: new Prisma.Decimal('1200.00'),
+        credit: new Prisma.Decimal('0.00'),
+        ecriture: nonAn,
+      },
+    ]);
+
+    const service = new LiasseService(prisma as unknown as PrismaService);
+    const result = await service.generate(company, { fiscalYearId: FY_2026.id });
+
+    expect(result.tableau2056.totalReglementees).toBe(ORACLE_2056_TOTALS.totalReglementees);
+    expect(result.tableau2056.totalRisquesCharges).toBe(ORACLE_2056_TOTALS.totalRisquesCharges);
+    expect(result.tableau2056.totalDepreciation).toBe(ORACLE_2056_TOTALS.totalDepreciation);
+    expect(result.tableau2056.totalGeneral).toBe(ORACLE_2056_TOTALS.totalGeneral);
+
+    // Bilan side-effects: DP (provisions pour risques) picks up the net 3 000,00; the clients line
+    // nets a 5 000,00 receivable against its 1 200,00 dépréciation.
+    const dp = result.bilan.passif.find((l) => l.code === 'DP')!;
+    expect(dp.montant).toBe('3000.00');
+    const clients = result.bilan.actif.find((l) => l.label === 'Clients et comptes rattachés')!;
+    expect(clients).toMatchObject({ brut: '5000.00', amortissements: '1200.00', net: '3800.00' });
+
     expect(result.bilan.totalActifNet).toBe(result.bilan.totalPassif);
   });
 });
