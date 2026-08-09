@@ -2,3 +2,9 @@
 # to check in. Real reference FEC samples belong in samples/ but should be
 # added deliberately (git add -f), not swept in by accident.
 samples/*.txt
+
+# A real, filled Monaco DSF declaration (name/address/dossier number of an
+# actual filer) used as a structural reference for the Monaco VAT pass —
+# never commit it. specs/vat-monaco-implementation-spec.md documents the
+# line structure and labels only, no filer data.
+specs/Blank VAT form MONACO.pdf

@@ -291,6 +291,14 @@ up.
 
 ## 4. Monaco divergence inventory
 
+**Superseded by `specs/vat-monaco-implementation-spec.md`**, which was
+built once the actual Monaco declaration form became available
+(`specs/Blank VAT form MONACO.pdf`) rather than the notice alone. Several
+findings below (esp. "Monaco's own Cadre B line numbers" being unknown,
+and filing frequency) are corrected or sharpened there — read that
+document for the current state, not this section. Kept here only as a
+record of what the notice-only pass could and couldn't establish.
+
 Read from `specs/Monaco notice TVA.pdf` (2 pages, DSF Monaco, "Notice
 pour l'établissement de la déclaration" + extraits du Code des Taxes sur
 le Chiffre d'Affaires, Ordonnance Souveraine n°11.887 du 19 février 1996
