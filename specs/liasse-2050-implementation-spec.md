@@ -1,8 +1,21 @@
 # Liasse fiscale — régime réel normal (2050-series), line spec + mapping
 
-**Status: review artifact. No computation built yet — this is the line
-spec, account mapping, articulation rules, and engine shape for review,
-per instruction. Nothing in `src/modules/liasse/` has been touched.**
+**Status: implemented and verified (as of 2026-08-09).** The mapping in
+this document was approved, then built in `src/modules/liasse/` —
+shared trial-balance engine (`trial-balance-engine.ts`), the
+classification machinery (`liasse-line-rules.ts`), the 2050-series
+mapping and compute functions (`bilan-2050.ts`,
+`compte-resultat-2052-2053.ts`), and the articulation checks
+(`liasse-articulation.ts`), orchestrated by `liasse.service.ts`
+(replacing the `NotImplementedException` stub) and exposed at
+`POST /liasse/generate`. Verified two ways: a hand-computed oracle
+(`liasse-oracle-fixture.ts` + the three `*.spec.ts` files, 26 tests, a
+full bilan+compte de résultat asserted line by line) and a live call
+against the real seeded FR demo company's fiscal year, which balanced
+(`totalActifNet === totalPassif`) on real data too. One real gap was
+found and fixed while building the oracle — account 764 (Revenus des
+VMP) was missing from the compte de résultat mapping — see the
+corrected `GL` row in §3c. No frontend screen yet.
 
 Scope of this pass: the two foundational forms only — **bilan (2050
 Actif / 2051 Passif)** and **compte de résultat (2052 / 2053)**. The
@@ -352,7 +365,7 @@ made for CA3 (no AIC/imports split). `FJ/FK` stay unimplemented;
 | GH/GI | Opérations en commun (655/755 family) | **uncertain — flagged, see §4** |
 | GJ | 761 | |
 | GK | 762 + 763 | |
-| GL | 768 | |
+| GL | 764 + 768 | **Corrected during implementation**: 764 (Revenus des VMP) was missing from the original table. VMP are short-term/trading investments, not "de l'actif immobilisé" (GK's territory — 762/763, immobilized securities' own revenue), so 764 belongs in GL's catch-all. |
 | GM | 786 | |
 | GN | 766 | |
 | GO | 767 | |
