@@ -17,7 +17,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "seed": "ts-node prisma/seed.ts",
-    "seed:sample": "ts-node prisma/seed-sample.ts"
+    "seed:sample": "ts-node prisma/seed-sample.ts",
+    "seed:monaco": "ts-node prisma/seed-monaco.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
