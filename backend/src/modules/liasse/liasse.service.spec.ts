@@ -3,6 +3,13 @@ import { Prisma } from '@prisma/client';
 import { LiasseService } from './liasse.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
+import {
+  FY_2026 as ORACLE_FY_2026,
+  ORACLE_ASSETS,
+  ORACLE_BILAN_LIGNES,
+  ORACLE_DEPRECIATION_ENTRIES,
+  ORACLE_HN,
+} from './tableau-2054-2055-oracle-fixture';
 
 const company: CompanyContext = { companyId: 'company-1' };
 
@@ -172,6 +179,72 @@ describe('LiasseService.generate', () => {
     await expect(service(prisma).generate(company, { fiscalYearId: FY_2026.id })).rejects.toThrow(
       /not implemented/,
     );
+  });
+
+  it('wires 2054/2055 end to end on the multi-year oracle — the first real exercise of entry.fiscalYear.endDate', async () => {
+    // Reuses the same hand-traced fixture as tableau-2054.spec.ts / tableau-2055.spec.ts /
+    // tableau-2054-2055-articulation.spec.ts, this time driven through the actual Prisma-shaped
+    // query result (include: { depreciationEntries: { include: { fiscalYear: true } } }) rather
+    // than calling the pure compute functions directly — the earlier VNC-bug tests above never
+    // populated depreciationEntries, so this is the first test that exercises
+    // entry.fiscalYear.endDate at all.
+    const entriesByAccount = new Map<string, typeof ORACLE_DEPRECIATION_ENTRIES>();
+    for (const entry of ORACLE_DEPRECIATION_ENTRIES) {
+      const list = entriesByAccount.get(entry.accountNumber) ?? [];
+      list.push(entry);
+      entriesByAccount.set(entry.accountNumber, list);
+    }
+    const fixedAssets: FakeFixedAsset[] = ORACLE_ASSETS.map((asset, i) => ({
+      id: `asset-${i}`,
+      companyId: company.companyId,
+      accountId: `account-${asset.accountNumber}`,
+      account: { number: asset.accountNumber },
+      acquisitionDate: asset.acquisitionDate,
+      acquisitionValue: new Prisma.Decimal(asset.acquisitionValue.toApiString()),
+      residualValue: new Prisma.Decimal('0.00'),
+      depreciationEntries: (entriesByAccount.get(asset.accountNumber) ?? []).map((entry) => ({
+        fiscalYearId: entry.fiscalYearId,
+        fiscalYear: { endDate: entry.fiscalYearEndDate },
+        amount: new Prisma.Decimal(entry.amount.toApiString()),
+        postedEcritureId: 'some-ecriture-id',
+      })),
+    }));
+
+    const prisma = makePrismaMock(fixedAssets);
+    prisma.fiscalYear.findFirst.mockResolvedValue({
+      id: ORACLE_FY_2026.id,
+      companyId: company.companyId,
+      label: '2026',
+      startDate: ORACLE_FY_2026.startDate,
+      endDate: ORACLE_FY_2026.endDate,
+      closedAt: null,
+    });
+    prisma.ecritureLigne.findMany = jest.fn().mockResolvedValue(
+      ORACLE_BILAN_LIGNES.map((l) => ({
+        compteId: l.compteNumber,
+        compte: { number: l.compteNumber, pcgClass: l.pcgClass },
+        debit: l.debit,
+        credit: l.credit,
+      })),
+    );
+
+    const service = new LiasseService(prisma as unknown as PrismaService);
+    const result = await service.generate(company, { fiscalYearId: ORACLE_FY_2026.id });
+
+    expect(result.compteResultat.beneficeOuPerte).toBe(ORACLE_HN);
+    expect(result.tableau2054.totalGeneral).toBe('390000.00');
+    expect(result.tableau2055.totalGeneral).toBe('38600.00');
+    expect(
+      result.tableau2054.lignes.find((l) => l.code === 'CONSTRUCTIONS_SOL_PROPRE'),
+    ).toMatchObject({
+      valeurBruteDebut: '200000.00',
+      acquisitions: '0.00',
+      valeurBruteFin: '200000.00',
+    });
+    expect(
+      result.tableau2055.lignes.find((l) => l.code === 'CONSTRUCTIONS_SOL_PROPRE'),
+    ).toMatchObject({ montantDebut: '10000.00', dotations: '10000.00', montantFin: '20000.00' });
+    expect(result.bilan.totalActifNet).toBe(result.bilan.totalPassif);
   });
 });
 

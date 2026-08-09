@@ -15,19 +15,33 @@ import {
   CompteResultat2052_2053,
   computeCompteResultat2052_2053,
 } from './compte-resultat-2052-2053';
-import { VncCheckLine, assertLiasseArticulation } from './liasse-articulation';
+import {
+  VncCheckLine,
+  assertLiasseArticulation,
+  assertTableauxTieToBilan,
+} from './liasse-articulation';
+import { ImmobilisationMovementAsset, Tableau2054, computeTableau2054 } from './tableau-2054';
+import {
+  ImmobilisationDepreciationMovement,
+  Tableau2055,
+  computeTableau2055,
+} from './tableau-2055';
 
 export interface LiasseResult {
   bilan: Bilan2050;
   compteResultat: CompteResultat2052_2053;
+  tableau2054: Tableau2054;
+  tableau2055: Tableau2055;
 }
 
 /**
- * Liasse fiscale, régime réel normal (2050-series) — bilan + compte de
- * résultat only, see specs/liasse-2050-implementation-spec.md. The
- * 2033-series (régime réel simplifié) mapping doesn't exist yet — a
- * REEL_SIMPLIFIE company is refused explicitly rather than silently
- * handed a réel-normal liasse, same discipline as
+ * Liasse fiscale, régime réel normal (2050-series) — bilan, compte de
+ * résultat, and the 2054/2055 immobilisations/amortissements movement
+ * annexes. See specs/liasse-2050-implementation-spec.md and
+ * specs/liasse-2054-2055-implementation-spec.md. The 2033-series
+ * (régime réel simplifié) mapping and the remaining annexes (2056-2059)
+ * don't exist yet — a REEL_SIMPLIFIE company is refused explicitly
+ * rather than silently handed a réel-normal liasse, same discipline as
  * VatService.computeDeclaration()'s jurisdiction guard.
  *
  * Only validated écritures are read, and the whole computation refuses
@@ -94,43 +108,72 @@ export class LiasseService {
     const compteResultat = computeCompteResultat2052_2053(compteResultatAccounts);
     const bilan = computeBilan2050(bilanAccounts, Money.fromString(compteResultat.beneficeOuPerte));
 
-    const vncByLine = await this.buildVncByLine(company, fiscalYear.endDate);
+    // One fetch, shared by the VNC check and both 2054/2055 — scoped to "acquired/posted in or
+    // before the reported fiscal year" (see fetchImmobilisations' own doc comment for why this
+    // scoping is load-bearing, not incidental).
+    const assets = await this.fetchImmobilisations(company, fiscalYear.endDate);
+
+    const vncByLine = this.buildVncByLine(assets);
     assertLiasseArticulation({ bilan, vncByLine });
 
-    return { bilan, compteResultat };
+    const tableau2054Assets: ImmobilisationMovementAsset[] = assets.map((asset) => ({
+      accountNumber: asset.account.number,
+      acquisitionDate: asset.acquisitionDate,
+      acquisitionValue: Money.fromDecimal(asset.acquisitionValue),
+    }));
+    const tableau2054 = computeTableau2054(tableau2054Assets, fiscalYear);
+
+    const tableau2055Entries: ImmobilisationDepreciationMovement[] = assets.flatMap((asset) =>
+      asset.depreciationEntries.map((entry) => ({
+        accountNumber: asset.account.number,
+        fiscalYearId: entry.fiscalYearId,
+        fiscalYearEndDate: entry.fiscalYear.endDate,
+        amount: Money.fromDecimal(entry.amount),
+      })),
+    );
+    const tableau2055 = computeTableau2055(tableau2055Entries, {
+      id: fiscalYear.id,
+      endDate: fiscalYear.endDate,
+    });
+
+    assertTableauxTieToBilan({ bilan, tableau2054, tableau2055 });
+
+    return { bilan, compteResultat, tableau2054, tableau2055 };
   }
 
   /**
-   * Groups every FixedAsset by the Actif line its account rolls up to,
-   * summing valeurBrute/amortissementsCumules per line using the same
-   * formula as the immobilisations module itself
-   * (fixed-asset-invariants.ts) — never re-derived. Both the assets
-   * themselves and their depreciation entries are scoped to "acquired/
-   * posted in or before the reported fiscal year" — an asset acquired
-   * in a LATER fiscal year must not inflate the VNC for an earlier,
-   * closed year's bilan. Filtering only depreciationEntries and not the
-   * assets themselves was a real bug here (caught while working out
-   * liasse-2054-2055-implementation-spec.md's movement requirements,
-   * fixed here since it needs the identical filter): a company that
-   * later acquired more assets would get a wrong VNC when reporting a
-   * past year, and nothing caught it because the oracle tests exercise
-   * assertLiasseArticulation directly against hand-built fixtures,
-   * never through this method.
+   * Every FixedAsset acquired in or before the reported fiscal year,
+   * with its posted depreciation entries from that same fiscal year or
+   * earlier — the shared "as of this year" dataset the VNC check and
+   * both 2054/2055 all need. Filtering only depreciationEntries and not
+   * the assets themselves was a real, separately-fixed bug here (see
+   * git history): a company that later acquired more assets would get
+   * a wrong VNC when reporting a past year. Fetched once and reused
+   * across all three consumers below rather than three separate
+   * queries.
    */
-  private async buildVncByLine(
-    company: CompanyContext,
-    asOfEndDate: Date,
-  ): Promise<VncCheckLine[]> {
-    const assets = await this.prisma.fixedAsset.findMany({
+  private async fetchImmobilisations(company: CompanyContext, asOfEndDate: Date) {
+    return this.prisma.fixedAsset.findMany({
       where: { companyId: company.companyId, acquisitionDate: { lte: asOfEndDate } },
       include: {
         account: true,
         depreciationEntries: {
           where: { postedEcritureId: { not: null }, fiscalYear: { endDate: { lte: asOfEndDate } } },
+          include: { fiscalYear: true },
         },
       },
     });
+  }
 
+  /**
+   * Groups the already-fetched assets by the Actif line their account
+   * rolls up to, summing valeurBrute/amortissementsCumules per line
+   * using the same formula as the immobilisations module itself
+   * (fixed-asset-invariants.ts) — never re-derived.
+   */
+  private buildVncByLine(
+    assets: Awaited<ReturnType<LiasseService['fetchImmobilisations']>>,
+  ): VncCheckLine[] {
     const byLine = new Map<string, { valeurBrute: Money; amortissementsCumules: Money }>();
     for (const asset of assets) {
       const summary = computeFixedAssetSummary(asset, asset.depreciationEntries);
