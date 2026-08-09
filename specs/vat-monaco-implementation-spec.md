@@ -176,7 +176,7 @@ by assuming convention parity.
 |---|---|---|
 | Line numbering scheme | Entirely different from France — no overlap at all (Monaco: 01/03–09b/A1/10–17/A2/15/30–37/B1/20/22–24/44/45/B2/B3/48/27–29/49/52/53/60/70–75; France: 08/09/9B/T6/16/17/18/19/20/21/22/2C/23/24/2E/25/TD/26/27/28/29/32). | Direct read of the rendered form vs. the CA3 form, both confirmed by rendering. |
 | Rate-line grouping | All three standard rates share the printed code "32" (three rows); France gives each its own code (08/09/9B). | Rendered form, §1a. |
-| 2,1 % as a named rate | No dedicated line for 2,1 % anywhere on the Monaco form (unlike France's T6, which this app promotes to a standard rate). Would fall in the unlabeled "30 Taux particuliers" bucket, if it exists at all for Monaco. | Absence confirmed by reading the full Cadre B rate section; existence of a Monaco 2,1 % rate itself is bucket (c), not confirmed either way. |
+| 2,1 % as a named rate | No dedicated, pre-printed 2,1 % line the way France names T6 — Monaco declares it through ligne 30 *"Taux particuliers ___%"*, a blank fillable field, instead of a named sub-line. **Resolved, see §6**: this is a declaration-mechanism difference (named line vs. generic field), not evidence the rate doesn't exist for Monaco. | Ligne 30's generic/fillable nature confirmed by rendering the page. |
 | Accise sur les énergies | Absent entirely from the Monaco form — no X/Y/Z/M-series régularisation section exists. | Confirmed absent across both rendered pages. |
 | "49 Taxes assimilées TMP" | A Monaco-specific assimilated tax with its own Base HT column, folded into ligne 60's total-à-payer formula. Not the same mechanism as France's ligne 29 (annexe 3310-A) — nothing ties TMP to that annexe. | Form, ligne 49. Meaning of "TMP" itself is bucket (c). |
 | Cadre A composition | Monaco gives "Cessions d'immobilisations" its own numbered line (08) inside the taxable side; France folds the equivalent into ligne A2 ("opérations taxables particulières") without a distinct number. Also, Monaco's ligne 15 "chiffre d'affaires" total is narrower than "A1 Total imposable" (see §2 flag) — no French equivalent has this specific two-tier total structure. | Form, Cadre A. |
@@ -186,8 +186,7 @@ by assuming convention parity.
 | Area | What's unresolved |
 |---|---|
 | **Filing frequency — an actual conflict, not just a gap.** | The notice's Article 70.1 states filing is monthly, or quarterly if annual VAT due < €4 000 — no annual option mentioned. But the example form's own period field reads *"Période de Déclaration: AN - 2023"* — most plausibly "Année 2023" (annual). Either "AN" means something other than annual, or an annual regime exists under a part of the Code des Taxes sur le Chiffre d'Affaires not included in the notice's excerpt (itself labeled *"Extraits"*, i.e. partial). **This directly contradicts the "monthly/quarterly, matches France" convergence already recorded in CLAUDE.md from the notice-only pass** — that entry needs revisiting once this is resolved, not left standing unchallenged. |
-| Whether Monaco has a 2,1 % rate at all | Ligne 30 "Taux particuliers" is blank (unfilled %) on the only example available. No sub-breakdown of what rates that bucket can hold. |
-| What "30 Taux particuliers" / "31 Anciens taux" actually contain | No taxonomy shown, unlike France's explicit T1–T7/13/P1–P2/I1–I6 breakdown. |
+| What "31 Anciens taux" actually contains | No taxonomy shown, unlike France's explicit T1–T7/13/P1–P2/I1–I6 breakdown. Genuinely unresolved — deferred, not implemented. Ligne 30 itself is resolved, see §6. |
 | PCG account numbers Monaco's declaration reads | **Not answerable from a tax form at all** — a DSF form has no reason to reference a filer's internal chart-of-accounts numbering, and neither document does. What's confirmed is the *label* match (§4a). Whether this app would reuse `445662`/`445660`/`445710` for a Monaco-jurisdiction company, or needs Monaco-specific account rows, is an implementation decision informed by — but not dictated by — that label match. CLAUDE.md already flags "Monaco commonly applies a PCG-aligned chart" as convention-based and not independently cited; this pass doesn't upgrade that. |
 | Whether déductible lines (44/45) need rate-tracking | Cadre B's "TVA brute" section structurally requires Base HT + Taxe due per rate (lines 30–32), same shape as France's collectée side. Nothing confirms whether 44/45 need a rate split (France's 19/20 don't either) — presumed no, by absence of contrary evidence, not by a source statement. |
 | "TMP" (ligne 49) | Undefined in both documents — full name and computation basis unknown. |
@@ -218,8 +217,33 @@ Flagging it as such rather than writing it into `CLAUDE.md` as
 Confirmed directly from the form (§2, §4a): **5,50 %, 10,00 %, 20,00 %**
 — exact match to France's three main rates, read from Monaco's own
 document, not inferred from "the convention probably keeps them
-aligned." **2,1 % is not confirmed** — no dedicated line, and whether it
-exists for Monaco at all is bucket (c) above.
+aligned."
+
+**2,1 % — corrected.** An earlier pass of this document classified 2,1 %
+as bucket (c) "can't tell," reasoning that the absence of a pre-printed
+2,1 % line (the way France names T6) meant its existence was
+unconfirmed. That reasoning was wrong: it mistook *how* a rate is
+declared for *whether* it exists. Re-reading the form, ligne 30 reads
+*"Taux particuliers ___%"* — a blank, fillable percentage field, the
+generic slot for whatever non-standard rate applies. This is Monaco's
+mechanism for a taux particulier: one blank field instead of France's
+several named sub-lines (T1, T6, ...), not evidence the rate is absent.
+Combined with the confirmed convention (CLAUDE.md "Monaco compliance":
+VAT largely mirrors French rates under the 1963 Franco-Monégasque tax
+convention) and the user's direct domain confirmation that Monaco's rate
+set includes 2,1 % (presse, médicaments, same as France), **2,1 % is
+implemented, declared via ligne 30**. This moves 2,1 % out of bucket (c)
+and into a corrected reading of bucket (b) above (§4b): a real
+mechanism difference (generic field vs. named line), not an unresolved
+unknown. Implemented in `computeMonacoDeclaration()` as a fourth
+`ImplementedRate` tagged `ligne: '30'`, alongside the three `ligne: '32'`
+rows — see the doc comment on `IMPLEMENTED_RATES` in
+`backend/src/modules/vat/monaco-declaration.ts` for the same correction
+recorded in code.
+
+Ligne 31 ("Anciens taux") remains genuinely unresolved — no taxonomy is
+shown for what it contains — and stays deferred, unaffected by this
+correction.
 
 ## 7. Open items before `computeMonacoDeclaration()` can start
 
@@ -229,9 +253,9 @@ All of §4c, plus:
    notice vs. the "AN" annual-looking period code on the actual form).
 2. Decide the PCG-account-reuse question in §5 — a real design decision
    for this app, not something the Monaco documents can settle.
-3. Determine whether 2,1 % is a real Monaco rate and if so how it's
-   declared (which would change whether this pass can mirror the
-   French T6 promotion-to-standard-rate decision, or must not).
-4. `computeMonacoDeclaration()` stays unbuilt until the above are
-   resolved — this document is the line spec, divergence table, and
-   account-mapping analysis only, per your instruction.
+3. ~~Determine whether 2,1 % is a real Monaco rate and if so how it's
+   declared~~ — resolved, see §6: implemented via ligne 30.
+4. `computeMonacoDeclaration()` is now built (§6, and account scheme
+   approved separately) — this document remains the line spec,
+   divergence table, and account-mapping analysis of record; keep it in
+   sync with the implementation rather than treating it as frozen.

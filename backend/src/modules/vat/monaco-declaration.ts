@@ -6,18 +6,18 @@ import { roundToNearestEuro } from './vat-rounding';
 /**
  * Monaco DSF declaration, basic-case computation — see
  * specs/vat-monaco-implementation-spec.md for the full line spec,
- * divergence table, and exactly what's implemented vs. deferred (bucket
- * (a)/(b) there vs. what's still bucket (c), unresolved). This is a
- * genuinely different declaration from the French CA3 — different form,
- * different tax authority, different line numbers — not a variant, even
- * though it happens to read the same PCG accounts (see the spec's §5).
+ * divergence table, and exactly what's implemented vs. deferred. This is
+ * a genuinely different declaration from the French CA3 — different
+ * form, different tax authority, different line numbers — not a
+ * variant, even though it happens to read the same PCG accounts (see
+ * the spec's §5).
  *
- * Scope, deliberately narrower than the CA3: only ligne 32's three named
- * rates (réduit/intermédiaire/normal) are implemented — lignes 30 (taux
- * particuliers), 31 (anciens taux), and 34 (TVA antérieurement déduite à
- * reverser) stay out, because unlike the CA3's T6 none of them are
- * confirmed to exist as a specific rate for Monaco from the source
- * documents (spec §4c). Lignes 20/22/23/24 (déductible) and 49/52/53
+ * Four rates implemented: the three named on ligne 32
+ * (réduit/intermédiaire/normal) plus 2,1 % via ligne 30 — see the
+ * IMPLEMENTED_RATES comment below for why 2,1 % belongs on 30, not a
+ * dropped rate. Lignes 31 (anciens taux) and 34 (TVA antérieurement
+ * déduite à reverser) stay deferred — genuinely different categories,
+ * not re-litigated here. Lignes 20/22/23/24 (déductible) and 49/52/53
  * (TMP, acomptes provisionnels, compléments) are equally unresolved and
  * stay out — see the spec's open items before ever widening this.
  */
@@ -26,30 +26,47 @@ import { roundToNearestEuro } from './vat-rounding';
 const DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT = '445662';
 /** Ligne 45 — autres biens et services (déductible), unambiguous, no rate split. */
 const DEDUCTIBLE_AUTRES_ACCOUNT = '445660';
-/** Ligne 32 (collectée) — any account under 4457, not hardcoded to one id. Same accounts as France, see spec §5. */
+/** Lignes 30/32 (collectée) — any account under 4457, not hardcoded to one id. Same accounts as France, see spec §5. */
 const COLLECTEE_PREFIX = '4457';
 /** Other 4456-prefixed accounts aren't mapped to a Monaco line yet. */
 const DEDUCTIBLE_PREFIX = '4456';
-/** Revenue lines feeding the base-HT-by-rate figures (ligne 32's "Base hors taxe" column). */
+/** Revenue lines feeding the base-HT-by-rate figures (lignes 30/32's "Base hors taxe" column). */
 const REVENUE_PCG_CLASS = 7;
 
 interface ImplementedRate {
-  /** All three share the printed line code "32" on the actual Monaco form — see spec §1a. */
+  /** "30" (taux particuliers, generic) or "32" (the three named standard rows) — see below. */
+  ligne: '30' | '32';
   label: string;
   ratePercent: Money;
 }
 
 /**
- * The three rates printed by name on the Monaco form's ligne 32 (spec
- * §2). No fourth rate the way France's CA3 promotes T6 (2,1 %) to
- * standard: Monaco's form shows no dedicated 2,1 % line at all, and
- * whether Monaco has that rate is unconfirmed (spec §4c) — so it is not
- * implemented here, deliberately asymmetric with the French decision.
+ * Corrected after review: 2,1 % IS implemented, on ligne 30 — not
+ * dropped the way an earlier pass concluded.
+ *
+ * The earlier conclusion ("no dedicated 2,1 % line, existence
+ * unconfirmed") mistook the *absence of a pre-printed 2,1 % label* for
+ * evidence the rate doesn't apply. Re-reading the actual form: ligne 30
+ * reads *"Taux particuliers ___%"* — a blank, fillable percentage field
+ * (confirmed by rendering the page, not just text extraction), the
+ * generic slot for whatever non-standard rate applies, functionally
+ * equivalent to how the French CA3 gives each taux particulier its own
+ * named sub-line (T1, T6, ...) instead of one blank field. Combined with
+ * the confirmed convention (CLAUDE.md "Monaco compliance": VAT largely
+ * mirrors French rates under the 1963 Franco-Monégasque tax convention)
+ * and that Monaco's rate set is confirmed to include 2,1 % (presse,
+ * médicaments, same as France), ligne 30 is where a Monaco filer with
+ * 2,1 %-rated activity would write "2,1" and declare it — not an
+ * unconfirmed or dropped rate.
+ *
+ * Ligne 31 (anciens taux) and ligne 34 stay deferred — genuinely
+ * different, unrelated categories, not affected by this correction.
  */
 const IMPLEMENTED_RATES: ImplementedRate[] = [
-  { label: 'Taux réduit', ratePercent: Money.fromString('5.50') },
-  { label: 'Taux intermédiaire', ratePercent: Money.fromString('10.00') },
-  { label: 'Taux normal', ratePercent: Money.fromString('20.00') },
+  { ligne: '30', label: 'Taux particulier 2,1 %', ratePercent: Money.fromString('2.10') },
+  { ligne: '32', label: 'Taux réduit', ratePercent: Money.fromString('5.50') },
+  { ligne: '32', label: 'Taux intermédiaire', ratePercent: Money.fromString('10.00') },
+  { ligne: '32', label: 'Taux normal', ratePercent: Money.fromString('20.00') },
 ];
 
 export interface MonacoLigne {
@@ -66,8 +83,8 @@ export interface MonacoVatRate {
 }
 
 export interface MonacoRateLine {
-  /** Always "32" — all three rates share this line code on the real form. */
-  ligne: '32';
+  /** "30" for the 2,1 % taux particulier, "32" for the three named standard rows. */
+  ligne: '30' | '32';
   label: string;
   ratePercent: string;
   /** Money string, rounded to the nearest euro. */
@@ -80,7 +97,7 @@ export interface MonacoDeclaration {
   periodStart: string;
   periodEnd: string;
   collecteeByRate: MonacoRateLine[];
-  /** Ligne B1 — total (implemented scope: sum of the ligne 32 rows only, not 30/31/34). Money string. */
+  /** Ligne B1 — total (implemented scope: ligne 30 + the three ligne 32 rows, not 31/34). Money string. */
   ligneB1: string;
   /** Ligne 44 — biens constituant des immobilisations. Money string. */
   ligne44: string;
@@ -112,9 +129,8 @@ function findImplementedRate(ratePercent: Money): ImplementedRate {
     throw new BadRequestException(
       `VAT rate ${ratePercent.toApiString()}% is not one of the currently-implemented Monaco rates ` +
         `(${IMPLEMENTED_RATES.map((r) => r.ratePercent.toApiString()).join('%, ')}%) — it would fall ` +
-        'under ligne 30 (taux particuliers) or ligne 31 (anciens taux), neither implemented (see ' +
-        'specs/vat-monaco-implementation-spec.md §4c — whether this rate even exists for Monaco is ' +
-        'unconfirmed from the source documents).',
+        'under ligne 31 (anciens taux), not implemented (see ' +
+        'specs/vat-monaco-implementation-spec.md).',
     );
   }
   return match;
@@ -197,8 +213,8 @@ export function computeMonacoDeclaration(
   assertNotNegative(ligne44, 'Ligne 44 (biens constituant des immobilisations)');
   assertNotNegative(ligne45, 'Ligne 45 (autres biens et services)');
   for (const { rate, baseHT, taxe } of buckets.values()) {
-    assertNotNegative(baseHT, `Base HT for ${rate.label} (ligne 32)`);
-    assertNotNegative(taxe, `Taxe due for ${rate.label} (ligne 32)`);
+    assertNotNegative(baseHT, `Base HT for ${rate.label} (ligne ${rate.ligne})`);
+    assertNotNegative(taxe, `Taxe due for ${rate.label} (ligne ${rate.ligne})`);
   }
 
   const ligneB1 = IMPLEMENTED_RATES.reduce(
@@ -218,7 +234,7 @@ export function computeMonacoDeclaration(
     collecteeByRate: IMPLEMENTED_RATES.map((rate) => {
       const bucket = buckets.get(rate.label)!;
       return {
-        ligne: '32' as const,
+        ligne: rate.ligne,
         label: rate.label,
         ratePercent: rate.ratePercent.toApiString(),
         baseHT: roundToNearestEuro(bucket.baseHT).toApiString(),
