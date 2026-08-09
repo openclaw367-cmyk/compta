@@ -104,17 +104,25 @@ export class LiasseService {
    * Groups every FixedAsset by the Actif line its account rolls up to,
    * summing valeurBrute/amortissementsCumules per line using the same
    * formula as the immobilisations module itself
-   * (fixed-asset-invariants.ts) — never re-derived. Depreciation entries
-   * posted in a LATER fiscal year than the one being reported are
-   * excluded, so this stays comparable to the trial balance, which is
-   * scoped to the same fiscal year.
+   * (fixed-asset-invariants.ts) — never re-derived. Both the assets
+   * themselves and their depreciation entries are scoped to "acquired/
+   * posted in or before the reported fiscal year" — an asset acquired
+   * in a LATER fiscal year must not inflate the VNC for an earlier,
+   * closed year's bilan. Filtering only depreciationEntries and not the
+   * assets themselves was a real bug here (caught while working out
+   * liasse-2054-2055-implementation-spec.md's movement requirements,
+   * fixed here since it needs the identical filter): a company that
+   * later acquired more assets would get a wrong VNC when reporting a
+   * past year, and nothing caught it because the oracle tests exercise
+   * assertLiasseArticulation directly against hand-built fixtures,
+   * never through this method.
    */
   private async buildVncByLine(
     company: CompanyContext,
     asOfEndDate: Date,
   ): Promise<VncCheckLine[]> {
     const assets = await this.prisma.fixedAsset.findMany({
-      where: { companyId: company.companyId },
+      where: { companyId: company.companyId, acquisitionDate: { lte: asOfEndDate } },
       include: {
         account: true,
         depreciationEntries: {
