@@ -336,8 +336,48 @@ export interface CompteResultat2052_2053 {
   beneficeOuPerte: string;
 }
 
+/** One 2054 row — cessions/virements are always "0.00", see tableau-2054.ts's doc comment. */
+export interface Tableau2054Ligne {
+  code: string;
+  label: string;
+  valeurBruteDebut: string;
+  acquisitions: string;
+  cessions: string;
+  virements: string;
+  valeurBruteFin: string;
+}
+
+/** Response shape for the 2054 half of POST /liasse/generate — see tableau-2054.ts on the backend. */
+export interface Tableau2054 {
+  lignes: Tableau2054Ligne[];
+  totalIncorporelles: string;
+  totalCorporelles: string;
+  totalFinancieres: string;
+  totalGeneral: string;
+}
+
+/** One 2055 row — diminutions is always "0.00", see tableau-2055.ts's doc comment. */
+export interface Tableau2055Ligne {
+  code: string;
+  label: string;
+  montantDebut: string;
+  dotations: string;
+  diminutions: string;
+  montantFin: string;
+}
+
+/** Response shape for the 2055 half of POST /liasse/generate — see tableau-2055.ts on the backend. */
+export interface Tableau2055 {
+  lignes: Tableau2055Ligne[];
+  totalIncorporelles: string;
+  totalCorporelles: string;
+  totalGeneral: string;
+}
+
 /** Response for POST /liasse/generate — régime réel normal (2050-series) only, see LiasseService.generate. */
 export interface LiasseResult {
   bilan: Bilan2050;
   compteResultat: CompteResultat2052_2053;
+  tableau2054: Tableau2054;
+  tableau2055: Tableau2055;
 }
