@@ -10,6 +10,7 @@ import { CompanyContext } from '../../common/tenant/company-context';
 import { CreateVatRateDto } from './dto/create-vat-rate.dto';
 import { ComputeVatDeclarationDto } from './dto/compute-vat-declaration.dto';
 import { Ca3Declaration, computeCa3Declaration } from './ca3-declaration';
+import { MonacoDeclaration, computeMonacoDeclaration } from './monaco-declaration';
 
 @Injectable()
 export class VatService {
@@ -45,38 +46,33 @@ export class VatService {
   }
 
   /**
-   * French CA3 (régime réel normal), basic-case only — see
-   * specs/vat-ca3-implementation-spec.md for the line spec, account
-   * mapping, and exactly what's implemented vs. deferred. Monaco (see
-   * specs/vat-monaco-implementation-spec.md) is a genuinely different
-   * declaration — different form, different line numbers, filed with a
-   * different tax authority — not a variant of the French computation,
-   * so this refuses outright for a non-FR company rather than silently
-   * running French logic against Monaco's chart of accounts.
+   * Computes the declaration for the company's own jurisdiction: the
+   * French CA3 (régime réel normal, basic case —
+   * specs/vat-ca3-implementation-spec.md) for FR, the Monaco DSF
+   * declaration (basic case — specs/vat-monaco-implementation-spec.md)
+   * for MC. These are genuinely different declarations — different
+   * form, different line numbers, filed with a different tax authority
+   * — not variants of one computation, even though (per the Monaco
+   * spec's confirmed account model, §5) they happen to read the same
+   * PCG accounts.
    *
    * Only validated écritures are read, and the whole computation refuses
    * if any écriture in the period is still a draft — same rule and same
    * reasoning as FecExportService.generate(): a declaration computed
    * around missing drafts would be silently wrong, not just incomplete.
    * The actual arithmetic lives in the pure, independently-tested
-   * computeCa3Declaration() — this method only fetches and delegates.
+   * computeCa3Declaration() / computeMonacoDeclaration() — this method
+   * only fetches, then delegates to whichever one matches jurisdiction.
    */
   async computeDeclaration(
     company: CompanyContext,
     dto: ComputeVatDeclarationDto,
-  ): Promise<Ca3Declaration> {
+  ): Promise<Ca3Declaration | MonacoDeclaration> {
     const companyRecord = await this.prisma.company.findFirst({
       where: { id: company.companyId },
     });
     if (!companyRecord) {
       throw new NotFoundException(`Company ${company.companyId} not found`);
-    }
-    if (companyRecord.jurisdiction !== 'FR') {
-      throw new NotImplementedException(
-        `Déclaration TVA monégasque pas encore implémentée (jurisdiction ${companyRecord.jurisdiction}). ` +
-          'Seule la déclaration CA3 française (jurisdiction FR) est disponible pour le moment — ' +
-          'voir specs/vat-monaco-implementation-spec.md.',
-      );
     }
 
     const periodStart = new Date(dto.periodStart);
@@ -110,17 +106,21 @@ export class VatService {
       this.prisma.vatRate.findMany({ where: { companyId: company.companyId } }),
     ]);
 
-    return computeCa3Declaration(
-      lignes.map((ligne) => ({
-        compteNumber: ligne.compte.number,
-        pcgClass: ligne.compte.pcgClass,
-        debit: ligne.debit,
-        credit: ligne.credit,
-        vatRateId: ligne.vatRateId,
-      })),
-      vatRates.map((rate) => ({ id: rate.id, ratePercent: rate.ratePercent })),
-      dto.periodStart,
-      dto.periodEnd,
-    );
+    const mappedLignes = lignes.map((ligne) => ({
+      compteNumber: ligne.compte.number,
+      pcgClass: ligne.compte.pcgClass,
+      debit: ligne.debit,
+      credit: ligne.credit,
+      vatRateId: ligne.vatRateId,
+    }));
+    const mappedRates = vatRates.map((rate) => ({ id: rate.id, ratePercent: rate.ratePercent }));
+
+    if (companyRecord.jurisdiction === 'FR') {
+      return computeCa3Declaration(mappedLignes, mappedRates, dto.periodStart, dto.periodEnd);
+    }
+    if (companyRecord.jurisdiction === 'MC') {
+      return computeMonacoDeclaration(mappedLignes, mappedRates, dto.periodStart, dto.periodEnd);
+    }
+    throw new NotImplementedException(`Unknown jurisdiction "${companyRecord.jurisdiction}".`);
   }
 }

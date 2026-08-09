@@ -1,8 +1,10 @@
-import { ConflictException, NotImplementedException } from '@nestjs/common';
+import { ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { VatService } from './vat.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
+import { Ca3Declaration } from './ca3-declaration';
+import { MonacoDeclaration } from './monaco-declaration';
 
 const company: CompanyContext = { companyId: 'company-1' };
 
@@ -24,19 +26,8 @@ describe('VatService.computeDeclaration', () => {
     service = new VatService(prisma as unknown as PrismaService);
   });
 
-  it('refuses to compute for a non-FR (Monaco) company rather than silently running French logic', async () => {
+  it('delegates to computeMonacoDeclaration for an MC company, not the French logic', async () => {
     prisma.company.findFirst.mockResolvedValue({ id: company.companyId, jurisdiction: 'MC' });
-    await expect(
-      service.computeDeclaration(company, { periodStart: '2026-01-01', periodEnd: '2026-01-31' }),
-    ).rejects.toThrow(NotImplementedException);
-    await expect(
-      service.computeDeclaration(company, { periodStart: '2026-01-01', periodEnd: '2026-01-31' }),
-    ).rejects.toThrow(/monégasque/);
-    expect(prisma.ecriture.count).not.toHaveBeenCalled();
-    expect(prisma.ecritureLigne.findMany).not.toHaveBeenCalled();
-  });
-
-  it('computes normally for an FR company (unaffected by the jurisdiction guard)', async () => {
     prisma.ecritureLigne.findMany.mockResolvedValue([
       {
         compteId: 'account-707',
@@ -57,10 +48,42 @@ describe('VatService.computeDeclaration', () => {
       { id: 'rate-20', ratePercent: new Prisma.Decimal('20.00') },
     ]);
 
-    const result = await service.computeDeclaration(company, {
+    const result = (await service.computeDeclaration(company, {
       periodStart: '2026-01-01',
       periodEnd: '2026-01-31',
-    });
+    })) as MonacoDeclaration;
+
+    // Monaco-shaped fields (ligneB1/ligne48), not the French ligne16/ligneTD.
+    expect(result.ligneB1).toBe('20.00');
+    expect(result.ligne48).toBe('20.00');
+    expect((result as unknown as Ca3Declaration).ligne16).toBeUndefined();
+  });
+
+  it('computes normally for an FR company (unaffected by the jurisdiction branch)', async () => {
+    prisma.ecritureLigne.findMany.mockResolvedValue([
+      {
+        compteId: 'account-707',
+        compte: { number: '707000', pcgClass: 7 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('100.00'),
+        vatRateId: 'rate-20',
+      },
+      {
+        compteId: 'account-44571',
+        compte: { number: '445710', pcgClass: 4 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('20.00'),
+        vatRateId: 'rate-20',
+      },
+    ]);
+    prisma.vatRate.findMany.mockResolvedValue([
+      { id: 'rate-20', ratePercent: new Prisma.Decimal('20.00') },
+    ]);
+
+    const result = (await service.computeDeclaration(company, {
+      periodStart: '2026-01-01',
+      periodEnd: '2026-01-31',
+    })) as Ca3Declaration;
 
     expect(result.ligneTD).toBe('20.00');
   });
@@ -120,10 +143,10 @@ describe('VatService.computeDeclaration', () => {
       { id: 'rate-20', ratePercent: new Prisma.Decimal('20.00') },
     ]);
 
-    const result = await service.computeDeclaration(company, {
+    const result = (await service.computeDeclaration(company, {
       periodStart: '2026-01-01',
       periodEnd: '2026-01-31',
-    });
+    })) as Ca3Declaration;
 
     expect(result.ligne16).toBe('20.00');
     expect(result.ligneTD).toBe('20.00');

@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Money } from '../../common/decimal';
+import { roundToNearestEuro } from './vat-rounding';
 
 /**
  * French CA3 (régime réel normal), basic-case computation — see
@@ -87,18 +88,6 @@ export interface Ca3Declaration {
   ligne28: string;
   /** Ligne 32 — total à payer (implemented scope: ligne28). Money string. */
   ligne32: string;
-}
-
-/**
- * Rounds to the nearest euro: fractions below 0,50 are dropped, 0,50 and
- * above round up (Article A47 A-1-style rule, but for VAT: CA3 notice
- * p.1/p.6/p.9, and Monaco Ordonnance Souveraine n°13.844 art. 1er —
- * identical rule, independently cited on both sides). Declaration-line
- * boundary only — never applied to a ledger value.
- */
-function roundToNearestEuro(amount: Money): Money {
-  const rounded = amount.toDecimal().toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP);
-  return Money.fromString(rounded.toFixed(2));
 }
 
 function assertNotNegative(amount: Money, description: string): void {
