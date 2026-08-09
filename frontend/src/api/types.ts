@@ -33,6 +33,8 @@ export interface Company {
   id: string;
   name: string;
   jurisdiction: 'FR' | 'MC';
+  /** Selects which liasse (2050-series vs. 2033-series) is the official/fileable one — see LiassePage. */
+  regime: 'REEL_NORMAL' | 'REEL_SIMPLIFIE';
   siren: string | null;
   rci: string | null;
   vatNumber: string | null;
@@ -261,4 +263,81 @@ export interface ImportBatch {
   errors: string[] | null;
   createdAt: string;
   ecritures?: Ecriture[];
+}
+
+/** One Actif row (2050) — Brut/Amortissements are ledger money strings, Net = Brut − Amortissements. */
+export interface BilanActifLigne {
+  code: string;
+  label: string;
+  brut: string;
+  amortissements: string;
+  net: string;
+}
+
+/** One Passif row (2051) — already net, no Brut/Amortissements split. */
+export interface BilanPassifLigne {
+  code: string;
+  label: string;
+  montant: string;
+}
+
+/** Response shape for the bilan half of POST /liasse/generate — see bilan-2050.ts on the backend. */
+export interface Bilan2050 {
+  actif: BilanActifLigne[];
+  /** CO — Actif total, colonne Brut. */
+  totalActifBrut: string;
+  /** 1A — Actif total, colonne Amortissements/provisions. */
+  totalActifAmortissements: string;
+  /** CO − 1A — uncoded on the real form itself. */
+  totalActifNet: string;
+  /** Includes DH (Report à nouveau — may legitimately be negative). DI is not in this array. */
+  passif: BilanPassifLigne[];
+  /** DI — Résultat de l'exercice. Constructed from the compte de résultat's HN, not a ledger read. */
+  resultatDeLExercice: string;
+  /** EE — Passif total. */
+  totalPassif: string;
+}
+
+export interface CompteResultatLigne {
+  code: string;
+  label: string;
+  montant: string;
+}
+
+/** Response shape for the compte-de-résultat half of POST /liasse/generate — see compte-resultat-2052-2053.ts. */
+export interface CompteResultat2052_2053 {
+  /** Every line, in form order, for a screen that shows the real form's codes — see compte-resultat-2052-2053.ts's CDR_RULES. */
+  lignes: CompteResultatLigne[];
+  /** FR — total des produits d'exploitation (I). */
+  totalProduitsExploitation: string;
+  /** GF — total des charges d'exploitation (II). */
+  totalChargesExploitation: string;
+  /** GG — résultat d'exploitation (I − II). */
+  resultatExploitation: string;
+  /** GH — bénéfice attribué ou perte transférée (III). Always null — opérations en commun deferred. */
+  beneficeAttribueOuPerteTransferee: string | null;
+  /** GI — perte supportée ou bénéfice transféré (IV). Always null, same reason. */
+  perteSupporteeOuBeneficeTransfere: string | null;
+  /** GP — total des produits financiers (V). */
+  totalProduitsFinanciers: string;
+  /** GU — total des charges financières (VI). */
+  totalChargesFinancieres: string;
+  /** GV — résultat financier (V − VI). */
+  resultatFinancier: string;
+  /** GW — résultat courant avant impôts (I − II + III − IV + V − VI). */
+  resultatCourantAvantImpots: string;
+  /** HI — résultat exceptionnel (VII − VIII). */
+  resultatExceptionnel: string;
+  /** HL — total des produits. */
+  totalProduits: string;
+  /** HM — total des charges. */
+  totalCharges: string;
+  /** HN — bénéfice ou perte. Feeds bilan.resultatDeLExercice. */
+  beneficeOuPerte: string;
+}
+
+/** Response for POST /liasse/generate — régime réel normal (2050-series) only, see LiasseService.generate. */
+export interface LiasseResult {
+  bilan: Bilan2050;
+  compteResultat: CompteResultat2052_2053;
 }

@@ -1,6 +1,5 @@
 import { Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';
-import { PlaceholderPage } from './components/placeholders/PlaceholderPage';
 import { JournalEntriesPage } from './pages/JournalEntriesPage';
 import { FiscalYearsPage } from './pages/FiscalYearsPage';
 import { CompanyProfilePage } from './pages/CompanyProfilePage';
@@ -12,6 +11,7 @@ import { FecExportPage } from './pages/FecExportPage';
 import { VatPage } from './pages/VatPage';
 import { ImmobilisationsPage } from './pages/ImmobilisationsPage';
 import { FixedAssetDetailPage } from './pages/FixedAssetDetailPage';
+import { LiassePage } from './pages/LiassePage';
 
 export default function App() {
   return (
@@ -28,16 +28,7 @@ export default function App() {
         <Route path="/immobilisations" element={<ImmobilisationsPage />} />
         <Route path="/immobilisations/:id" element={<FixedAssetDetailPage />} />
         <Route path="/tva" element={<VatPage />} />
-        <Route
-          path="/liasse"
-          element={
-            <PlaceholderPage
-              kind="not-implemented"
-              title="Liasse fiscale"
-              message="La génération de la liasse fiscale n'est pas encore implémentée côté serveur. Rien à afficher ici tant que ce n'est pas fait — voir CLAUDE.md."
-            />
-          }
-        />
+        <Route path="/liasse" element={<LiassePage />} />
       </Routes>
     </AppShell>
   );

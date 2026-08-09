@@ -12,6 +12,7 @@ import type {
   ImportBatch,
   ImportPreviewResponse,
   Journal,
+  LiasseResult,
   TrialBalanceResponse,
   VatRate,
 } from './types';
@@ -130,6 +131,22 @@ export function useComputeVatDeclaration() {
   return useMutation({
     mutationFn: (params: { periodStart: string; periodEnd: string }) =>
       api.post<Ca3Declaration>('/vat/declaration', params),
+  });
+}
+
+/**
+ * Generates the liasse fiscale (bilan 2050/2051, compte de résultat
+ * 2052/2053) for a fiscal year — read-only, never writes to the ledger.
+ * See LiasseService.generate on the backend: refuses (501) for a
+ * REEL_SIMPLIFIE company, refuses (409) if any écriture in the fiscal
+ * year is still a draft, and refuses (400/409) on an unmapped account, a
+ * sign ambiguity, or a bilan that doesn't balance — the page surfaces
+ * those messages as-is.
+ */
+export function useGenerateLiasse() {
+  return useMutation({
+    mutationFn: (params: { fiscalYearId: string }) =>
+      api.post<LiasseResult>('/liasse/generate', params),
   });
 }
 
