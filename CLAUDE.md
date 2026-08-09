@@ -77,6 +77,53 @@ docs/        Compliance artifacts (e.g. Test Compta Demat reports)
    since that's the REST prefix. `/docs` loads without any tenant context —
    see the middleware note below for why that's safe.
 
+## Test fixtures — multi-year regression company
+
+The seeded demo company (SIREN `123456789`, "Société Démo SARL") only ever
+has one fiscal year, so it can't exercise cross-year logic — and cross-year
+bugs are real: the liasse VNC-scoping bug (see "Liasse fiscale" below) only
+surfaced once a second, later fiscal year existed to leak into the first.
+To keep a reference for that class of bug, a second company, **"Société
+Test Multi-Année"** (id `cmsm0x5cc0000o5j8z8a3rr53`, FR/`REEL_NORMAL`, no
+SIREN), was built by hand through the real APIs on 2026-08-09 and is kept
+around deliberately as a standing fixture:
+
+- **Two fiscal years**: 2025 (`cmsm0xdk80002o5j89nbzom2a`) and 2026
+  (`cmsm0xdlq0004o5j8ja1yc84k`), both open.
+- **10 validated écritures**: an opening block plus 2 immobilisation
+  acquisitions and 7 dotation postings spread across both years.
+- **6 `FixedAsset` records** spanning both years and multiple 2054/2055
+  categories on purpose (a 2025 terrain, a 2025 bâtiment, a 2026 entrepôt,
+  a 2025 machine, a 2026 office-equipment purchase, a 2025 véhicule) —
+  chosen specifically to exercise "début vs. this year's movement"
+  splitting in `tableau-2054.ts`/`tableau-2055.ts`, not just closing
+  balances.
+- This is the exact dataset hand-traced in
+  `backend/src/modules/liasse/tableau-2054-2055-oracle-fixture.ts` and
+  used as the unit-test oracle — the fixture company reproduces it as
+  real rows so the same numbers can be checked live through the actual
+  API/UI, not just against mocks.
+
+**Rules for this company, so it stays trustworthy as a reference:**
+
+- **Don't post ad-hoc test entries into it.** Any écriture added here
+  should be a deliberate, documented extension of the fixture (updating
+  the oracle fixture file to match), not a one-off — otherwise its
+  numbers stop matching the hand-traced oracle and it stops being useful
+  as a regression check.
+- **It's not created by `npm run seed`.** It only exists in whatever
+  local Postgres database it was created in; a fresh `prisma migrate
+  dev`/reseed on a different machine or a wiped local DB won't recreate
+  it. There's no seed script for it (yet) — if that becomes a problem,
+  the fix is a dedicated `seed-multi-annee.ts` following the
+  `seed-sample.ts`/`seed-monaco.ts` precedent, not recreating it by hand
+  again.
+- **No company picker exists in the frontend** (see "Multi-tenant data
+  model" below), so viewing this company's data in the browser requires
+  temporarily pointing `x-company-id` at it (e.g. a temporary edit to
+  `frontend/src/api/client.ts`'s `request()`, reverted immediately after)
+  rather than clicking to it — don't leave that override in place.
+
 ## Multi-tenant data model — non-negotiable
 
 The product is used as a single-company tool today, but the schema and
