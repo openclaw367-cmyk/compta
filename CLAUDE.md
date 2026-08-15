@@ -29,12 +29,13 @@ depreciation (amortissements), VAT (TVA), and liasse fiscale.
   has its own two screens: an asset list (valeur brute / amortissements
   cumulés / VNC per asset) and a per-asset detail page showing the plan
   d'amortissement, where a "Comptabiliser la dotation" action posts each
-  period's dotation as a real validated écriture. Cession (disposal) is
-  now a real backend endpoint (see "Immobilisations / cession" below)
-  but has no frontend action yet — posting a disposal today means
-  calling `POST /depreciation/fixed-assets/:id/cession` directly; a
-  "Céder l'immobilisation" UI action is future work, not
-  existing-but-unwired. Liasse fiscale has a real screen too
+  period's dotation as a real validated écriture, and a "Céder
+  l'immobilisation" action (cession date, price, compte de règlement
+  defaulting to 462000) posts the disposal écriture(s) the same way —
+  same `window.confirm()`-then-mutate pattern, since both are definitive
+  ledger writes. A disposed asset stays listed (not removed), shown with
+  a "Cédée" badge, its cession date/price and plus/moins-value, and its
+  plan d'amortissement closed to further posting. Liasse fiscale has a real screen too
   (`LiassePage`) — bilan (2050/2051), compte de résultat (2052/2053),
   the 2054/2055 movement annexes (immobilisations/amortissements, now
   including real cessions/reprises columns), 2056 (provisions), 2057
@@ -662,8 +663,14 @@ text itself, not the DGFiP commentary).
   every articulation check passing on real data — bilan Actif=Passif,
   the 2054/2055 tie-out, and 2059-A's own compte-de-résultat tie-out all
   held.
-- **Not built this pass**: a frontend "Céder l'immobilisation" action
-  (posting today means calling the API directly) — see "Stack" above.
+- **Frontend built (2026-08-15, same day as the backend)**: a "Céder
+  l'immobilisation" action on `FixedAssetDetailPage` — see "Stack"
+  above for the form fields and post-disposal display state. The
+  liasse annexe screens (2054/2055/2056/2057/2059-A) needed no changes
+  at all to show the real cession data — they were already wired
+  correctly in the backend-only pass above; re-verified live against
+  the already-disposed Entrepôt C fixture asset rather than posting a
+  new disposal into the fixture.
 
 ## Liasse fiscale / bilan & compte de résultat
 
@@ -1018,10 +1025,12 @@ Reachable from the fiscal-year management screen.
 half (asset list, per-asset plan d'amortissement) and closes the
 previously-logged "depreciation never posts to the ledger" gap: dotations
 post through the normal entries validation layer and VNC is computed
-from posted entries only. **Cession (disposal) is also done** (as of
-2026-08-15) — see "Immobilisations / cession" above for the full
-écriture design, verified live against the multi-year fixture; no
-frontend action to trigger it yet. See "Known scope boundaries" above
+from posted entries only. **Cession (disposal) is also done, backend and
+frontend** (as of 2026-08-15) — see "Immobilisations / cession" above
+for the full écriture design, verified live against the multi-year
+fixture, and the "Céder l'immobilisation" action on
+`FixedAssetDetailPage` (see "Stack" above) to trigger it. See "Known
+scope boundaries" above
 for what's still deferred (dégressif, acquisition-year proration) and
 for the newly-logged "orphaned immobilisation" gap (a class-2 écriture
 with no `FixedAsset` behind it, currently only caught at
@@ -1090,12 +1099,9 @@ uncross-checked).
    schema field + UI to set it) remains open if ever wanted, not
    blocking; 2059-A's court-terme/long-terme tax qualification is the
    same kind of open, non-blocking item. Separately, worth picking up
-   soon: a frontend "Céder l'immobilisation" action (the backend
-   endpoint is done, see "Immobilisations / cession" above, but posting
-   a disposal today means calling the API directly) and the "orphaned
-   immobilisation" guard logged in "Known scope boundaries" — warning
-   at journal-entry time rather than relying on the liasse tie-out as
-   the only backstop.
+   soon: the "orphaned immobilisation" guard logged in "Known scope
+   boundaries" — warning at journal-entry time rather than relying on
+   the liasse tie-out as the only backstop.
 2. **Cash flow statement** — bilan and compte de résultat are already
    covered by the liasse work above.
 3. **Financial analysis** — ratios, free cash flow, and a DCF as an
