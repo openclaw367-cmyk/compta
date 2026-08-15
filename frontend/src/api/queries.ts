@@ -4,6 +4,7 @@ import type {
   Account,
   AccountLedgerResponse,
   Ca3Declaration,
+  CessionResult,
   Company,
   DepreciationEntry,
   Ecriture,
@@ -17,6 +18,7 @@ import type {
   VatRate,
 } from './types';
 import type {
+  CessionFixedAssetDto,
   CreateAccountDto,
   CreateEcritureDto,
   CreateFiscalYearDto,
@@ -431,6 +433,27 @@ export function usePostDotation() {
       api.post<DepreciationEntry>(`/depreciation/fixed-assets/entries/${depreciationEntryId}/post`, {}),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['fixed-asset-schedule'] });
+      void queryClient.invalidateQueries({ queryKey: ['fixed-assets'] });
+      invalidateEcrituresAndLedger(queryClient);
+    },
+  });
+}
+
+/**
+ * Disposes of (céder) a fixed asset — posts the prorated final dotation
+ * (if needed) and the disposal écriture itself, both real and validated,
+ * through DepreciationService.disposeFixedAsset on the backend. Same
+ * invalidation footprint as usePostDotation: schedule, asset list (VNC/
+ * cessionDate change), and the ledger/ecritures caches since real
+ * écritures now exist.
+ */
+export function useDisposeFixedAsset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ fixedAssetId, dto }: { fixedAssetId: string; dto: CessionFixedAssetDto }) =>
+      api.post<CessionResult>(`/depreciation/fixed-assets/${fixedAssetId}/cession`, dto),
+    onSuccess: (_data, { fixedAssetId }) => {
+      void queryClient.invalidateQueries({ queryKey: ['fixed-asset-schedule', fixedAssetId] });
       void queryClient.invalidateQueries({ queryKey: ['fixed-assets'] });
       invalidateEcrituresAndLedger(queryClient);
     },

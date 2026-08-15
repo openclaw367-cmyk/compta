@@ -244,6 +244,18 @@ export interface FixedAsset {
   vnc: string;
 }
 
+/** Response for POST /depreciation/fixed-assets/:id/cession — see CessionResultDto on the backend. */
+export interface CessionResult {
+  finalDotationEcritureNum: string | null;
+  cessionEcritureNum: string;
+  /** Money string. VNC at the date of cession. */
+  vnc: string;
+  /** Money string. Sale proceeds. */
+  cessionPrice: string;
+  /** Money string, signed. cessionPrice - vnc. */
+  plusOuMoinsValue: string;
+}
+
 /** One line of an asset's plan d'amortissement — see DepreciationEntryDto on the backend. */
 export interface DepreciationEntry {
   id: string;

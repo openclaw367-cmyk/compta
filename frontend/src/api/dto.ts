@@ -17,3 +17,4 @@ export type { CreateVatRateDto } from '../../../backend/src/modules/vat/dto/crea
 export type { CreateJournalDto } from '../../../backend/src/modules/journals/dto/create-journal.dto';
 export type { CreateAccountDto } from '../../../backend/src/modules/accounts/dto/create-account.dto';
 export type { CreateFixedAssetDto } from '../../../backend/src/modules/depreciation/dto/create-fixed-asset.dto';
+export type { CessionFixedAssetDto } from '../../../backend/src/modules/depreciation/dto/cession-fixed-asset.dto';

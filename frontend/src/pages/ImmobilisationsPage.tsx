@@ -308,6 +308,11 @@ export function ImmobilisationsPage() {
                     >
                       {asset.label}
                     </Link>
+                    {asset.cessionDate && (
+                      <span className="ml-2 inline-flex items-center rounded-full bg-border-strong px-2 py-0.5 text-[11px] font-medium text-ink-muted">
+                        Cédée
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 tabular-nums text-ink-muted">
                     {formatDate(asset.serviceStartDate)}
