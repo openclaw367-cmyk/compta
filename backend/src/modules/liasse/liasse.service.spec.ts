@@ -539,6 +539,74 @@ describe('LiasseService.generate', () => {
   });
 });
 
+describe('LiasseService.generateSecondary', () => {
+  it('computes the REEL_SIMPLIFIE comparison view for a REEL_NORMAL company, from the same ledger', async () => {
+    // Reuses the exact same dataset/figures as the "wires the REEL_SIMPLIFIE..." test above
+    // (companyRecord.regime defaults to REEL_NORMAL here, via makePrismaMock()) — proving the
+    // comparison path reads the identical ledger and computes the identical result regardless of
+    // which regime is official.
+    const prisma = makePrismaMock();
+    prisma.ecritureLigne.findMany = jest.fn().mockResolvedValue(
+      ORACLE_BILAN_LIGNES.map((l) => ({
+        compteId: l.compteNumber,
+        compte: { number: l.compteNumber, pcgClass: l.pcgClass },
+        debit: l.debit,
+        credit: l.credit,
+      })),
+    );
+
+    const result = await service(prisma).generateSecondary(company, { fiscalYearId: FY_2026.id });
+
+    if (result.regime !== 'REEL_SIMPLIFIE') {
+      throw new Error(`Expected REEL_SIMPLIFIE, got ${result.regime}`);
+    }
+    expect(result.compteResultat.beneficeOuPerte).toBe(ORACLE_HN);
+    expect(result.bilan.totalActifNet).toBe('365400.00');
+    expect(result.bilan.totalPassif).toBe('365400.00');
+  });
+
+  it('computes the REEL_NORMAL comparison view (full annexes) for a REEL_SIMPLIFIE company, from the same ledger', async () => {
+    const prisma = makePrismaMock();
+    prisma.company.findFirst.mockResolvedValue({ id: company.companyId, regime: 'REEL_SIMPLIFIE' });
+    prisma.ecritureLigne.findMany = jest.fn().mockResolvedValue([
+      {
+        compteId: '512000',
+        compte: { number: '512000', pcgClass: 5 },
+        debit: new Prisma.Decimal('50000.00'),
+        credit: new Prisma.Decimal('0.00'),
+        ecriture: { journal: { type: JournalType.OPERATIONS_DIVERSES } },
+      },
+      {
+        compteId: '101000',
+        compte: { number: '101000', pcgClass: 1 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('50000.00'),
+        ecriture: { journal: { type: JournalType.OPERATIONS_DIVERSES } },
+      },
+    ]);
+
+    const result = await service(prisma).generateSecondary(company, { fiscalYearId: FY_2026.id });
+
+    if (result.regime !== 'REEL_NORMAL') {
+      throw new Error(`Expected REEL_NORMAL, got ${result.regime}`);
+    }
+    expect(result.bilan.totalActifNet).toBe('50000.00');
+    expect(result.bilan.totalPassif).toBe('50000.00');
+    // No immobilisations posted — every annexe trivially ties to a zero bilan figure.
+    expect(result.tableau2054.totalGeneral).toBe('0.00');
+    expect(result.tableau2059.cadreA).toHaveLength(0);
+  });
+
+  it('still enforces the drafts-block guard on the comparison path', async () => {
+    const prisma = makePrismaMock();
+    prisma.company.findFirst.mockResolvedValue({ id: company.companyId, regime: 'REEL_SIMPLIFIE' });
+    prisma.ecriture.count.mockResolvedValue(1);
+    await expect(
+      service(prisma).generateSecondary(company, { fiscalYearId: FY_2026.id }),
+    ).rejects.toThrow(/1 écriture/);
+  });
+});
+
 function service(prisma: ReturnType<typeof makePrismaMock>): LiasseService {
   return new LiasseService(prisma as unknown as PrismaService);
 }

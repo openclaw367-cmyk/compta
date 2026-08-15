@@ -39,15 +39,21 @@ depreciation (amortissements), VAT (TVA), and liasse fiscale.
   (`LiassePage`) — bilan (2050/2051), compte de résultat (2052/2053),
   the 2054/2055 movement annexes (immobilisations/amortissements, now
   including real cessions/reprises columns), 2056 (provisions), 2057
-  (état des créances et des dettes, montant brut only — its own
-  maturity split is blocked, not the whole table), and 2059-A
+  (état des créances et des dettes, now with the real à-un-an-au-plus/
+  à-plus-d'un-an maturity split alongside montant brut), and 2059-A
   (plus/moins-values — Cadre A/B now populate for real per disposal,
   the court-terme/long-terme tax qualification stays unbuilt, see
-  "Immobilisations / cession" below), régime réel normal only,
-  read-only report — see "Liasse fiscale / bilan & compte de résultat"
-  and "Liasse fiscale annexes 2056/2059" below. The régime réel
-  simplifié (2033-series) variant remains honest "non implémenté"
-  territory, matching the backend's own scope.
+  "Immobilisations / cession" below), read-only report — see "Liasse
+  fiscale / bilan & compte de résultat" and "Liasse fiscale annexes
+  2056/2059" below. **The régime réel simplifié (2033-series) liasse
+  (bilan simplifié + compte de résultat simplifié) is also real**, shown
+  as a "vue de comparaison" alongside whichever regime is the
+  company's own official one (both are always computed from the same
+  ledger — see "Liasse fiscale — comparison view, 2057 maturity
+  columns, dateEcheance capture" below); only the 2033-C-onward annexes
+  remain unbuilt for that regime. The journal entry grid also captures
+  a due date (`dateEcheance`) on créance/dette lines, feeding 2057's
+  maturity split.
 - **Package manager**: npm.
 - **Testing**: Jest (unit + e2e, NestJS default).
 - **Validation**: `class-validator` / `class-transformer` on all DTOs.
@@ -987,10 +993,10 @@ recorded above.
   `dateLettrage` (still API-unsettable, a separate known gap),
   `dateEcheance` is fully API-settable end to end, confirmed live
   (round-tripped through a real draft écriture against the FR demo
-  company, then deleted). **No frontend form field yet** — same
-  backend-first sequencing as everywhere else; the journal grid doesn't
-  offer a due-date input, so the only way to set it today is the API
-  directly.
+  company, then deleted). **Frontend form field built** (2026-08-15,
+  same day as the backend, in a later pass) — see "Liasse fiscale —
+  frontend for the 2033-series comparison view and 2057 maturity
+  columns" below.
 - **`montantBrut` is UNCHANGED — still a pure regrouping of `Bilan2050`.**
   The maturity split is computed by a SEPARATE pass over raw,
   `dateEcheance`-tagged `EcritureLigne`s (`Tableau2057RawLigne[]`,
@@ -1049,6 +1055,97 @@ recorded above.
   service wiring, which is the genuinely new capture mechanism; the
   maturity math itself is the oracle tests' job.
 
+## Liasse fiscale — comparison view, 2057 maturity columns, dateEcheance capture
+
+As of 2026-08-15 (same day, a later pass), both backend-complete
+features above are surfaced in the frontend, plus a small, additive
+backend change to make the "have both, display either" design work.
+
+- **`LiasseService.generateSecondary()` (new) — the regime the company
+  DIDN'T pick, from the exact same ledger.** `POST
+  /liasse/generate-secondary`, same `ComputeLiasseDto` input as
+  `/liasse/generate`. `Company.regime` only selects which one is
+  OFFICIAL/fileable; both are always computable, since they read the
+  same PCG ledger. Deliberately a SEPARATE endpoint/method rather than
+  a field on `generate()`'s response: a failure computing the
+  comparison regime (e.g. an account that classifies cleanly under one
+  regime's rule table but not the other's) must never block viewing
+  the company's own official liasse. Two independent HTTP calls
+  guarantee that structurally — no try/catch resilience logic needed
+  in the service at all, since a throw in one call simply doesn't
+  touch the other. Implemented by refactoring `generate()`'s body into
+  three private helpers (`fetchLedgerContext()` — company/fiscal-year/
+  draft-count/trial-balance, shared by both entry points;
+  `computeReelSimplifie()`; `computeReelNormal()`, the full annexe
+  pipeline) with `generate()` itself behaviorally UNCHANGED (verified:
+  all 7 of its existing tests pass with zero modification) —
+  `generateSecondary()` just calls whichever of the two compute
+  helpers `generate()` did NOT call.
+- **The comparison view is bilan + compte de résultat only, even when
+  the comparison regime is RÉEL_NORMAL** (which has 2054–2059 annexes
+  available) — `LiassePage`'s `ComparisonSection` deliberately renders
+  only `.bilan`/`.compteResultat` from the secondary result, never the
+  annexe fields, keeping the comparison a quick sanity check rather
+  than a second full report.
+- **`LiassePage.tsx`**: the `!regimeSupported` block that disabled
+  "Générer" entirely for a `REEL_SIMPLIFIE` company is gone —
+  `useGenerateLiasse()`'s result is now the `LiasseAnyResult` union
+  (`LiasseResult | LiasseSimplifieResult`), and the page branches on
+  `.regime` to render either the existing 2050-series sections or new
+  `Bilan2033ASection`/`CompteResultat2033BSection` components (same
+  visual conventions: `SectionRows`, `ActifRow`/`PassifRow` reused
+  as-is since `Bilan2033AActifLigne`/`Bilan2033APassifLigne` share the
+  same field shapes, `renderCdrRow`/`CdrTotalRow` reused for
+  2033-B). `BalanceBanner` was genericized from `{ bilan: Bilan2050 }`
+  to `{ totalActifNet, totalPassif }` so both regimes' bilans can
+  share it. After a successful `handleGenerate()`, a second,
+  independent mutation (`useGenerateLiasseSecondary()`) fires for the
+  comparison view; its own `isPending`/`isError`/`data` state feeds
+  `ComparisonSection`, which never touches the primary result's error
+  state (matches the backend's own two-independent-calls guarantee).
+- **2057's maturity columns are real** — `Tableau2057Section` now
+  renders `aUnAnAuPlus`/`aPlusDUnAn` (Cadre A) and
+  `aUnAnAuPlus`/`aPlusDUnAnEt5AnsAuPlus`/`aPlusDe5Ans` (Cadre B)
+  alongside the existing `montantBrut` column, plus the new
+  `maturityNote`. **The default-bucket convention is flagged at the
+  COLUMN level, not per-row**: since the backend only returns
+  aggregate bucket totals (not a per-account "how much of this was
+  defaulted" breakdown), the frontend cannot honestly split "real
+  short-term" from "defaulted to short-term" within the same cell —
+  doing so would be exactly the kind of frontend-side guessing the
+  build guardrails ruled out. Instead, the "À un an au plus" column
+  header carries a permanent caption ("dont échéances non
+  renseignées") and `maturityNote` is displayed under both tables,
+  honestly conveying the caveat without fabricating a split the data
+  doesn't support.
+- **`dateEcheance` capture in the journal grid** — `EcritureEditor.tsx`
+  gained an "Échéance" column (a `<input type="date">`), shown only
+  when `lineNeedsDueDate()` matches: `pcgClass === 4` (tiers — clients,
+  fournisseurs, personnel, état, groupe et associés, ...) or a
+  class-1 loan account (`16x` prefix) — the same "don't imply every
+  line needs it" pattern `lineNeedsVatRate()` already established for
+  the TVA column. Scoped to what the build instruction named
+  explicitly (411/401/41x/40x and loan accounts) rather than
+  exhaustively matching every 2057 Cadre A/B account family (e.g.
+  immobilisations-financières prefixes 267/274/275/276/277 are Cadre A
+  accounts too but aren't covered by this predicate) — a narrower,
+  deliberately-scoped capture surface, not a completeness claim.
+- **Verified two ways.** `tsc`/`eslint`/`vite build` all clean; the
+  full backend suite (287 tests) passes with `generate()` behaviorally
+  unchanged. Live against the FR demo company: `/liasse/generate` and
+  `/liasse/generate-secondary` both called for real, confirming (a)
+  the JSON shapes match the new frontend types field-for-field, and
+  (b) — a genuinely interesting live result — **both regimes
+  independently balance to the exact same grand total on the same
+  real ledger** (21 855,00 = 21 855,00 for both `REEL_NORMAL` and the
+  `REEL_SIMPLIFIE` comparison), the same cross-regime reconciliation
+  the oracle tests proved, now confirmed on live data too. No browser
+  automation available in this environment — rendering itself
+  (`Tableau2057Section`'s column layout, the due-date input showing/
+  hiding correctly per account) was not visually verified; that would
+  need the user's own browser or a future session with browser
+  tooling.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
@@ -1083,12 +1180,13 @@ assume they're covered either:
   (2033-B, résultat comptable section), see "Liasse fiscale — régime
   réel simplifié (2033-series)" above; only 2033-C onward (annexes) and
   2033-B's own résultat fiscal section remain unbuilt for that regime.
-  `LiassePage` renders all seven `REEL_NORMAL` tables; the
-  `REEL_SIMPLIFIE` shape has no frontend screen yet (backend-only so
-  far, same sequencing as every other annexe originally). **2057's
-  maturity split is also now real** (as of 2026-08-15, same day) — see
-  "Liasse fiscale / 2057 — maturity split" above — backend-computed and
-  tested, not yet surfaced in `LiassePage` either.
+  `LiassePage` renders all seven `REEL_NORMAL` tables, plus the
+  `REEL_SIMPLIFIE` shape as a "vue de comparaison" (bilan + compte de
+  résultat only, no annexes) alongside whichever regime is official —
+  see "Liasse fiscale — comparison view, 2057 maturity columns,
+  dateEcheance capture" above. **2057's maturity split is also
+  displayed** (à un an au plus / à plus d'un an for Cadre A, the
+  three-way split for Cadre B), same section above.
 - **VAT's `computeDeclaration()` is no longer a stub for either
   jurisdiction** — it branches to `computeCa3Declaration()` (FR) or
   `computeMonacoDeclaration()` (MC) — but each only covers its own
@@ -1310,9 +1408,7 @@ A-1 §VIII uncross-checked).
    and 2058-A/B for régime normal remain deliberately deferred
    (judgment-heavy, no mechanical ledger source). 2059-A's
    court-terme/long-terme tax qualification is the same kind of open,
-   non-blocking item. Frontend display for both the 2033-series liasse
-   and 2057's new maturity columns is real, tangible next work — both
-   are backend-complete and tested, waiting on a screen.
+   non-blocking item.
 2. **Cash flow statement** — bilan and compte de résultat are already
    covered by the liasse work above.
 3. **Financial analysis** — ratios, free cash flow, and a DCF as an

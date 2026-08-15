@@ -14,7 +14,7 @@ import type {
   ImportBatch,
   ImportPreviewResponse,
   Journal,
-  LiasseResult,
+  LiasseAnyResult,
   TrialBalanceResponse,
   VatRate,
 } from './types';
@@ -138,18 +138,33 @@ export function useComputeVatDeclaration() {
 }
 
 /**
- * Generates the liasse fiscale (bilan 2050/2051, compte de résultat
- * 2052/2053) for a fiscal year — read-only, never writes to the ledger.
- * See LiasseService.generate on the backend: refuses (501) for a
- * REEL_SIMPLIFIE company, refuses (409) if any écriture in the fiscal
- * year is still a draft, and refuses (400/409) on an unmapped account, a
- * sign ambiguity, or a bilan that doesn't balance — the page surfaces
- * those messages as-is.
+ * Generates the liasse fiscale for a fiscal year — read-only, never
+ * writes to the ledger. See LiasseService.generate on the backend:
+ * branches on Company.regime (REEL_NORMAL → full 2050-series,
+ * REEL_SIMPLIFIE → 2033-A/2033-B), refuses (409) if any écriture in the
+ * fiscal year is still a draft, and refuses (400/409) on an unmapped
+ * account, a sign ambiguity, or a bilan that doesn't balance — the page
+ * surfaces those messages as-is.
  */
 export function useGenerateLiasse() {
   return useMutation({
     mutationFn: (params: { fiscalYearId: string }) =>
-      api.post<LiasseResult>('/liasse/generate', params),
+      api.post<LiasseAnyResult>('/liasse/generate', params),
+  });
+}
+
+/**
+ * Generates the OTHER regime's liasse — a comparison view, from the
+ * exact same ledger, independent of Company.regime. See
+ * LiasseService.generateSecondary: a separate endpoint/mutation on
+ * purpose, so a failure computing the comparison regime never blocks
+ * the primary useGenerateLiasse() result — the two calls are
+ * independent, not chained through shared error state.
+ */
+export function useGenerateLiasseSecondary() {
+  return useMutation({
+    mutationFn: (params: { fiscalYearId: string }) =>
+      api.post<LiasseAnyResult>('/liasse/generate-secondary', params),
   });
 }
 

@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useCompany, useEcritures, useFiscalYears, useGenerateLiasse } from '../api/queries';
+import {
+  useCompany,
+  useEcritures,
+  useFiscalYears,
+  useGenerateLiasse,
+  useGenerateLiasseSecondary,
+} from '../api/queries';
 import type {
+  Bilan2033A,
   Bilan2050,
   BilanActifLigne,
+  CompteResultat2033B,
   CompteResultat2052_2053,
   CompteResultatLigne,
+  LiasseAnyResult,
   Tableau2054,
   Tableau2054Ligne,
   Tableau2055,
@@ -13,7 +22,8 @@ import type {
   Tableau2056,
   Tableau2056Ligne,
   Tableau2057,
-  Tableau2057Ligne,
+  Tableau2057CadreALigne,
+  Tableau2057CadreBLigne,
   Tableau2059A,
 } from '../api/types';
 import { ApiError } from '../api/client';
@@ -142,11 +152,17 @@ const TABLEAU_2056_SECTIONS: { title: string; totalCode: 'totalReglementees' | '
   },
 ];
 
+const REGIME_LABEL: Record<'REEL_NORMAL' | 'REEL_SIMPLIFIE', string> = {
+  REEL_NORMAL: 'réel normal (2050/2052)',
+  REEL_SIMPLIFIE: 'réel simplifié (2033-A/2033-B)',
+};
+
 export function LiassePage() {
   const companyQuery = useCompany();
   const fiscalYearsQuery = useFiscalYears();
   const ecrituresQuery = useEcritures();
   const generateLiasse = useGenerateLiasse();
+  const generateSecondary = useGenerateLiasseSecondary();
 
   const fiscalYears = fiscalYearsQuery.data ?? NO_FISCAL_YEARS;
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
@@ -163,19 +179,17 @@ export function LiassePage() {
     [ecritures, fiscalYearId],
   );
 
-  const regimeSupported = companyQuery.data?.regime === 'REEL_NORMAL';
-
-  const canGenerate =
-    Boolean(fiscalYearId) &&
-    regimeSupported &&
-    draftsInYear.length === 0 &&
-    !generateLiasse.isPending;
+  const canGenerate = Boolean(fiscalYearId) && draftsInYear.length === 0 && !generateLiasse.isPending;
 
   async function handleGenerate() {
     if (!fiscalYearId) return;
     setError(null);
     try {
       await generateLiasse.mutateAsync({ fiscalYearId });
+      // Comparison view — deliberately not awaited into the same try/catch: its own
+      // isPending/isError state (surfaced by ComparisonSection) is independent, so a failure here
+      // must never touch the primary result above. See useGenerateLiasseSecondary's doc comment.
+      void generateSecondary.mutateAsync({ fiscalYearId }).catch(() => {});
     } catch (err) {
       setError(err instanceof ApiError ? err.details : ['Le calcul a échoué.']);
     }
@@ -183,14 +197,15 @@ export function LiassePage() {
 
   const isLoading = companyQuery.isLoading || fiscalYearsQuery.isLoading || ecrituresQuery.isLoading;
   const result = generateLiasse.data ?? null;
+  const officialRegime = companyQuery.data?.regime;
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-8 py-8">
       <header>
         <h1 className="text-[20px] font-semibold tracking-tight text-ink">Liasse fiscale</h1>
         <p className="mt-0.5 text-[13px] text-ink-muted">
-          Bilan (2050/2051) et compte de résultat (2052/2053), régime réel normal — calcule et
-          affiche, n'écrit jamais dans le journal.
+          Calcule et affiche, n'écrit jamais dans le journal
+          {officialRegime && <> — régime officiel : {REGIME_LABEL[officialRegime]}</>}.
         </p>
       </header>
 
@@ -231,15 +246,7 @@ export function LiassePage() {
             </button>
           </div>
 
-          {!regimeSupported && (
-            <div className="rounded-md bg-warning-soft px-4 py-2.5 text-[13px] text-warning">
-              La liasse fiscale au régime réel simplifié (2033-series) n'est pas encore
-              implémentée — seul le régime réel normal (2050-series) est disponible. Ce champ se
-              règle sur la fiche société.
-            </div>
-          )}
-
-          {regimeSupported && draftsInYear.length > 0 && (
+          {draftsInYear.length > 0 && (
             <div className="rounded-md bg-warning-soft px-4 py-2.5 text-[13px] text-warning">
               {draftsInYear.length === 1
                 ? "1 écriture en brouillon bloque le calcul : une écriture non validée dans " +
@@ -264,24 +271,110 @@ export function LiassePage() {
 
       {result && (
         <>
-          <BalanceBanner bilan={result.bilan} />
-          <BilanSection bilan={result.bilan} />
-          <CompteResultatSection compteResultat={result.compteResultat} />
-          <TableauxArticulationBanner
-            bilan={result.bilan}
-            tableau2054={result.tableau2054}
-            tableau2055={result.tableau2055}
+          {result.regime === 'REEL_NORMAL' ? (
+            <>
+              <BalanceBanner totalActifNet={result.bilan.totalActifNet} totalPassif={result.bilan.totalPassif} />
+              <BilanSection bilan={result.bilan} />
+              <CompteResultatSection compteResultat={result.compteResultat} />
+              <TableauxArticulationBanner
+                bilan={result.bilan}
+                tableau2054={result.tableau2054}
+                tableau2055={result.tableau2055}
+              />
+              <Tableau2054Section tableau2054={result.tableau2054} />
+              <Tableau2055Section tableau2055={result.tableau2055} />
+              <Tableau2056ArticulationBanner bilan={result.bilan} tableau2056={result.tableau2056} />
+              <Tableau2056Section tableau2056={result.tableau2056} />
+              <Tableau2057ArticulationBanner bilan={result.bilan} tableau2057={result.tableau2057} />
+              <Tableau2057Section tableau2057={result.tableau2057} />
+              <Tableau2059Section tableau2059={result.tableau2059} />
+            </>
+          ) : (
+            <>
+              <BalanceBanner totalActifNet={result.bilan.totalActifNet} totalPassif={result.bilan.totalPassif} />
+              <Bilan2033ASection bilan={result.bilan} />
+              <CompteResultat2033BSection compteResultat={result.compteResultat} />
+            </>
+          )}
+
+          <ComparisonSection
+            isPending={generateSecondary.isPending}
+            isError={generateSecondary.isError}
+            errorMessage={
+              generateSecondary.error instanceof ApiError
+                ? generateSecondary.error.message
+                : 'Erreur inconnue.'
+            }
+            result={generateSecondary.data ?? null}
           />
-          <Tableau2054Section tableau2054={result.tableau2054} />
-          <Tableau2055Section tableau2055={result.tableau2055} />
-          <Tableau2056ArticulationBanner bilan={result.bilan} tableau2056={result.tableau2056} />
-          <Tableau2056Section tableau2056={result.tableau2056} />
-          <Tableau2057ArticulationBanner bilan={result.bilan} tableau2057={result.tableau2057} />
-          <Tableau2057Section tableau2057={result.tableau2057} />
-          <Tableau2059Section tableau2059={result.tableau2059} />
         </>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Comparison view — the OTHER regime's bilan + compte de résultat only (no
+// annexes even when the comparison regime is RÉEL_NORMAL), computed from the
+// same ledger via a separate mutation/endpoint so a failure here can never
+// affect the primary, official result above — see
+// useGenerateLiasseSecondary's doc comment.
+// ---------------------------------------------------------------------------
+
+function ComparisonSection({
+  isPending,
+  isError,
+  errorMessage,
+  result,
+}: {
+  isPending: boolean;
+  isError: boolean;
+  errorMessage: string;
+  result: LiasseAnyResult | null;
+}) {
+  if (isPending) {
+    return (
+      <div className="rounded-lg border border-border bg-surface p-5 text-[13px] text-ink-faint">
+        Calcul de la vue de comparaison…
+      </div>
+    );
+  }
+  if (isError) {
+    return (
+      <div className="rounded-md bg-warning-soft px-4 py-2.5 text-[13px] text-warning">
+        La vue de comparaison n'a pas pu être calculée ({errorMessage}) — la liasse officielle
+        ci-dessus n'est pas affectée.
+      </div>
+    );
+  }
+  if (!result) {
+    return null;
+  }
+
+  return (
+    <section className="flex flex-col gap-4 border-t-2 border-dashed border-border pt-8">
+      <div>
+        <h2 className="text-[14px] font-semibold text-ink">
+          Vue de comparaison — régime {REGIME_LABEL[result.regime]}
+        </h2>
+        <p className="mt-0.5 text-[12.5px] text-ink-muted">
+          Calculée sur le même exercice, à titre indicatif — bilan et compte de résultat
+          uniquement, sans les annexes. Ne remplace pas le régime officiel de la société.
+        </p>
+      </div>
+      <BalanceBanner totalActifNet={result.bilan.totalActifNet} totalPassif={result.bilan.totalPassif} />
+      {result.regime === 'REEL_NORMAL' ? (
+        <>
+          <BilanSection bilan={result.bilan} />
+          <CompteResultatSection compteResultat={result.compteResultat} />
+        </>
+      ) : (
+        <>
+          <Bilan2033ASection bilan={result.bilan} />
+          <CompteResultat2033BSection compteResultat={result.compteResultat} />
+        </>
+      )}
+    </section>
   );
 }
 
@@ -293,8 +386,14 @@ export function LiassePage() {
 // client-side check.
 // ---------------------------------------------------------------------------
 
-function BalanceBanner({ bilan }: { bilan: Bilan2050 }) {
-  const balances = bilan.totalActifNet === bilan.totalPassif;
+function BalanceBanner({
+  totalActifNet,
+  totalPassif,
+}: {
+  totalActifNet: string;
+  totalPassif: string;
+}) {
+  const balances = totalActifNet === totalPassif;
   return (
     <div
       className={[
@@ -312,12 +411,12 @@ function BalanceBanner({ bilan }: { bilan: Bilan2050 }) {
           {balances ? 'Bilan équilibré' : 'Bilan déséquilibré'}
         </div>
         <p className="mt-1 text-[12.5px] text-ink-muted">
-          Actif net (CO − 1A) {balances ? '=' : '≠'} Passif total (EE)
+          Actif net {balances ? '=' : '≠'} Passif total
         </p>
       </div>
       <div className="flex items-baseline gap-3">
         <span className="text-[15px] tabular-nums text-ink-muted">
-          {formatMoneyFr(bilan.totalActifNet)}
+          {formatMoneyFr(totalActifNet)}
         </span>
         <span className={['text-[15px]', balances ? 'text-positive' : 'text-negative'].join(' ')}>
           {balances ? '=' : '≠'}
@@ -328,7 +427,7 @@ function BalanceBanner({ bilan }: { bilan: Bilan2050 }) {
             balances ? 'text-positive' : 'text-negative',
           ].join(' ')}
         >
-          {formatMoneyFr(bilan.totalPassif)}
+          {formatMoneyFr(totalPassif)}
         </span>
       </div>
     </div>
@@ -476,6 +575,251 @@ function PassifRow({
         {formatMoneyFr(montant)}
       </td>
     </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Bilan simplifié (2033-A) — régime réel simplifié. Coarser line set than
+// 2050/2051 (see bilan-2033-a.ts's doc comment); ActifRow/PassifRow above
+// are reused as-is since Bilan2033AActifLigne/Bilan2033APassifLigne share
+// the same field shapes as their 2050-series counterparts.
+// ---------------------------------------------------------------------------
+
+const ACTIF_2033A_SECTIONS: { title: string; codes: string[] }[] = [
+  { title: 'Actif immobilisé', codes: ['010', '014', '028', '040'] },
+  { title: 'Actif circulant', codes: ['050', '060', '064', '068', '072', '092', '080', '084'] },
+];
+
+/** '__RESULTAT__' is a sentinel for the Résultat de l'exercice row (136), which sits between 134 (Report à nouveau) and 137 (Subventions) on the form but isn't in Bilan2033A.passif — same convention as bilan-2050's '__DI__'. */
+const PASSIF_2033A_CAPITAUX_CODES = ['120', '124', '126', '130', '132', '134', '__RESULTAT__', '137', '140'];
+const PASSIF_2033A_DETTES_CODES = ['156', '164', '166', '172', '173', '175', '174'];
+
+function Bilan2033ASection({ bilan }: { bilan: Bilan2033A }) {
+  const actifByCode = new Map(bilan.actif.map((l) => [l.code, l]));
+  const passifByCode = new Map(bilan.passif.map((l) => [l.code, l]));
+  const totalICapitauxPropres = addMoneyStrings(
+    bilan.totalIPassifExcludingResultat,
+    bilan.resultatDeLExercice,
+  );
+
+  return (
+    <section className="flex flex-col gap-4">
+      <h2 className="text-[14px] font-semibold text-ink">Bilan simplifié — 2033-A</h2>
+
+      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <table className="w-full border-collapse text-[13px]">
+          <thead>
+            <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              <th className="px-4 py-2.5 font-semibold">Actif</th>
+              <th className="px-4 py-2.5 text-right font-semibold">Brut</th>
+              <th className="px-4 py-2.5 text-right font-semibold">Amortissements</th>
+              <th className="px-4 py-2.5 text-right font-semibold">Net</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ACTIF_2033A_SECTIONS.map((section) => (
+              <SectionRows key={section.title} title={section.title} colSpan={4}>
+                {section.codes.map((code) => {
+                  const ligne = actifByCode.get(code);
+                  if (!ligne) return null;
+                  return <ActifRow key={code} ligne={ligne} />;
+                })}
+              </SectionRows>
+            ))}
+            <tr className="bg-bg">
+              <td className="px-4 py-2.5 font-semibold text-ink">
+                <span className="mr-2 font-medium tabular-nums text-ink-faint">110/112</span>
+                Total général (I + II)
+              </td>
+              <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
+                {formatMoneyFr(bilan.totalActifBrut)}
+              </td>
+              <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
+                {formatMoneyFr(bilan.totalActifAmortissements)}
+              </td>
+              <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
+                {formatMoneyFr(bilan.totalActifNet)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <table className="w-full border-collapse text-[13px]">
+          <thead>
+            <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              <th className="px-4 py-2.5 font-semibold" colSpan={2}>
+                Passif
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <SectionRows title="Capitaux propres" colSpan={2}>
+              {PASSIF_2033A_CAPITAUX_CODES.map((code) => {
+                if (code === '__RESULTAT__') {
+                  return (
+                    <PassifRow
+                      key={code}
+                      code="136"
+                      label="Résultat de l'exercice (bénéfice ou perte)"
+                      montant={bilan.resultatDeLExercice}
+                      emphasize
+                    />
+                  );
+                }
+                const ligne = passifByCode.get(code);
+                if (!ligne) return null;
+                return (
+                  <PassifRow key={code} code={ligne.code} label={ligne.label} montant={ligne.montant} />
+                );
+              })}
+              <tr className="border-b border-border bg-bg">
+                <td className="px-4 py-2.5 font-semibold text-ink">
+                  <span className="mr-2 font-medium tabular-nums text-ink-faint">142</span>
+                  Total I
+                </td>
+                <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
+                  {formatMoneyFr(totalICapitauxPropres)}
+                </td>
+              </tr>
+            </SectionRows>
+            <SectionRows title="Provisions pour risques et charges" colSpan={2}>
+              <tr className="border-b border-border bg-bg">
+                <td className="px-4 py-2.5 font-semibold text-ink">
+                  <span className="mr-2 font-medium tabular-nums text-ink-faint">154</span>
+                  Total II
+                </td>
+                <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
+                  {formatMoneyFr(bilan.totalIIPassif)}
+                </td>
+              </tr>
+            </SectionRows>
+            <SectionRows title="Dettes" colSpan={2}>
+              {PASSIF_2033A_DETTES_CODES.map((code) => {
+                const ligne = passifByCode.get(code);
+                if (!ligne) return null;
+                return (
+                  <PassifRow key={code} code={ligne.code} label={ligne.label} montant={ligne.montant} />
+                );
+              })}
+              <tr className="border-b border-border bg-bg">
+                <td className="px-4 py-2.5 font-semibold text-ink">
+                  <span className="mr-2 font-medium tabular-nums text-ink-faint">176</span>
+                  Total III
+                </td>
+                <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
+                  {formatMoneyFr(bilan.totalIIIPassif)}
+                </td>
+              </tr>
+            </SectionRows>
+            <tr className="bg-bg">
+              <td className="px-4 py-2.5 font-semibold text-ink">
+                <span className="mr-2 font-medium tabular-nums text-ink-faint">180</span>
+                Total général (I + II + III)
+              </td>
+              <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
+                {formatMoneyFr(bilan.totalPassif)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Compte de résultat simplifié (2033-B) — "A - RÉSULTAT COMPTABLE" section
+// only (cases 209–310), see compte-resultat-2033-b.ts's doc comment for why
+// "B - RÉSULTAT FISCAL" isn't built. renderCdrRow/CdrTotalRow (defined
+// below, alongside the 2052/2053 section) are reused as-is.
+// ---------------------------------------------------------------------------
+
+const CDR_2033B_PRODUITS_EXPLOITATION = ['210', '214', '218', '222', '224', '226', '230'];
+const CDR_2033B_CHARGES_EXPLOITATION = [
+  '234', '236', '238', '240', '242', '244', '250', '252', '254', '256', '262',
+];
+
+function CompteResultat2033BSection({ compteResultat }: { compteResultat: CompteResultat2033B }) {
+  const byCode = new Map(compteResultat.lignes.map((l) => [l.code, l]));
+  const isPerte = compteResultat.beneficeOuPerte.startsWith('-');
+
+  return (
+    <section className="flex flex-col gap-4">
+      <h2 className="text-[14px] font-semibold text-ink">Compte de résultat simplifié — 2033-B</h2>
+
+      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <table className="w-full border-collapse text-[13px]">
+          <thead>
+            <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              <th className="px-4 py-2.5 font-semibold" colSpan={2}>
+                A — Résultat comptable
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <SectionRows title="Produits d'exploitation" colSpan={2}>
+              {CDR_2033B_PRODUITS_EXPLOITATION.map((code) => renderCdrRow(byCode.get(code)))}
+            </SectionRows>
+            <CdrTotalRow
+              code="232"
+              label="Total des produits d'exploitation hors TVA (I)"
+              montant={compteResultat.totalProduitsExploitation}
+            />
+            <SectionRows title="Charges d'exploitation" colSpan={2}>
+              {CDR_2033B_CHARGES_EXPLOITATION.map((code) => renderCdrRow(byCode.get(code)))}
+            </SectionRows>
+            <CdrTotalRow
+              code="264"
+              label="Total des charges d'exploitation (II)"
+              montant={compteResultat.totalChargesExploitation}
+            />
+            <CdrTotalRow
+              code="270"
+              label="1 — Résultat d'exploitation (I − II)"
+              montant={compteResultat.resultatExploitation}
+              strong
+            />
+            <CdrTotalRow code="280" label="Produits financiers (III)" montant={compteResultat.produitsFinanciers} />
+            <CdrTotalRow code="294" label="Charges financières (V)" montant={compteResultat.chargesFinancieres} />
+            <CdrTotalRow code="290" label="Produits exceptionnels (IV)" montant={compteResultat.produitsExceptionnels} />
+            <CdrTotalRow code="300" label="Charges exceptionnelles (VI)" montant={compteResultat.chargesExceptionnelles} />
+            <CdrTotalRow code="306" label="Impôt sur les bénéfices (VII)" montant={compteResultat.impotSurLesBenefices} />
+          </tbody>
+        </table>
+      </div>
+
+      <div
+        className={[
+          'flex items-center justify-between rounded-lg border p-5',
+          isPerte ? 'border-negative-soft bg-negative-soft' : 'border-positive-soft bg-positive-soft',
+        ].join(' ')}
+      >
+        <div>
+          <div
+            className={[
+              'text-[11px] font-semibold uppercase tracking-wide',
+              isPerte ? 'text-negative' : 'text-positive',
+            ].join(' ')}
+          >
+            2 — {isPerte ? 'Perte' : 'Bénéfice'}
+          </div>
+          <p className="mt-1 text-[12.5px] text-ink-muted">
+            310 — Produits (I + III + IV) − Charges (II + V + VI + VII). Reporté au bilan, ligne 136
+            (Résultat de l'exercice).
+          </p>
+        </div>
+        <div
+          className={[
+            'text-[22px] font-semibold tabular-nums',
+            isPerte ? 'text-negative' : 'text-positive',
+          ].join(' ')}
+        >
+          {formatMoneyFr(compteResultat.beneficeOuPerte)}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1110,7 +1454,7 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
           2057 — État des créances et des dettes
         </h2>
         <p className="mt-0.5 text-[12.5px] text-ink-muted">
-          Montant brut par nature à la clôture de l'exercice.
+          Montant brut et échéance par nature à la clôture de l'exercice.
         </p>
       </div>
 
@@ -1120,17 +1464,26 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
               <th className="px-4 py-2.5 font-semibold">Cadre A — État des créances</th>
               <th className="px-4 py-2.5 text-right font-semibold">Montant brut</th>
+              <th className="px-4 py-2.5 text-right font-semibold">
+                À un an au plus
+                <div className="mt-0.5 text-[10px] font-normal normal-case text-ink-faint">
+                  dont échéances non renseignées
+                </div>
+              </th>
+              <th className="px-4 py-2.5 text-right font-semibold">À plus d'un an</th>
             </tr>
           </thead>
           <tbody>
             {tableau2057.cadreA.map((ligne) => (
-              <Tableau2057Row key={ligne.code} ligne={ligne} />
+              <Tableau2057CadreARow key={ligne.code} ligne={ligne} />
             ))}
             <tr className="bg-bg">
               <td className="px-4 py-2.5 font-semibold text-ink">TOTAUX</td>
               <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
                 {formatMoneyFr(tableau2057.totalCreances)}
               </td>
+              <td className="px-4 py-2.5" />
+              <td className="px-4 py-2.5" />
             </tr>
           </tbody>
         </table>
@@ -1142,28 +1495,40 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
               <th className="px-4 py-2.5 font-semibold">Cadre B — État des dettes</th>
               <th className="px-4 py-2.5 text-right font-semibold">Montant brut</th>
+              <th className="px-4 py-2.5 text-right font-semibold">
+                À un an au plus
+                <div className="mt-0.5 text-[10px] font-normal normal-case text-ink-faint">
+                  dont échéances non renseignées
+                </div>
+              </th>
+              <th className="px-4 py-2.5 text-right font-semibold">À plus d'1 an et 5 ans au plus</th>
+              <th className="px-4 py-2.5 text-right font-semibold">À plus de 5 ans</th>
             </tr>
           </thead>
           <tbody>
             {tableau2057.cadreB.map((ligne) => (
-              <Tableau2057Row key={ligne.code} ligne={ligne} />
+              <Tableau2057CadreBRow key={ligne.code} ligne={ligne} />
             ))}
             <tr className="bg-bg">
               <td className="px-4 py-2.5 font-semibold text-ink">TOTAUX</td>
               <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
                 {formatMoneyFr(tableau2057.totalDettes)}
               </td>
+              <td className="px-4 py-2.5" />
+              <td className="px-4 py-2.5" />
+              <td className="px-4 py-2.5" />
             </tr>
           </tbody>
         </table>
       </div>
 
       <p className="text-[12px] text-ink-faint">{tableau2057.note}</p>
+      <p className="text-[12px] text-ink-faint">{tableau2057.maturityNote}</p>
     </section>
   );
 }
 
-function Tableau2057Row({ ligne }: { ligne: Tableau2057Ligne }) {
+function Tableau2057CadreARow({ ligne }: { ligne: Tableau2057CadreALigne }) {
   return (
     <tr className="border-b border-border last:border-b-0">
       <td className="px-4 py-2 text-ink">
@@ -1172,6 +1537,35 @@ function Tableau2057Row({ ligne }: { ligne: Tableau2057Ligne }) {
       </td>
       <td className="px-4 py-2 text-right tabular-nums text-ink">
         {formatMoneyFr(ligne.montantBrut)}
+      </td>
+      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+        {formatMoneyFr(ligne.aUnAnAuPlus)}
+      </td>
+      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+        {formatMoneyFr(ligne.aPlusDUnAn)}
+      </td>
+    </tr>
+  );
+}
+
+function Tableau2057CadreBRow({ ligne }: { ligne: Tableau2057CadreBLigne }) {
+  return (
+    <tr className="border-b border-border last:border-b-0">
+      <td className="px-4 py-2 text-ink">
+        <span className="mr-2 font-medium tabular-nums text-ink-faint">{ligne.code}</span>
+        {ligne.label}
+      </td>
+      <td className="px-4 py-2 text-right tabular-nums text-ink">
+        {formatMoneyFr(ligne.montantBrut)}
+      </td>
+      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+        {formatMoneyFr(ligne.aUnAnAuPlus)}
+      </td>
+      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+        {formatMoneyFr(ligne.aPlusDUnAnEt5AnsAuPlus)}
+      </td>
+      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+        {formatMoneyFr(ligne.aPlusDe5Ans)}
       </td>
     </tr>
   );

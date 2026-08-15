@@ -112,6 +112,8 @@ export interface EcritureLigne {
   montantDevise: string | null;
   idDevise: string | null;
   vatRateId: string | null;
+  /** Due date — feeds the 2057 maturity split. Null on lines with no due-date concept and on historical lines predating this field. */
+  dateEcheance: string | null;
 }
 
 export interface Ecriture {
@@ -421,25 +423,34 @@ export interface Tableau2056 {
   dontDotationsReprisesParNature: null;
 }
 
-/** One 2057 row — montant brut only, no maturity split. See tableau-2057.ts's doc comment: every row reproduces one Bilan2050 actif/passif line. */
-export interface Tableau2057Ligne {
+/** One 2057 Cadre A row — see tableau-2057.ts's doc comment: montantBrut reproduces one Bilan2050 actif line; aUnAnAuPlus/aPlusDUnAn are the maturity split, computed from EcritureLigne.dateEcheance (a line with none defaults to aUnAnAuPlus — see the result's own maturityNote). */
+export interface Tableau2057CadreALigne {
   code: string;
   label: string;
   montantBrut: string;
+  aUnAnAuPlus: string;
+  aPlusDUnAn: string;
 }
 
-/**
- * Response shape for the 2057 half of POST /liasse/generate — see
- * tableau-2057.ts on the backend. Maturity (à plus/moins d'un an) is
- * genuinely blocked — no due-date field exists anywhere in the schema —
- * see `note`.
- */
+/** One 2057 Cadre B row — same idea, three-way split (≤1an / 1-5ans / >5ans). */
+export interface Tableau2057CadreBLigne {
+  code: string;
+  label: string;
+  montantBrut: string;
+  aUnAnAuPlus: string;
+  aPlusDUnAnEt5AnsAuPlus: string;
+  aPlusDe5Ans: string;
+}
+
+/** Response shape for the 2057 half of POST /liasse/generate — see tableau-2057.ts on the backend. */
 export interface Tableau2057 {
-  cadreA: Tableau2057Ligne[];
+  cadreA: Tableau2057CadreALigne[];
   totalCreances: string;
-  cadreB: Tableau2057Ligne[];
+  cadreB: Tableau2057CadreBLigne[];
   totalDettes: string;
   note: string;
+  /** Explains the maturity split's default-bucket convention and the still-unbuilt origin-based split on emprunts. */
+  maturityNote: string;
 }
 
 /** Cadre A row shape (valeur résiduelle des éléments cédés) — "valeur nette réévaluée" and "amortissements en franchise d'impôt" aren't represented, see tableau-2059.ts's doc comment. */
@@ -475,8 +486,9 @@ export interface Tableau2059A {
   note: string;
 }
 
-/** Response for POST /liasse/generate — régime réel normal (2050-series) only, see LiasseService.generate. */
+/** Régime réel normal (2050-series) result — see LiasseService.generate. */
 export interface LiasseResult {
+  regime: 'REEL_NORMAL';
   bilan: Bilan2050;
   compteResultat: CompteResultat2052_2053;
   tableau2054: Tableau2054;
@@ -485,3 +497,91 @@ export interface LiasseResult {
   tableau2057: Tableau2057;
   tableau2059: Tableau2059A;
 }
+
+/** One Actif row (2033-A) — Brut/Amortissements are ledger money strings, Net = Brut − Amortissements. Coarser grouping than Bilan2050 — see bilan-2033-a.ts's doc comment. */
+export interface Bilan2033AActifLigne {
+  code: string;
+  label: string;
+  brut: string;
+  amortissements: string;
+  net: string;
+}
+
+/** One Passif row (2033-A) — already net, no Brut/Amortissements split. */
+export interface Bilan2033APassifLigne {
+  code: string;
+  label: string;
+  montant: string;
+}
+
+/** Response shape for the bilan simplifié half of a REEL_SIMPLIFIE liasse — see bilan-2033-a.ts on the backend. */
+export interface Bilan2033A {
+  actif: Bilan2033AActifLigne[];
+  /** 044/048 — Total I (Actif immobilisé), colonnes Brut/Amortissements. */
+  totalIActifBrut: string;
+  totalIActifAmortissements: string;
+  /** 096/098 — Total II (Actif circulant), colonnes Brut/Amortissements. */
+  totalIIActifBrut: string;
+  totalIIActifAmortissements: string;
+  /** 110/112 — Total général (I + II), colonnes Brut/Amortissements. */
+  totalActifBrut: string;
+  totalActifAmortissements: string;
+  /** Net = Brut − Amortissements, uncoded on the form itself. */
+  totalActifNet: string;
+  /** Includes 134 (Report à nouveau — may legitimately be negative). 136 is not in this array — see resultatDeLExercice. */
+  passif: Bilan2033APassifLigne[];
+  /** 142 — Total I (Capitaux propres), EXCLUDING 136 (Résultat) — add resultatDeLExercice for the form's own Total I. */
+  totalIPassifExcludingResultat: string;
+  /** 136 — Résultat de l'exercice. Not a ledger read — constructed from the compte de résultat's ligne 310. */
+  resultatDeLExercice: string;
+  /** 154 — Total II (Provisions pour risques et charges). */
+  totalIIPassif: string;
+  /** 176 — Total III (Dettes). */
+  totalIIIPassif: string;
+  /** 180 — Total général (I + II + III). */
+  totalPassif: string;
+}
+
+export interface CompteResultat2033BLigne {
+  code: string;
+  label: string;
+  montant: string;
+}
+
+/** Response shape for the compte de résultat simplifié half of a REEL_SIMPLIFIE liasse — "A - RÉSULTAT COMPTABLE" section only, see compte-resultat-2033-b.ts on the backend. */
+export interface CompteResultat2033B {
+  /** Every line, in form order (cases 209–306). */
+  lignes: CompteResultat2033BLigne[];
+  /** 232 — Total des produits d'exploitation hors TVA (I). */
+  totalProduitsExploitation: string;
+  /** 264 — Total des charges d'exploitation (II). */
+  totalChargesExploitation: string;
+  /** 270 — Résultat d'exploitation (I − II). */
+  resultatExploitation: string;
+  /** 280 — Produits financiers (III). */
+  produitsFinanciers: string;
+  /** 294 — Charges financières (V). */
+  chargesFinancieres: string;
+  /** 290 — Produits exceptionnels (IV). */
+  produitsExceptionnels: string;
+  /** 300 — Charges exceptionnelles (VI). */
+  chargesExceptionnelles: string;
+  /** 306 — Impôt sur les bénéfices (VII). */
+  impotSurLesBenefices: string;
+  /** 310 — Bénéfices ou pertes. Feeds Bilan2033A.resultatDeLExercice. */
+  beneficeOuPerte: string;
+}
+
+/**
+ * Régime réel simplifié result — bilan simplifié (2033-A) + compte de
+ * résultat simplifié (2033-B, résultat comptable only). No annexe
+ * equivalents (2033-C onward) — see LiasseService on the backend.
+ */
+export interface LiasseSimplifieResult {
+  regime: 'REEL_SIMPLIFIE';
+  bilan: Bilan2033A;
+  compteResultat: CompteResultat2033B;
+}
+
+/** Either regime's liasse — discriminate on `.regime`. Both /liasse/generate and /liasse/generate-secondary return this union. */
+export type LiasseAnyResult = LiasseResult | LiasseSimplifieResult;

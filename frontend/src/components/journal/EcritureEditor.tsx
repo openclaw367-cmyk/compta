@@ -23,6 +23,8 @@ interface DraftLigne {
   credit: string;
   lettrage: string;
   vatRateId: string | null;
+  /** ISO date string, or '' when unset — feeds the 2057 maturity split. */
+  dateEcheance: string;
 }
 
 let keySeq = 0;
@@ -40,6 +42,7 @@ function emptyLigne(): DraftLigne {
     credit: '',
     lettrage: '',
     vatRateId: null,
+    dateEcheance: '',
   };
 }
 
@@ -51,6 +54,17 @@ function emptyLigne(): DraftLigne {
  */
 function lineNeedsVatRate(account: Account | undefined): boolean {
   return Boolean(account && (account.number.startsWith('4457') || account.pcgClass === 7));
+}
+
+/**
+ * A due date only matters for a créance/dette line — class 4 (tiers:
+ * clients, fournisseurs, personnel, état, groupe et associés, ...) or a
+ * class-1 loan account (16x) — feeding 2057's Cadre A/B maturity split.
+ * Shown only then, same "don't imply every line needs it" pattern as
+ * lineNeedsVatRate above.
+ */
+function lineNeedsDueDate(account: Account | undefined): boolean {
+  return Boolean(account && (account.pcgClass === 4 || account.number.startsWith('16')));
 }
 
 function toIsoDate(value: string): string {
@@ -66,6 +80,7 @@ function fromExisting(ecriture: Ecriture): DraftLigne[] {
     credit: isZeroMoney(ligne.credit) ? '' : ligne.credit.replace('.', ','),
     lettrage: ligne.lettrage ?? '',
     vatRateId: ligne.vatRateId,
+    dateEcheance: ligne.dateEcheance ? toIsoDate(ligne.dateEcheance) : '',
   }));
 }
 
@@ -196,6 +211,7 @@ export function EcritureEditor({
       credit: isZeroMoney(row.credit || '0') ? undefined : normalizeMoneyInput(row.credit),
       lettrage: row.lettrage.trim() === '' ? undefined : row.lettrage.trim(),
       vatRateId: row.vatRateId ?? undefined,
+      dateEcheance: row.dateEcheance === '' ? undefined : row.dateEcheance,
     }));
     const dto: CreateEcritureDto = {
       journalId,
@@ -265,6 +281,7 @@ export function EcritureEditor({
               <th className="w-[13%] px-3 py-2 text-right font-semibold">Crédit</th>
               <th className="w-20 px-3 py-2 font-semibold">Lettrage</th>
               <th className="w-24 px-3 py-2 font-semibold">TVA</th>
+              <th className="w-32 px-3 py-2 font-semibold">Échéance</th>
               <th className="w-8 px-2 py-2" />
             </tr>
           </thead>
@@ -279,6 +296,7 @@ export function EcritureEditor({
                 ? accounts.filter((a) => a.isAuxiliary && a.parentId === mainAccount.id)
                 : [];
               const needsVatRate = lineNeedsVatRate(mainAccount);
+              const needsDueDate = lineNeedsDueDate(mainAccount);
               return (
                 <tr key={row.key} className="border-b border-border last:border-b-0 hover:bg-bg/60">
                   <td className="p-0">
@@ -381,6 +399,19 @@ export function EcritureEditor({
                           </option>
                         ))}
                       </select>
+                    ) : (
+                      <span className="block px-2 py-1.5 text-ink-faint">—</span>
+                    )}
+                  </td>
+                  <td className="p-0">
+                    {needsDueDate ? (
+                      <input
+                        type="date"
+                        disabled={readOnly}
+                        value={row.dateEcheance}
+                        onChange={(e) => updateRow(index, { dateEcheance: e.target.value })}
+                        className="w-full bg-transparent px-2 py-1.5 text-[13px] text-ink outline-none disabled:text-ink-faint"
+                      />
                     ) : (
                       <span className="block px-2 py-1.5 text-ink-faint">—</span>
                     )}

@@ -28,4 +28,18 @@ export class LiasseController {
   generate(@CurrentCompany() company: CompanyContext, @Body() dto: ComputeLiasseDto) {
     return this.liasseService.generate(company, dto);
   }
+
+  @ApiOperation({
+    summary:
+      "Generate the OTHER regime's liasse — a comparison view, independent of Company.regime.",
+    description:
+      'Both regimes are always computable from the same ledger; Company.regime only selects which ' +
+      'one is official. A separate endpoint (not a field on /generate) so a failure computing the ' +
+      "comparison regime never blocks viewing the company's own official liasse. Same draft-block " +
+      'guard as /generate.',
+  })
+  @Post('generate-secondary')
+  generateSecondary(@CurrentCompany() company: CompanyContext, @Body() dto: ComputeLiasseDto) {
+    return this.liasseService.generateSecondary(company, dto);
+  }
 }

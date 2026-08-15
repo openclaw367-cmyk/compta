@@ -91,6 +91,46 @@ export class LiasseService {
     company: CompanyContext,
     dto: ComputeLiasseDto,
   ): Promise<LiasseResult | LiasseSimplifieResult> {
+    const ctx = await this.fetchLedgerContext(company, dto);
+    if (ctx.companyRecord.regime === 'REEL_SIMPLIFIE') {
+      return this.computeReelSimplifie(ctx.bilanAccounts, ctx.compteResultatAccounts);
+    }
+    return this.computeReelNormal(company, ctx);
+  }
+
+  /**
+   * The regime the company DIDN'T pick, computed from the exact same
+   * ledger — see CLAUDE.md "Liasse fiscale — comparison view". Both
+   * regimes are always available for any company since they read the
+   * same PCG ledger; `Company.regime` only selects which one is the
+   * OFFICIAL/fileable one, not which one is computable. Deliberately a
+   * separate method (and separate endpoint) rather than folding this
+   * into `generate()`'s return shape: a failure computing the secondary
+   * regime (e.g. an account that classifies cleanly under one regime's
+   * rule table but not the other's) must never block viewing the
+   * company's own official liasse — two independent calls guarantee
+   * that structurally, with no try/catch resilience logic needed here.
+   */
+  async generateSecondary(
+    company: CompanyContext,
+    dto: ComputeLiasseDto,
+  ): Promise<LiasseResult | LiasseSimplifieResult> {
+    const ctx = await this.fetchLedgerContext(company, dto);
+    if (ctx.companyRecord.regime === 'REEL_SIMPLIFIE') {
+      return this.computeReelNormal(company, ctx);
+    }
+    return this.computeReelSimplifie(ctx.bilanAccounts, ctx.compteResultatAccounts);
+  }
+
+  /**
+   * Shared prefetch for both `generate()` and `generateSecondary()`:
+   * validates the company/fiscal year exist and the regime is a known
+   * one, refuses while any draft écriture exists in the fiscal year,
+   * and builds the trial balance split by bilan (classes 1–5) vs.
+   * compte de résultat (classes 6–7) — same "throw rather than guess"
+   * discipline either caller then builds on.
+   */
+  private async fetchLedgerContext(company: CompanyContext, dto: ComputeLiasseDto) {
     const companyRecord = await this.prisma.company.findFirst({ where: { id: company.companyId } });
     if (!companyRecord) {
       throw new NotFoundException(`Company ${company.companyId} not found`);
@@ -137,17 +177,31 @@ export class LiasseService {
     const bilanAccounts = trialBalance.filter((a) => a.pcgClass >= 1 && a.pcgClass <= 5);
     const compteResultatAccounts = trialBalance.filter((a) => a.pcgClass === 6 || a.pcgClass === 7);
     // Class 8 accounts, if any, are neither bilan nor compte de résultat — silently excluded, not
-    // silently mismapped (see doc comment above).
+    // silently mismapped (see module doc comment).
 
-    if (companyRecord.regime === 'REEL_SIMPLIFIE') {
-      const compteResultat = computeCompteResultat2033B(compteResultatAccounts);
-      const bilan = computeBilan2033A(
-        bilanAccounts,
-        Money.fromString(compteResultat.beneficeOuPerte),
-      );
-      assertBilan2033ABalances(bilan);
-      return { regime: 'REEL_SIMPLIFIE', bilan, compteResultat };
-    }
+    return { companyRecord, fiscalYear, lignes, bilanAccounts, compteResultatAccounts };
+  }
+
+  /** Pure, cheap — bilan simplifié (2033-A) + compte de résultat simplifié (2033-B). */
+  private computeReelSimplifie(
+    bilanAccounts: ReturnType<typeof buildTrialBalance>,
+    compteResultatAccounts: ReturnType<typeof buildTrialBalance>,
+  ): LiasseSimplifieResult {
+    const compteResultat = computeCompteResultat2033B(compteResultatAccounts);
+    const bilan = computeBilan2033A(
+      bilanAccounts,
+      Money.fromString(compteResultat.beneficeOuPerte),
+    );
+    assertBilan2033ABalances(bilan);
+    return { regime: 'REEL_SIMPLIFIE', bilan, compteResultat };
+  }
+
+  /** The full régime réel normal pipeline — bilan, compte de résultat, and every 2054–2059 annexe. */
+  private async computeReelNormal(
+    company: CompanyContext,
+    ctx: Awaited<ReturnType<LiasseService['fetchLedgerContext']>>,
+  ): Promise<LiasseResult> {
+    const { fiscalYear, lignes, bilanAccounts, compteResultatAccounts } = ctx;
 
     const compteResultat = computeCompteResultat2052_2053(compteResultatAccounts);
     const bilan = computeBilan2050(bilanAccounts, Money.fromString(compteResultat.beneficeOuPerte));
