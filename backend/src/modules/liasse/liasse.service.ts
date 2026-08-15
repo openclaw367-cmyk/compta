@@ -11,13 +11,16 @@ import { computeFixedAssetSummary } from '../depreciation/fixed-asset-invariants
 import { ComputeLiasseDto } from './dto/compute-liasse.dto';
 import { LiasseLigne, buildTrialBalance } from './trial-balance-engine';
 import { Bilan2050, computeBilan2050, resolveImmobilisationLineCode } from './bilan-2050';
+import { Bilan2033A, computeBilan2033A } from './bilan-2033-a';
 import {
   CompteResultat2052_2053,
   computeCompteResultat2052_2053,
 } from './compte-resultat-2052-2053';
+import { CompteResultat2033B, computeCompteResultat2033B } from './compte-resultat-2033-b';
 import {
   VncCheckLine,
   assertLiasseArticulation,
+  assertBilan2033ABalances,
   assertTableauxTieToBilan,
   assertTableau2056TiesToBilan,
   assertTableau2057TiesToBilan,
@@ -36,6 +39,7 @@ import { Tableau2057, computeTableau2057 } from './tableau-2057';
 import { Tableau2059AAsset, Tableau2059A, computeTableau2059A } from './tableau-2059';
 
 export interface LiasseResult {
+  regime: 'REEL_NORMAL';
   bilan: Bilan2050;
   compteResultat: CompteResultat2052_2053;
   tableau2054: Tableau2054;
@@ -43,6 +47,18 @@ export interface LiasseResult {
   tableau2056: Tableau2056;
   tableau2057: Tableau2057;
   tableau2059: Tableau2059A;
+}
+
+/**
+ * Régime réel simplifié — bilan simplifié (2033-A) and compte de résultat
+ * simplifié (2033-B, "A - RÉSULTAT COMPTABLE" section only) only, no
+ * annexe equivalents (2033-C onward are a future pass) — see
+ * bilan-2033-a.ts/compte-resultat-2033-b.ts for the full scope statement.
+ */
+export interface LiasseSimplifieResult {
+  regime: 'REEL_SIMPLIFIE';
+  bilan: Bilan2033A;
+  compteResultat: CompteResultat2033B;
 }
 
 /**
@@ -71,15 +87,18 @@ export interface LiasseResult {
 export class LiasseService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async generate(company: CompanyContext, dto: ComputeLiasseDto): Promise<LiasseResult> {
+  async generate(
+    company: CompanyContext,
+    dto: ComputeLiasseDto,
+  ): Promise<LiasseResult | LiasseSimplifieResult> {
     const companyRecord = await this.prisma.company.findFirst({ where: { id: company.companyId } });
     if (!companyRecord) {
       throw new NotFoundException(`Company ${company.companyId} not found`);
     }
-    if (companyRecord.regime !== 'REEL_NORMAL') {
+    if (companyRecord.regime !== 'REEL_NORMAL' && companyRecord.regime !== 'REEL_SIMPLIFIE') {
       throw new NotImplementedException(
-        `Liasse fiscale for regime "${companyRecord.regime}" is not implemented yet — only ` +
-          'REEL_NORMAL (2050-series) is built so far. See specs/liasse-2050-implementation-spec.md.',
+        `Liasse fiscale for regime "${String(companyRecord.regime)}" is not implemented yet — only ` +
+          'REEL_NORMAL (2050-series) and REEL_SIMPLIFIE (2033-A/2033-B) are built so far.',
       );
     }
 
@@ -119,6 +138,16 @@ export class LiasseService {
     const compteResultatAccounts = trialBalance.filter((a) => a.pcgClass === 6 || a.pcgClass === 7);
     // Class 8 accounts, if any, are neither bilan nor compte de résultat — silently excluded, not
     // silently mismapped (see doc comment above).
+
+    if (companyRecord.regime === 'REEL_SIMPLIFIE') {
+      const compteResultat = computeCompteResultat2033B(compteResultatAccounts);
+      const bilan = computeBilan2033A(
+        bilanAccounts,
+        Money.fromString(compteResultat.beneficeOuPerte),
+      );
+      assertBilan2033ABalances(bilan);
+      return { regime: 'REEL_SIMPLIFIE', bilan, compteResultat };
+    }
 
     const compteResultat = computeCompteResultat2052_2053(compteResultatAccounts);
     const bilan = computeBilan2050(bilanAccounts, Money.fromString(compteResultat.beneficeOuPerte));
@@ -196,6 +225,7 @@ export class LiasseService {
     assertTableau2059TiesToCompteResultat({ compteResultat, tableau2059 });
 
     return {
+      regime: 'REEL_NORMAL',
       bilan,
       compteResultat,
       tableau2054,

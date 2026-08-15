@@ -853,14 +853,118 @@ facts that must never be re-derived from memory.
   "Société Test Multi-Année" fixture, matching the backend verification
   exactly, including a real disposal (see "Immobilisations / cession"
   above).
-- Remaining liasse work: the 2033-series (régime réel simplifié)
-  mapping as a second pass over the same shared engine — the concrete
-  test of whether the engine shape actually supports a second mapping
-  layer the way it was designed to. Real 2057 maturity tracking (a new
-  schema field + UI to set it) remains open if ever wanted, but the
-  montant-brut version is a complete, real screen on its own — not a
-  placeholder waiting on that decision. 2059-A's court-terme/long-terme
-  tax qualification remains open too, same reasoning.
+- Remaining liasse work: 2059-A's court-terme/long-terme tax
+  qualification remains open — see "Liasse fiscale — régime réel
+  simplifié (2033-series)" below for the 2033-series pass (now built)
+  and "Liasse fiscale annexes 2056/2059" above for 2057's still-blocked
+  maturity split (now built too, see "Liasse fiscale / 2057 — état des
+  créances et des dettes, maturity split" below).
+
+## Liasse fiscale — régime réel simplifié (2033-series)
+
+`bilan-2033-a.ts` / `compte-resultat-2033-b.ts` (as of 2026-08-15)
+compute the régime réel simplifié liasse's two foundational forms —
+**bilan simplifié (2033-A-SD)** and **compte de résultat simplifié
+(2033-B-SD, "A - RÉSULTAT COMPTABLE" section only)** — the same shape
+of first pass the 2050-series got originally (bilan + compte de
+résultat before any annexe). `LiasseService.generate()` branches on
+`Company.regime`: `REEL_NORMAL` → the existing 2050-series pipeline
+unchanged, `REEL_SIMPLIFIE` → this new pipeline, returning a
+`{ regime, bilan, compteResultat }` shape either way (`LiasseResult` vs
+`LiasseSimplifieResult`) so a caller can discriminate on `regime`. Any
+other regime value still throws `NotImplementedException` (currently
+unreachable — the `Regime` enum only has these two values — kept as a
+defensive branch, same "throw rather than silently handle a case that
+shouldn't exist" discipline as everywhere else in this app).
+
+- **This was the concrete test of whether `trial-balance-engine.ts` /
+  `liasse-line-rules.ts` actually support a second regime cleanly, and
+  they did — no engine change was needed.** `classifyAccounts(accounts,
+  rules, dualNatureRules)` already took its rule table as a parameter,
+  not a hardcoded 2050-series table; building 2033-A/2033-B was
+  entirely a new rule table (`bilan-2033-a.ts`'s `ACTIF_RULES`/
+  `PASSIF_RULES`/`DUAL_NATURE_RULES`, `compte-resultat-2033-b.ts`'s
+  `CDR_RULES`) plus new pure compute functions, reusing
+  `buildTrialBalance()`/`classifyAccounts()` verbatim. If the engine
+  HAD needed changes to support this cleanly, the instruction was to
+  stop and report the coupling before working around it — that never
+  came up.
+- **Case numbers and labels quoted from the rendered form, not text
+  extraction.** `specs/2033-sd_5394.pdf`'s `pdftotext` output was
+  unreliable for this form: `-layout` and `-raw` modes disagreed with
+  each other on the DETTES section's case-to-label ordering (which of
+  156/164/166/169/172 belongs to "Avances et acomptes reçus" vs.
+  "Fournisseurs et comptes rattachés" vs. "Dettes fiscales et
+  sociales"). Resolved by rendering the PDF to an image (`pip install
+  pymupdf`, since this environment has no `pdftoppm`/poppler) and
+  reading the case numbers directly off the grid — every code/label
+  pair in both rule tables is confirmed against that rendering, not
+  guessed from either extraction mode.
+- **This form is coarser than 2050/2051 — many distinct 2050 lines
+  collapse into one 2033-A line.** E.g. bilan-2050's AB/CX/AF/AJ/AL
+  (five separate incorporelles lines) all fold into 2033-A's single
+  "Autres immobilisations incorporelles" (014/016); CS/CU/BB/BD/BF/BH
+  fold into one "Immobilisations financières" (040/042). Where an
+  account has genuinely no line of its own on this simplified form,
+  it's routed to the nearest documented catch-all, same "no dedicated
+  line → route to nearest catch-all, flagged in a comment" convention
+  bilan-2050.ts already established (206→AJ, 1062→DG) — e.g. 104
+  "Primes liées au capital social" → "Autres réserves" (132), since
+  2033-A has no primes-d'émission line at all. **One family is MORE
+  granular on this form, not less**: 455 "Associés - comptes courants"
+  gets its own dedicated passif line ("Comptes courants d'associés",
+  173) where bilan-2050 folds it into EA alongside 451/464/458/467/468.
+- **775x/675x (cessions d'immobilisations) routing on 2033-B is a
+  documented convention, not a form-confirmed mapping** — flagged
+  explicitly in `compte-resultat-2033-b.ts`'s own doc comment. This
+  form has no F1/G1/G2/G3-equivalent split by nature; every 775x/675x
+  sub-account routes to Produits/Charges exceptionnels (290/300)
+  uniformly, mirroring this app's own fallback for a cession
+  sub-account with no dedicated 2052/2053 line. Revisit against the
+  2033-NOT-SD notice if it's ever available.
+- **"B - RÉSULTAT FISCAL" (2033-B's cases 312 onward) is deliberately
+  NOT built** — this regime's analog of 2058-A (détermination du
+  résultat fiscal): réintégrations/déductions extra-comptables need
+  real CGI tax-rule scoping, no mechanical ledger source, out of scope
+  this pass same as 2058-A/B for régime normal. `computeCompteResultat2033B()`
+  only computes "A - RÉSULTAT COMPTABLE" (cases 209–310).
+  **2033-C onward (immobilisations/amortissements/plus-values,
+  provisions/amortissements dérogatoires/déficits, effectifs et valeur
+  ajoutée for CVAE, composition du capital, filiales et participations)
+  are not built either** — this pass is bilan + compte de résultat
+  only, the same scope the 2050-series had before its own annexe passes
+  (2054/2055/2056/2057/2059) came later. `LiasseSimplifieResult` has no
+  annexe fields.
+- **Verified two ways.** Hand-computed oracles in `bilan-2033-a.spec.ts`
+  and `compte-resultat-2033-b.spec.ts`, reusing the SAME hand-traced
+  dataset `liasse-oracle-fixture.ts` already provides for the 2050-series
+  oracle (not a new fixture) — every figure was independently
+  re-derived by hand against this form's coarser line codes. Each spec
+  file also has its own **cross-regime reconciliation test**: running
+  the identical trial balance through both `computeBilan2033A()`/
+  `computeBilan2050()` (or `computeCompteResultat2033B()`/
+  `computeCompteResultat2052_2053()`) and asserting the grand totals
+  match exactly, despite completely independently-specified rule
+  tables and different line-code granularity — this is what "reconciles
+  to the same trial balance the 2050 series reads" actually means here,
+  proven rather than asserted by construction. One real mapping gap was
+  found and fixed while hand-deriving this: account 404 ("fournisseurs
+  d'immobilisations", present in the shared oracle fixture) had no line
+  on 2033-A's DETTES section at all — fixed by folding it into
+  "Fournisseurs et comptes rattachés" (166) alongside 401/403/408,
+  documented as the same PCG-class-40 family. Separately,
+  `liasse.service.spec.ts` has a full mocked-Prisma end-to-end wiring
+  test for the `REEL_SIMPLIFIE` branch, exercising the real query shape
+  `LiasseService.generate()` issues (not just the pure compute
+  functions), confirming `fixedAsset.findMany` is never called on this
+  path (no 2033-C this pass). **Not verified live against the running
+  Postgres dev DB** — `Company.regime` isn't settable via
+  `UpdateCompanyDto`, and `Company` has no delete endpoint, so creating
+  a throwaway REEL_SIMPLIFIE company for a one-off live check would
+  permanently clutter the dev DB with no way to clean it up; the oracle
+  + cross-regime + mocked end-to-end coverage above was judged
+  sufficient without it. If `regime` ever becomes updatable, a live
+  check is a natural thing to add then.
 
 ## Known scope boundaries
 

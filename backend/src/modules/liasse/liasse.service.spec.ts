@@ -1,6 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { Prisma, JournalType } from '@prisma/client';
-import { LiasseService } from './liasse.service';
+import { LiasseResult, LiasseService, LiasseSimplifieResult } from './liasse.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import {
@@ -13,6 +13,14 @@ import {
 import { ORACLE_2056_TOTALS } from './tableau-2056-oracle-fixture';
 
 const company: CompanyContext = { companyId: 'company-1' };
+
+/** Every test in this file exercises the REEL_NORMAL company — narrows the union for property access. */
+function asReelNormal(result: LiasseResult | LiasseSimplifieResult): LiasseResult {
+  if (result.regime !== 'REEL_NORMAL') {
+    throw new Error(`Expected a REEL_NORMAL result, got ${result.regime}`);
+  }
+  return result;
+}
 
 const FY_2026 = {
   id: 'fy-2026',
@@ -57,7 +65,9 @@ function makeFixedAssetFindMany(assets: FakeFixedAsset[]) {
       if (cessionGte) {
         filtered = filtered.filter((a) => !a.cessionDate || a.cessionDate >= cessionGte.gte);
       }
-      return Promise.resolve(filtered.map((a) => ({ cessionDate: null, cessionPrice: null, ...a })));
+      return Promise.resolve(
+        filtered.map((a) => ({ cessionDate: null, cessionPrice: null, ...a })),
+      );
     },
   );
 }
@@ -120,7 +130,7 @@ describe('LiasseService.generate', () => {
     ]);
 
     const service = new LiasseService(prisma as unknown as PrismaService);
-    const result = await service.generate(company, { fiscalYearId: FY_2026.id });
+    const result = asReelNormal(await service.generate(company, { fiscalYearId: FY_2026.id }));
 
     const at = result.bilan.actif.find((l) => l.code === 'AT')!;
     expect(at.brut).toBe('1000.00'); // asset A only — asset B never leaked in
@@ -185,12 +195,40 @@ describe('LiasseService.generate', () => {
     );
   });
 
-  it('refuses a REEL_SIMPLIFIE company', async () => {
+  it('wires the REEL_SIMPLIFIE (2033-A/2033-B) path end to end on the same oracle dataset the REEL_NORMAL path uses', async () => {
+    // Reuses this file's own ORACLE_BILAN_LIGNES/ORACLE_HN (tableau-2054-2055-oracle-fixture.ts —
+    // despite the name, it's the FULL ledger including the class-6 dotations, same as the "wires
+    // 2054/2055" test above feeds it) — a real ecritureLigne.findMany call returns every validated
+    // line regardless of class; LiasseService.generate() itself splits by pcgClass.
+    //
+    // Hand-derived: class-2 net (immobilisations − amortissements) = 390000.00 − 38600.00 =
+    // 351400.00; class-5 net (512000) = 100000 − 80000 − 6000 = 14000.00 (débit, cash) — the '028'
+    // and '084' 2033-A lines respectively. totalActifNet = 351400 + 14000 = 365400.00. Passif: 120
+    // (101000, capital) = 385000.00; resultatDeLExercice = ORACLE_HN = -19600.00 (from 681100's
+    // 19600.00 total dotations, the fixture's only charge). totalPassif = 385000 − 19600 =
+    // 365400.00 — balances, matching totalActifNet.
     const prisma = makePrismaMock();
     prisma.company.findFirst.mockResolvedValue({ id: company.companyId, regime: 'REEL_SIMPLIFIE' });
-    await expect(service(prisma).generate(company, { fiscalYearId: FY_2026.id })).rejects.toThrow(
-      /not implemented/,
+    prisma.ecritureLigne.findMany = jest.fn().mockResolvedValue(
+      ORACLE_BILAN_LIGNES.map((l) => ({
+        compteId: l.compteNumber,
+        compte: { number: l.compteNumber, pcgClass: l.pcgClass },
+        debit: l.debit,
+        credit: l.credit,
+      })),
     );
+
+    const result = await service(prisma).generate(company, { fiscalYearId: FY_2026.id });
+
+    if (result.regime !== 'REEL_SIMPLIFIE') {
+      throw new Error(`Expected REEL_SIMPLIFIE, got ${result.regime}`);
+    }
+    expect(result.compteResultat.beneficeOuPerte).toBe(ORACLE_HN);
+    expect(result.bilan.resultatDeLExercice).toBe(ORACLE_HN);
+    expect(result.bilan.totalActifNet).toBe('365400.00');
+    expect(result.bilan.totalPassif).toBe('365400.00');
+    // fixedAsset.findMany must never be queried on the simplifié path — no 2033-C this pass.
+    expect(prisma.fixedAsset.findMany).not.toHaveBeenCalled();
   });
 
   it('wires 2054/2055 end to end on the multi-year oracle — the first real exercise of entry.fiscalYear.endDate', async () => {
@@ -241,7 +279,9 @@ describe('LiasseService.generate', () => {
     );
 
     const service = new LiasseService(prisma as unknown as PrismaService);
-    const result = await service.generate(company, { fiscalYearId: ORACLE_FY_2026.id });
+    const result = asReelNormal(
+      await service.generate(company, { fiscalYearId: ORACLE_FY_2026.id }),
+    );
 
     expect(result.compteResultat.beneficeOuPerte).toBe(ORACLE_HN);
     expect(result.tableau2054.totalGeneral).toBe('390000.00');
@@ -308,17 +348,46 @@ describe('LiasseService.generate', () => {
         debit: l.debit,
         credit: l.credit,
       })),
-      { compteId: '281540', compte: { number: '281540', pcgClass: 2 }, debit: new Prisma.Decimal('6000.00'), credit: new Prisma.Decimal('0.00') },
-      { compteId: '675200', compte: { number: '675200', pcgClass: 6 }, debit: new Prisma.Decimal('24000.00'), credit: new Prisma.Decimal('0.00') },
-      { compteId: '215400', compte: { number: '215400', pcgClass: 2 }, debit: new Prisma.Decimal('0.00'), credit: new Prisma.Decimal('30000.00') },
-      { compteId: '512000', compte: { number: '512000', pcgClass: 5 }, debit: new Prisma.Decimal('25000.00'), credit: new Prisma.Decimal('0.00') },
-      { compteId: '775200', compte: { number: '775200', pcgClass: 7 }, debit: new Prisma.Decimal('0.00'), credit: new Prisma.Decimal('25000.00') },
+      {
+        compteId: '281540',
+        compte: { number: '281540', pcgClass: 2 },
+        debit: new Prisma.Decimal('6000.00'),
+        credit: new Prisma.Decimal('0.00'),
+      },
+      {
+        compteId: '675200',
+        compte: { number: '675200', pcgClass: 6 },
+        debit: new Prisma.Decimal('24000.00'),
+        credit: new Prisma.Decimal('0.00'),
+      },
+      {
+        compteId: '215400',
+        compte: { number: '215400', pcgClass: 2 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('30000.00'),
+      },
+      {
+        compteId: '512000',
+        compte: { number: '512000', pcgClass: 5 },
+        debit: new Prisma.Decimal('25000.00'),
+        credit: new Prisma.Decimal('0.00'),
+      },
+      {
+        compteId: '775200',
+        compte: { number: '775200', pcgClass: 7 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('25000.00'),
+      },
     ]);
 
     const service = new LiasseService(prisma as unknown as PrismaService);
-    const result = await service.generate(company, { fiscalYearId: ORACLE_FY_2026.id });
+    const result = asReelNormal(
+      await service.generate(company, { fiscalYearId: ORACLE_FY_2026.id }),
+    );
 
-    expect(result.tableau2054.lignes.find((l) => l.code === 'INSTALLATIONS_TECHNIQUES')).toMatchObject({
+    expect(
+      result.tableau2054.lignes.find((l) => l.code === 'INSTALLATIONS_TECHNIQUES'),
+    ).toMatchObject({
       valeurBruteDebut: '30000.00',
       acquisitions: '0.00',
       cessions: '30000.00',
@@ -326,7 +395,9 @@ describe('LiasseService.generate', () => {
     });
     expect(result.tableau2054.totalGeneral).toBe('360000.00'); // 390000.00 - 30000.00
 
-    expect(result.tableau2055.lignes.find((l) => l.code === 'INSTALLATIONS_TECHNIQUES')).toMatchObject({
+    expect(
+      result.tableau2055.lignes.find((l) => l.code === 'INSTALLATIONS_TECHNIQUES'),
+    ).toMatchObject({
       montantDebut: '3000.00',
       dotations: '3000.00',
       diminutions: '6000.00',
@@ -335,10 +406,20 @@ describe('LiasseService.generate', () => {
     expect(result.tableau2055.totalGeneral).toBe('32600.00'); // 38600.00 - 6000.00
 
     expect(result.tableau2059.cadreA).toEqual([
-      { accountNumber: '215400', valeurOrigine: '30000.00', amortissements: '6000.00', valeurResiduelle: '24000.00' },
+      {
+        accountNumber: '215400',
+        valeurOrigine: '30000.00',
+        amortissements: '6000.00',
+        valeurResiduelle: '24000.00',
+      },
     ]);
     expect(result.tableau2059.cadreB).toEqual([
-      { accountNumber: '215400', prixDeVente: '25000.00', plusOuMoinsValue: '1000.00', qualification: null },
+      {
+        accountNumber: '215400',
+        prixDeVente: '25000.00',
+        plusOuMoinsValue: '1000.00',
+        qualification: null,
+      },
     ]);
     expect(result.tableau2059.totalNonQualifie).toBe('1000.00');
 
@@ -433,7 +514,7 @@ describe('LiasseService.generate', () => {
     ]);
 
     const service = new LiasseService(prisma as unknown as PrismaService);
-    const result = await service.generate(company, { fiscalYearId: FY_2026.id });
+    const result = asReelNormal(await service.generate(company, { fiscalYearId: FY_2026.id }));
 
     expect(result.tableau2056.totalReglementees).toBe(ORACLE_2056_TOTALS.totalReglementees);
     expect(result.tableau2056.totalRisquesCharges).toBe(ORACLE_2056_TOTALS.totalRisquesCharges);

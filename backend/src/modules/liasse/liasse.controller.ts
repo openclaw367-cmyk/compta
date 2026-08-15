@@ -16,12 +16,13 @@ export class LiasseController {
   constructor(private readonly liasseService: LiasseService) {}
 
   @ApiOperation({
-    summary:
-      'Generate the liasse fiscale (bilan 2050/2051, compte de résultat 2052/2053) for a fiscal year.',
+    summary: 'Generate the liasse fiscale for a fiscal year — regime-dependent shape.',
     description:
-      'Régime réel normal (2050-series) only — see specs/liasse-2050-implementation-spec.md. Refuses ' +
-      'for a REEL_SIMPLIFIE company, and if any écriture in the fiscal year is still a draft. The ' +
-      '2054+ annex forms (immobilisations, amortissements, résultat fiscal, ...) are not generated.',
+      'Branches on Company.regime. REEL_NORMAL returns the full 2050-series (bilan, compte de ' +
+      'résultat, 2054/2055/2056/2057/2059 annexes) — see specs/liasse-2050-implementation-spec.md. ' +
+      'REEL_SIMPLIFIE returns bilan simplifié (2033-A) and compte de résultat simplifié (2033-B, ' +
+      '"résultat comptable" section only — no annexe equivalents yet, no résultat fiscal). Refuses ' +
+      'for any other regime, and if any écriture in the fiscal year is still a draft.',
   })
   @Post('generate')
   generate(@CurrentCompany() company: CompanyContext, @Body() dto: ComputeLiasseDto) {

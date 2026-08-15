@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { Money } from '../../common/decimal';
 import { Bilan2050 } from './bilan-2050';
+import { Bilan2033A } from './bilan-2033-a';
 import { Tableau2054 } from './tableau-2054';
 import { Tableau2055 } from './tableau-2055';
 import { Tableau2056 } from './tableau-2056';
@@ -108,6 +109,26 @@ function assertVncTiesToLedger(bilan: Bilan2050, vncByLine: VncCheckLine[]): voi
           `(${ledgerAmort.toApiString()}). A dotation may not have been posted correctly.`,
       );
     }
+  }
+}
+
+/**
+ * The régime réel simplifié analog of assertBilanBalances above — same
+ * check, same independence argument, retargeted to Bilan2033A's field
+ * names. Kept as its own exported function (not a generic one both
+ * regimes share) since the two Bilan types, while similarly shaped,
+ * are genuinely distinct — see bilan-2033-a.ts's doc comment for why
+ * they don't unify into one type.
+ */
+export function assertBilan2033ABalances(bilan: Bilan2033A): void {
+  const actifNet = Money.fromString(bilan.totalActifNet);
+  const passifTotal = Money.fromString(bilan.totalPassif);
+  if (!actifNet.equals(passifTotal)) {
+    throw new ConflictException(
+      `Bilan simplifié does not balance: Actif net (${actifNet.toApiString()}) ≠ Passif total ` +
+        `(${passifTotal.toApiString()}). This means an account was misclassified, double-counted, ` +
+        'or dropped by the 2033-A mapping — never a case to silently accept.',
+    );
   }
 }
 
