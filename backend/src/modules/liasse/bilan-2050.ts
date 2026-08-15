@@ -25,7 +25,7 @@ const TVA_COLLECTEE_ACCOUNT = '445710';
  * in the same flat classification — a 28x/29x/39x/49x/59x contra account
  * is just another 'credit'-direction line, no special-casing needed.
  */
-const ACTIF_RULES: LineRule[] = [
+export const ACTIF_RULES: LineRule[] = [
   { code: 'AB', label: "Frais d'établissement (brut)", prefixes: ['201'], direction: 'debit' },
   { code: 'AC', label: "Frais d'établissement (amort.)", prefixes: ['2801'], direction: 'credit' },
   { code: 'CX', label: 'Frais de développement (brut)', prefixes: ['203'], direction: 'debit' },
@@ -292,7 +292,7 @@ const ACTIF_RULES: LineRule[] = [
   },
 ];
 
-const PASSIF_RULES: LineRule[] = [
+export const PASSIF_RULES: LineRule[] = [
   { code: 'DA', label: 'Capital social ou individuel', prefixes: ['101'], direction: 'credit' },
   {
     code: 'DB',
@@ -406,7 +406,7 @@ const PASSIF_RULES: LineRule[] = [
  * fiscal and associés "charges à payer / produits à recevoir" families,
  * per PCG art. 933-4's own terminaison-8 rule).
  */
-const DUAL_NATURE_RULES: DualNatureRule[] = [
+export const DUAL_NATURE_RULES: DualNatureRule[] = [
   { prefixes: ['512', '514', '516', '517'], debitLine: 'CF', creditLine: 'DU' },
   { prefixes: ['455'], debitLine: 'BZ', creditLine: 'EA' },
   { prefixes: ['428', '438', '448'], debitLine: 'BZ', creditLine: 'DY' },

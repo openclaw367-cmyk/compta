@@ -68,6 +68,51 @@ function matchingDualNatureRule(
 }
 
 /**
+ * Classifies ONE account (by number) into exactly one line's code —
+ * the same prefix-matching and dual-nature resolution classifyAccounts
+ * uses internally per account, exposed standalone for anything needing
+ * a per-account, non-aggregated lookup (e.g. tableau-2057.ts's maturity
+ * split, which needs to know which Cadre A/B code a raw EcritureLigne's
+ * account belongs to before it's ever aggregated into a
+ * TrialBalanceAccount). Throws — never guesses — on zero or multiple
+ * matches, same discipline as classifyAccounts itself.
+ *
+ * Dual-nature accounts need the account's OWN balance sign to resolve
+ * (see DualNatureRule), so `balance` is required — pass the specific
+ * ligne's own debit/credit-derived amount when classifying a raw ligne
+ * rather than an aggregated account.
+ */
+export function resolveLineCode(
+  accountNumber: string,
+  balance: Money,
+  rules: LineRule[],
+  dualNatureRules: DualNatureRule[] = [],
+): string {
+  const dualNature = matchingDualNatureRule(accountNumber, dualNatureRules);
+  if (dualNature) {
+    return balance.isPositive() ? dualNature.debitLine : dualNature.creditLine;
+  }
+
+  const matches = matchingRules(accountNumber, rules);
+  if (matches.length === 0) {
+    throw new BadRequestException(
+      `Account "${accountNumber}" has no liasse line mapping. This account either falls outside the ` +
+        'ranges this app maps (see specs/liasse-2050-implementation-spec.md §4 for what is ' +
+        "deliberately deferred), or is a genuinely new account the mapping hasn't been extended to " +
+        'cover — either way, this must be resolved explicitly rather than silently dropped or guessed.',
+    );
+  }
+  if (matches.length > 1) {
+    throw new ConflictException(
+      `Account "${accountNumber}" matches more than one liasse line ` +
+        `(${matches.map((m) => m.code).join(', ')}) — the mapping's prefix rules overlap for this ` +
+        'account and must be disjoint. This is a mapping bug, not a data problem.',
+    );
+  }
+  return matches[0].code;
+}
+
+/**
  * Classifies every account in a trial balance into exactly one line,
  * summing each line's contribution per its own sign convention. Throws
  * — never guesses — when an account matches no rule, matches more than

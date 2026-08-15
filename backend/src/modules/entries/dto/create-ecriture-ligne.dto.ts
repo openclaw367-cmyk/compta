@@ -1,4 +1,4 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsOptional, IsString } from 'class-validator';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { IsMoneyString } from '../../../common/decimal';
 
@@ -49,4 +49,16 @@ export class CreateEcritureLigneDto {
   @IsOptional()
   @IsString()
   vatRateId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Due date for a créance/dette line — feeds the 2057 (état des échéances) maturity split. ' +
+      'Omit for lines with no due-date concept (charges, produits, immobilisations, trésorerie); ' +
+      "omitting it on a créance/dette line falls into 2057's documented default bucket rather than " +
+      'blocking the écriture.',
+    example: '2027-03-31',
+  })
+  @IsOptional()
+  @IsDateString()
+  dateEcheance?: string;
 }

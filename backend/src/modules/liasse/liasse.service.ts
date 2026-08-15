@@ -35,7 +35,7 @@ import {
 } from './tableau-2055';
 import { ProvisionMovementLigne, Tableau2056, computeTableau2056 } from './tableau-2056';
 import { PROVISION_ACCOUNT_CLASS_PREFIXES } from './provision-categories';
-import { Tableau2057, computeTableau2057 } from './tableau-2057';
+import { Tableau2057, Tableau2057RawLigne, computeTableau2057 } from './tableau-2057';
 import { Tableau2059AAsset, Tableau2059A, computeTableau2059A } from './tableau-2059';
 
 export interface LiasseResult {
@@ -208,7 +208,14 @@ export class LiasseService {
     const tableau2056 = computeTableau2056(provisionLignes);
     assertTableau2056TiesToBilan({ trialBalance: bilanAccounts, tableau2056 });
 
-    const tableau2057 = computeTableau2057(bilan);
+    const tableau2057RawLignes: Tableau2057RawLigne[] = lignes.map((ligne) => ({
+      compteNumber: ligne.compte.number,
+      pcgClass: ligne.compte.pcgClass,
+      debit: ligne.debit,
+      credit: ligne.credit,
+      dateEcheance: ligne.dateEcheance,
+    }));
+    const tableau2057 = computeTableau2057(bilan, tableau2057RawLignes, fiscalYear.endDate);
     assertTableau2057TiesToBilan({ bilan, tableau2057 });
 
     const tableau2059Assets: Tableau2059AAsset[] = assetsDisposedThisYear.map((asset) => {

@@ -275,6 +275,14 @@ model EcritureLigne {
   vatRateId String?
   vatRate   VatRate? @relation(fields: [vatRateId], references: [id])
 
+  /// Due date for a créance/dette line — feeds the 2057 (état des
+  /// échéances) maturity split (see tableau-2057.ts). Optional: most
+  /// lines (charges, produits, immobilisations, trésorerie) have no
+  /// notion of a due date at all. A créance/dette line with no value
+  /// here falls into 2057's documented default bucket rather than
+  /// being guessed.
+  dateEcheance DateTime?
+
   createdAt DateTime @default(now())
 
   @@index([companyId, ecritureId])

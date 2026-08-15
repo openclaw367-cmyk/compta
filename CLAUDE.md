@@ -72,8 +72,9 @@ docs/        Compliance artifacts (e.g. Test Compta Demat reports)
    instance/service you run locally.
 2. `cd backend && npm install`
 3. `npx prisma migrate dev` — applies `backend/prisma/migrations/` (the
-   `20260711170231_init` baseline plus `20260801195325_add_company_address`
-   and `20260802175438_add_fixed_asset_cession_fields`)
+   `20260711170231_init` baseline plus `20260801195325_add_company_address`,
+   `20260802175438_add_fixed_asset_cession_fields`, and
+   `20260815144830_add_ecriture_ligne_date_echeance`)
    and runs `npm run seed` automatically via the `prisma.seed` config in
    `package.json`. Run `npm run seed` on its own to re-seed without a
    migration. On Windows, `prisma generate` can fail with `EPERM` renaming
@@ -814,26 +815,32 @@ facts that must never be re-derived from memory.
   "autres" bucket rather than being guessed a number. Its full backend
   articulation (`assertTableau2056TiesToBilan`) compares two
   independently-derived totals rather than tying to a bilan subtotal,
-  since the bilan has none to offer for TOTAL III. **2057** turned out
-  NOT to need the maturity-tracking decision once actually scoped:
-  rather than re-classifying raw ledger accounts a third time,
-  `tableau-2057.ts` computes it as a pure REGROUPING of the
-  already-computed `Bilan2050` — every 2057 row (montant brut only) is
-  exactly one bilan actif/passif line, relabeled into the CERFA form's
-  own Cadre A (créances) / Cadre B (dettes) layout, with a client-side
-  articulation banner (Cadre A/B totals tie to the same bilan lines,
-  summed independently in the browser). The maturity split itself (à
-  un an au plus / à plus d'un an, échéancier 1/5 ans) is still
-  genuinely blocked — no due-date field exists anywhere in the schema
-  — stated explicitly in the table's own `note` field rather than
-  guessed or silently omitted. Some CERFA sub-lines (clients douteux
-  vs. autres créances clients; personnel/sécurité sociale/impôts/TVA
-  shown separately) aren't separable either, because `bilan-2050.ts`
-  already merges them (BX, DY) or `DualNatureRule` merges them further
-  (groupe et associés into BZ/EA/DY alongside unrelated families) — not
-  a mapping problem the account numbers can solve, so 2057 reproduces
-  the bilan's own (coarser) line groupings instead, each row stating
-  which bilan line it reproduces. **2059-A** (as of 2026-08-15) renders
+  since the bilan has none to offer for TOTAL III. **2057**'s
+  MONTANT BRUT column is a pure REGROUPING of the already-computed
+  `Bilan2050` — every 2057 row is exactly one bilan actif/passif line,
+  relabeled into the CERFA form's own Cadre A (créances) / Cadre B
+  (dettes) layout, with a client-side articulation banner (Cadre A/B
+  totals tie to the same bilan lines, summed independently in the
+  browser). Some CERFA sub-lines (clients douteux vs. autres créances
+  clients; personnel/sécurité sociale/impôts/TVA shown separately)
+  aren't separable, because `bilan-2050.ts` already merges them (BX,
+  DY) or `DualNatureRule` merges them further (groupe et associés into
+  BZ/EA/DY alongside unrelated families) — not a mapping problem the
+  account numbers can solve, so 2057 reproduces the bilan's own
+  (coarser) line groupings instead, each row stating which bilan line
+  it reproduces. **The maturity split itself (à un an au plus / à plus
+  d'un an for Cadre A; the three-way ≤1an/1-5ans/>5ans for Cadre B) is
+  now built too (2026-08-15)** — see "Liasse fiscale / 2057 — maturity
+  split" below for the full design (the new `EcritureLigne.dateEcheance`
+  field, the separate raw-ligne pass, the default-bucket convention,
+  and a real dual-nature classification bug this pass's own
+  self-consistency check caught and fixed). **Not yet surfaced in
+  `LiassePage.tsx`** — the frontend still only renders `montantBrut`/
+  `totalCreances`/`totalDettes`/`note` (all unchanged in shape); the new
+  `aUnAnAuPlus`/`aPlusDUnAn`/`aPlusDUnAnEt5AnsAuPlus`/`aPlusDe5Ans`/
+  `maturityNote` fields are real and tested but backend-only so far,
+  same backend-first-then-display sequencing already used for every
+  other annexe in this app. **2059-A** (as of 2026-08-15) renders
   real Cadre A (valeur d'origine / amortissements / valeur résiduelle)
   and Cadre B (prix de vente / montant global de la plus-value) rows,
   one per asset actually disposed within the reported fiscal year — see
@@ -966,6 +973,82 @@ shouldn't exist" discipline as everywhere else in this app).
   sufficient without it. If `regime` ever becomes updatable, a live
   check is a natural thing to add then.
 
+## Liasse fiscale / 2057 — maturity split
+
+As of 2026-08-15, 2057's à-un-an-au-plus/à-plus-d'un-an split (Cadre A,
+créances) and the ≤1an/1-5ans/>5ans split (Cadre B, dettes) are real,
+closing the "no due-date field exists anywhere in the schema" gap
+recorded above.
+
+- **New field: `EcritureLigne.dateEcheance` (nullable `DateTime`)** —
+  migration `20260815144830_add_ecriture_ligne_date_echeance`. Exposed
+  on `CreateEcritureLigneDto` (`@IsOptional() @IsDateString()`), same
+  settable-at-line-creation-time pattern `lettrage` already has — unlike
+  `dateLettrage` (still API-unsettable, a separate known gap),
+  `dateEcheance` is fully API-settable end to end, confirmed live
+  (round-tripped through a real draft écriture against the FR demo
+  company, then deleted). **No frontend form field yet** — same
+  backend-first sequencing as everywhere else; the journal grid doesn't
+  offer a due-date input, so the only way to set it today is the API
+  directly.
+- **`montantBrut` is UNCHANGED — still a pure regrouping of `Bilan2050`.**
+  The maturity split is computed by a SEPARATE pass over raw,
+  `dateEcheance`-tagged `EcritureLigne`s (`Tableau2057RawLigne[]`,
+  `LiasseService.generate()` already had these fetched for other
+  purposes — no new query). The two are independently derived and
+  asserted to tie out per line (`aUnAnAuPlus + aPlusDUnAn ===
+  montantBrut`, and the three-way sum for Cadre B) — same
+  "two-independently-sourced-numbers" articulation discipline as
+  `assertVncTiesToLedger` and the rest of this app's cross-checks, not
+  a cosmetic addition.
+- **A line with no `dateEcheance` falls into the CONSERVATIVE
+  short-term bucket** ("à un an au plus" for both cadres) — a
+  documented convention (`Tableau2057.maturityNote`, distinct from the
+  existing `note` field), not a guess: most trade créances/dettes this
+  app would encounter genuinely are short-term, and defaulting short
+  is the standard conservative accounting assumption for an unknown
+  due date.
+- **A real bug found by this pass's own self-consistency check, not by
+  inspection**: the first version classified each raw ligne's Cadre A/B
+  code independently, per-ligne, including for dual-nature accounts
+  (512/514/516/517 bank overdraft routing, 455/428/438/448/458/467/468).
+  Dual-nature routing depends on an ACCOUNT's aggregate balance for the
+  period (net debit → CF, net credit → DU), never any single ledger
+  line's own debit/credit sign — classifying per-ligne instead
+  misrouted ordinary credit-side lines on a net-debit bank account
+  straight into DU, wildly inflating it (caught immediately: the
+  `aUnAnAuPlus + aPlusDUnAn === montantBrut` check threw against the
+  oracle bilan, `196500.00 ≠ 43000.00`). Fixed: `buildMaturityTotals()`
+  now aggregates each distinct account ONCE across all its lignes
+  first, resolves that account's code from the aggregate (matching
+  `classifyAccounts()`'s own per-account, not per-ligne, semantics
+  exactly), then buckets individual lignes by maturity using that
+  pre-resolved code.
+- **The form's origin-based split remains unbuilt, and can't be closed
+  by `dateEcheance` at all** — "Emprunts et dettes auprès des
+  établissements de crédit" prints "à 1 an maximum à l'origine" vs.
+  "à plus d'1 an à l'origine" (VG/VH), a split on the loan's ORIGINAL
+  term at inception, not its remaining due date. `dateEcheance` answers
+  a different question; DU stays one combined row, as before.
+- **`resolveLineCode()` (new, `liasse-line-rules.ts`)** — a per-account
+  classification helper extracted alongside `classifyAccounts()`
+  (which is untouched, zero risk to its 36 existing passing test
+  suites) rather than refactored out of it, so the maturity split could
+  reuse the exact same prefix-matching/dual-nature logic without
+  duplicating it by hand. `bilan-2050.ts`'s `ACTIF_RULES`/
+  `PASSIF_RULES`/`DUAL_NATURE_RULES` are now exported for this reuse.
+- **Verified two ways.** Hand-computed oracle tests in
+  `tableau-2057.spec.ts`: the existing bilan-oracle regression (every
+  line defaults to short-term, since that fixture tags no due dates)
+  plus a new dedicated maturity scenario (a créance split
+  10 000,00/5 000,00 across the two Cadre A buckets, a dette split
+  8 000,00/12 000,00/3 000,00 across all three Cadre B buckets).
+  Separately, `dateEcheance` was round-tripped live through a real
+  draft écriture against the FR demo company (created, fetched back
+  confirming the exact date persisted, deleted) — the schema/DTO/
+  service wiring, which is the genuinely new capture mechanism; the
+  maturity math itself is the oracle tests' job.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
@@ -995,13 +1078,17 @@ assume they're covered either:
   `computeTableau2057()`/`computeTableau2059A()` are all real (see
   "Liasse fiscale / bilan & compte de résultat" and "Liasse fiscale
   annexes 2056/2059" above), and `LiasseService.generate()` returns all
-  seven; `REEL_SIMPLIFIE` companies are refused outright
-  (`NotImplementedException`), not handed a wrong liasse. `LiassePage`
-  renders all seven. 2057's own maturity split (à un an au plus / à
-  plus d'un an) is still blocked — no due-date field exists anywhere in
-  the schema — but that's a real, narrower gap within a real table, not
-  the whole annexe being absent. Only the 2033-series (régime réel
-  simplifié) mapping remains genuinely unbuilt.
+  seven for `REEL_NORMAL`. **`REEL_SIMPLIFIE` is also now real** (as of
+  2026-08-15) — bilan simplifié (2033-A) + compte de résultat simplifié
+  (2033-B, résultat comptable section), see "Liasse fiscale — régime
+  réel simplifié (2033-series)" above; only 2033-C onward (annexes) and
+  2033-B's own résultat fiscal section remain unbuilt for that regime.
+  `LiassePage` renders all seven `REEL_NORMAL` tables; the
+  `REEL_SIMPLIFIE` shape has no frontend screen yet (backend-only so
+  far, same sequencing as every other annexe originally). **2057's
+  maturity split is also now real** (as of 2026-08-15, same day) — see
+  "Liasse fiscale / 2057 — maturity split" above — backend-computed and
+  tested, not yet surfaced in `LiassePage` either.
 - **VAT's `computeDeclaration()` is no longer a stub for either
   jurisdiction** — it branches to `computeCa3Declaration()` (FR) or
   `computeMonacoDeclaration()` (MC) — but each only covers its own
@@ -1195,30 +1282,37 @@ fiscale / bilan & compte de résultat" and "Liasse fiscale annexes
 2056/2059" above for the core architecture (the Actif=Passif
 independent check, DI constructed from HN, the confirmed overdraft/
 775-675/immobilisation-category regroupings, the 2054/2055 tie-out,
-2057's regroup-the-bilan approach). **2057's own maturity split is
-still blocked** — both its cadres would need a maturity/échéance split
-nothing in the schema can produce — see "Liasse fiscale annexes
-2056/2059" above and `specs/liasse-2056-2059-implementation-spec.md`
-§3; the montant-brut table itself is real and complete, not a
-placeholder. Verifying 2054/2055 live also surfaced and closed a real,
-structural gap — see "Known scope boundaries" below, "orphaned
-immobilisation." Other logged gaps remain open too (`dateLettrage` not
-API-settable, no import-batch listing endpoint, no delete/deactivate on
-Journal/Account/VatRate/FiscalYear, Article A47 A-1 §VIII
-uncross-checked).
+2057's regroup-the-bilan approach). **2057's maturity split is also
+now built** (2026-08-15) — see "Liasse fiscale / 2057 — maturity
+split" above: `EcritureLigne.dateEcheance` (new field, API-settable),
+a separate raw-ligne pass independently tied to the bilan-derived
+montant brut, a documented short-term default bucket, backend-computed
+and tested but not yet in `LiassePage`. **The régime réel simplifié
+(2033-series) liasse is also built** (same day) — see "Liasse fiscale
+— régime réel simplifié (2033-series)" above: bilan simplifié +
+compte de résultat simplifié, the concrete proof the shared engine
+supports a second regime without changes. Verifying 2054/2055 live
+also surfaced and closed a real, structural gap — see "Known scope
+boundaries" below, "orphaned immobilisation" (also now closed, see
+"Warn at entry time..." above). Other logged gaps remain open too
+(`dateLettrage` not API-settable, no import-batch listing endpoint, no
+delete/deactivate on Journal/Account/VatRate/FiscalYear, Article A47
+A-1 §VIII uncross-checked).
 
 **Build order for what's next**, roughly in priority:
 
-1. **Liasse fiscale**: the 2033-series (régime réel simplifié) mapping
-   as a second pass over the same shared engine — the concrete test of
-   whether the engine shape actually supports a second mapping layer
-   the way it was designed to. Real 2057 maturity tracking (a new
-   schema field + UI to set it) remains open if ever wanted, not
-   blocking; 2059-A's court-terme/long-terme tax qualification is the
-   same kind of open, non-blocking item. Separately, worth picking up
-   soon: the "orphaned immobilisation" guard logged in "Known scope
-   boundaries" — warning at journal-entry time rather than relying on
-   the liasse tie-out as the only backstop.
+1. **Liasse fiscale**: the 2033-C-onward annexes (immobilisations/
+   amortissements/plus-values, provisions/amortissements dérogatoires/
+   déficits, effectifs/valeur ajoutée, capital, filiales) for régime
+   réel simplifié — the same annexe build-out the 2050-series already
+   went through, now that 2033-A/2033-B prove the engine supports it.
+   2033-B's own résultat fiscal section (this regime's 2058-A analog)
+   and 2058-A/B for régime normal remain deliberately deferred
+   (judgment-heavy, no mechanical ledger source). 2059-A's
+   court-terme/long-terme tax qualification is the same kind of open,
+   non-blocking item. Frontend display for both the 2033-series liasse
+   and 2057's new maturity columns is real, tangible next work — both
+   are backend-complete and tested, waiting on a screen.
 2. **Cash flow statement** — bilan and compte de résultat are already
    covered by the liasse work above.
 3. **Financial analysis** — ratios, free cash flow, and a DCF as an

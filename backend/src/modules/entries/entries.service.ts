@@ -235,6 +235,7 @@ export class EntriesService {
           : undefined,
         idDevise: ligne.idDevise,
         vatRateId: ligne.vatRateId,
+        dateEcheance: ligne.dateEcheance ? new Date(ligne.dateEcheance) : undefined,
       };
     });
 
