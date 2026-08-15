@@ -5,7 +5,8 @@ import { resolveImmobilisationCategory } from './immobilisation-categories';
 /**
  * 2055-SD (Amortissements), Cadre A only — movement of amortissements
  * over the fiscal year. See
- * specs/liasse-2054-2055-implementation-spec.md §2/§3/§5.
+ * specs/liasse-2054-2055-implementation-spec.md §2/§3/§5 and CLAUDE.md
+ * "Immobilisations / cession" for how "reprises" is now real.
  *
  * Cadre B (amortissements dérogatoires) is not represented here at
  * all — structurally N/A, not deferred: it only arises when the tax
@@ -18,8 +19,14 @@ import { resolveImmobilisationCategory } from './immobilisation-categories';
  * represented.
  *
  * Diminutions (Cadre A col 3 — amortissements afférents aux éléments
- * sortis de l'actif et reprises) is always 0.00 — depends on cession
- * logic that doesn't exist.
+ * sortis de l'actif et reprises) is real: `disposals` carries one entry
+ * per asset disposed within the reported fiscal year, with its
+ * cumulative posted amortissements AT disposal (already includes that
+ * year's own, possibly prorated, final dotation). This is passed as its
+ * own explicit list rather than derived from `entries` — `entries` is
+ * flattened per (account, fiscalYear), and since multiple assets can
+ * share one account, there's no way to attribute "this account's total"
+ * to one specific disposed asset from the flattened shape alone.
  */
 
 export interface ImmobilisationDepreciationMovement {
@@ -30,12 +37,18 @@ export interface ImmobilisationDepreciationMovement {
   amount: Money;
 }
 
+export interface ImmobilisationDisposal {
+  accountNumber: string;
+  /** Cumulative posted amortissements for this specific asset at the date of disposal. */
+  amortissementsCumules: Money;
+}
+
 export interface Tableau2055Ligne {
   code: string;
   label: string;
   montantDebut: string;
   dotations: string;
-  /** Always "0.00" this pass. */
+  /** Sum of amortissementsCumules-at-disposal for assets in this category disposed within the reported fiscal year. */
   diminutions: string;
   montantFin: string;
 }
@@ -137,8 +150,9 @@ const ROW_CODES = new Set([...INCORPORELLES_CODES, ...CORPORELLES_CODES]);
 export function computeTableau2055(
   entries: ImmobilisationDepreciationMovement[],
   reportedFiscalYear: { id: string; endDate: Date },
+  disposals: ImmobilisationDisposal[] = [],
 ): Tableau2055 {
-  const byCategory = new Map<string, { debut: Money; dotations: Money }>();
+  const byCategory = new Map<string, { debut: Money; dotations: Money; diminutions: Money }>();
   for (const entry of entries) {
     if (entry.fiscalYearEndDate > reportedFiscalYear.endDate) {
       throw new ConflictException(
@@ -159,6 +173,7 @@ export function computeTableau2055(
     const bucket = byCategory.get(category.code) ?? {
       debut: Money.zero(),
       dotations: Money.zero(),
+      diminutions: Money.zero(),
     };
     if (entry.fiscalYearId === reportedFiscalYear.id) {
       bucket.dotations = bucket.dotations.plus(entry.amount);
@@ -168,23 +183,42 @@ export function computeTableau2055(
     byCategory.set(category.code, bucket);
   }
 
+  for (const disposal of disposals) {
+    const category = resolveImmobilisationCategory(disposal.accountNumber);
+    if (!ROW_CODES.has(category.code)) {
+      throw new ConflictException(
+        `Account "${disposal.accountNumber}" has a disposal but its category (${category.code}) has ` +
+          'no 2055 row — immobilisations en cours, avances, and financières are never amortized.',
+      );
+    }
+    const bucket = byCategory.get(category.code) ?? {
+      debut: Money.zero(),
+      dotations: Money.zero(),
+      diminutions: Money.zero(),
+    };
+    bucket.diminutions = bucket.diminutions.plus(disposal.amortissementsCumules);
+    byCategory.set(category.code, bucket);
+  }
+
   const lignes: Tableau2055Ligne[] = ROWS_2055.map((row) => {
     let debut = Money.zero();
     let dotations = Money.zero();
+    let diminutions = Money.zero();
     for (const categoryCode of row.categories) {
       const bucket = byCategory.get(categoryCode);
       if (bucket) {
         debut = debut.plus(bucket.debut);
         dotations = dotations.plus(bucket.dotations);
+        diminutions = diminutions.plus(bucket.diminutions);
       }
     }
-    const fin = debut.plus(dotations); // diminutions always 0 — see module doc comment
+    const fin = debut.plus(dotations).minus(diminutions);
     return {
       code: row.code,
       label: row.label,
       montantDebut: debut.toApiString(),
       dotations: dotations.toApiString(),
-      diminutions: '0.00',
+      diminutions: diminutions.toApiString(),
       montantFin: fin.toApiString(),
     };
   });

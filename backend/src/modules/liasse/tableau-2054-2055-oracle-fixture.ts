@@ -39,31 +39,37 @@ export const ORACLE_ASSETS: ImmobilisationMovementAsset[] = [
     accountNumber: '211000',
     acquisitionDate: new Date('2025-03-01'),
     acquisitionValue: Money.fromString('50000.00'),
+    cessionDate: null,
   }, // Terrain A
   {
     accountNumber: '213000',
     acquisitionDate: new Date('2025-06-01'),
     acquisitionValue: Money.fromString('200000.00'),
+    cessionDate: null,
   }, // Bâtiment B
   {
     accountNumber: '214000',
     acquisitionDate: new Date('2026-04-01'),
     acquisitionValue: Money.fromString('80000.00'),
+    cessionDate: null,
   }, // Entrepôt C
   {
     accountNumber: '215400',
     acquisitionDate: new Date('2025-09-01'),
     acquisitionValue: Money.fromString('30000.00'),
+    cessionDate: null,
   }, // Machine D
   {
     accountNumber: '218300',
     acquisitionDate: new Date('2026-02-01'),
     acquisitionValue: Money.fromString('6000.00'),
+    cessionDate: null,
   }, // Ordinateurs E
   {
     accountNumber: '218200',
     acquisitionDate: new Date('2025-01-10'),
     acquisitionValue: Money.fromString('24000.00'),
+    cessionDate: null,
   }, // Véhicule F
 ];
 
@@ -72,6 +78,7 @@ export const LATER_ASSET: ImmobilisationMovementAsset = {
   accountNumber: '218300',
   acquisitionDate: new Date('2027-01-15'),
   acquisitionValue: Money.fromString('9999.00'),
+  cessionDate: null,
 };
 
 export const ORACLE_DEPRECIATION_ENTRIES: ImmobilisationDepreciationMovement[] = [

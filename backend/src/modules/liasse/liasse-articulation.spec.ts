@@ -202,6 +202,8 @@ describe('assertTableau2056TiesToBilan', () => {
   });
 });
 
+const FY_2059_TEST = { startDate: new Date('2026-01-01'), endDate: new Date('2026-12-31') };
+
 describe('assertTableau2059TiesToCompteResultat', () => {
   it('passes when both sides are 0,00 (no cessions posted, no cession écritures either)', () => {
     const compteResultat = fakeCompteResultat([
@@ -212,7 +214,7 @@ describe('assertTableau2059TiesToCompteResultat', () => {
       { code: 'G3', label: '', montant: '0.00' },
       { code: 'HH', label: '', montant: '0.00' },
     ]);
-    const tableau2059 = computeTableau2059A([]);
+    const tableau2059 = computeTableau2059A([], FY_2059_TEST);
     expect(() =>
       assertTableau2059TiesToCompteResultat({ compteResultat, tableau2059 }),
     ).not.toThrow();
@@ -220,7 +222,7 @@ describe('assertTableau2059TiesToCompteResultat', () => {
 
   it('tolerates missing cession lines (a compte de résultat where none of those accounts were ever used)', () => {
     const compteResultat = fakeCompteResultat([{ code: 'FC', label: '', montant: '1000.00' }]);
-    const tableau2059 = computeTableau2059A([]);
+    const tableau2059 = computeTableau2059A([], FY_2059_TEST);
     expect(() =>
       assertTableau2059TiesToCompteResultat({ compteResultat, tableau2059 }),
     ).not.toThrow();
@@ -231,10 +233,33 @@ describe('assertTableau2059TiesToCompteResultat', () => {
       { code: 'F1', label: '', montant: '5000.00' },
       { code: 'G1', label: '', montant: '0.00' },
     ]);
-    const tableau2059 = computeTableau2059A([]); // no cessionDate anywhere → still the empty table
+    const tableau2059 = computeTableau2059A([], FY_2059_TEST); // no disposal recorded, but the CDR shows a cession
     expect(() => assertTableau2059TiesToCompteResultat({ compteResultat, tableau2059 })).toThrow(
       /does not equal the compte de résultat's net cession result/,
     );
+  });
+
+  it('passes when a real disposal ties exactly to its own 775/675 compte-de-résultat lines', () => {
+    const compteResultat = fakeCompteResultat([
+      { code: 'F1', label: '', montant: '9000.00' }, // 775200 produit de cession
+      { code: 'G1', label: '', montant: '7491.67' }, // 675200 VNC des éléments cédés
+    ]);
+    const tableau2059 = computeTableau2059A(
+      [
+        {
+          accountNumber: '218200',
+          cessionDate: new Date('2026-07-01'),
+          cessionPrice: Money.fromString('9000.00'),
+          valeurBrute: Money.fromString('12000.00'),
+          amortissementsCumules: Money.fromString('4508.33'),
+        },
+      ],
+      FY_2059_TEST,
+    );
+    expect(tableau2059.totalNonQualifie).toBe('1508.33'); // 9000.00 - 7491.67
+    expect(() =>
+      assertTableau2059TiesToCompteResultat({ compteResultat, tableau2059 }),
+    ).not.toThrow();
   });
 });
 

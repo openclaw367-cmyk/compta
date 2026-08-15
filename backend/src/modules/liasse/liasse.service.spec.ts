@@ -32,23 +32,34 @@ interface FakeFixedAsset {
   acquisitionValue: Prisma.Decimal;
   residualValue: Prisma.Decimal;
   depreciationEntries: unknown[];
+  cessionDate?: Date | null;
+  cessionPrice?: Prisma.Decimal | null;
 }
 
 /**
  * A "smart" fixedAsset.findMany mock: it actually applies the
- * acquisitionDate filter from the `where` clause it receives, the same
- * way Postgres would — rather than just returning a fixed list
- * regardless of the query. This is what makes the regression test
- * below meaningfully exercise the fix: against the pre-fix code (no
- * acquisitionDate in the where clause), this mock would return every
- * asset regardless of date, reproducing the bug.
+ * acquisitionDate AND cessionDate filters from the `where` clause it
+ * receives, the same way Postgres would — rather than just returning a
+ * fixed list regardless of the query. This is what makes the regression
+ * tests below meaningfully exercise the fix: against pre-fix code (no
+ * acquisitionDate/cessionDate filtering in the where clause), this mock
+ * would return every asset regardless of date, reproducing the bug.
  */
 function makeFixedAssetFindMany(assets: FakeFixedAsset[]) {
-  return jest.fn((args: { where?: { acquisitionDate?: { lte?: Date } } }) => {
-    const lte = args?.where?.acquisitionDate?.lte;
-    const filtered = lte ? assets.filter((a) => a.acquisitionDate <= lte) : assets;
-    return Promise.resolve(filtered);
-  });
+  return jest.fn(
+    (args: {
+      where?: { acquisitionDate?: { lte?: Date }; OR?: { cessionDate?: { gte?: Date } | null }[] };
+    }) => {
+      const lte = args?.where?.acquisitionDate?.lte;
+      let filtered = lte ? assets.filter((a) => a.acquisitionDate <= lte) : assets;
+      const cessionGte = args?.where?.OR?.find((c) => c.cessionDate && 'gte' in c.cessionDate)
+        ?.cessionDate as { gte: Date } | undefined;
+      if (cessionGte) {
+        filtered = filtered.filter((a) => !a.cessionDate || a.cessionDate >= cessionGte.gte);
+      }
+      return Promise.resolve(filtered.map((a) => ({ cessionDate: null, cessionPrice: null, ...a })));
+    },
+  );
 }
 
 function makePrismaMock(fixedAssets: FakeFixedAsset[] = []) {
@@ -245,6 +256,95 @@ describe('LiasseService.generate', () => {
     expect(
       result.tableau2055.lignes.find((l) => l.code === 'CONSTRUCTIONS_SOL_PROPRE'),
     ).toMatchObject({ montantDebut: '10000.00', dotations: '10000.00', montantFin: '20000.00' });
+    expect(result.bilan.totalActifNet).toBe(result.bilan.totalPassif);
+  });
+
+  it('wires a real disposal end to end — 2054 cessions, 2055 diminutions, and 2059-A all agree, Actif=Passif still holds', async () => {
+    // Machine D (215400) disposed exactly on FY2026's own last day, cessionPrice 25000.00 — no
+    // extra prorated dotation needed since the base oracle's own FY2026 dotation (3000.00) already
+    // covers the full year. VNC at disposal = 30000.00 (valeurBrute) - 6000.00
+    // (amortissementsCumules: 3000 début + 3000 FY2026 dotation) = 24000.00. Plus-value = 25000.00
+    // - 24000.00 = 1000.00.
+    const entriesByAccount = new Map<string, typeof ORACLE_DEPRECIATION_ENTRIES>();
+    for (const entry of ORACLE_DEPRECIATION_ENTRIES) {
+      const list = entriesByAccount.get(entry.accountNumber) ?? [];
+      list.push(entry);
+      entriesByAccount.set(entry.accountNumber, list);
+    }
+    const fixedAssets: FakeFixedAsset[] = ORACLE_ASSETS.map((asset, i) => ({
+      id: `asset-${i}`,
+      companyId: company.companyId,
+      accountId: `account-${asset.accountNumber}`,
+      account: { number: asset.accountNumber },
+      acquisitionDate: asset.acquisitionDate,
+      acquisitionValue: new Prisma.Decimal(asset.acquisitionValue.toApiString()),
+      residualValue: new Prisma.Decimal('0.00'),
+      depreciationEntries: (entriesByAccount.get(asset.accountNumber) ?? []).map((entry) => ({
+        fiscalYearId: entry.fiscalYearId,
+        fiscalYear: { endDate: entry.fiscalYearEndDate },
+        amount: new Prisma.Decimal(entry.amount.toApiString()),
+        postedEcritureId: 'some-ecriture-id',
+      })),
+      cessionDate: asset.accountNumber === '215400' ? new Date('2026-12-31') : null,
+      cessionPrice: asset.accountNumber === '215400' ? new Prisma.Decimal('25000.00') : null,
+    }));
+
+    const prisma = makePrismaMock(fixedAssets);
+    prisma.fiscalYear.findFirst.mockResolvedValue({
+      id: ORACLE_FY_2026.id,
+      companyId: company.companyId,
+      label: '2026',
+      startDate: ORACLE_FY_2026.startDate,
+      endDate: ORACLE_FY_2026.endDate,
+      closedAt: null,
+    });
+    // Same ORACLE_BILAN_LIGNES base, plus the disposal's own écriture: débit 281540 6000.00 + débit
+    // 675200 24000.00 = crédit 215400 30000.00 (sortie), débit 512000 25000.00 = crédit 775200
+    // 25000.00 (produit de cession).
+    prisma.ecritureLigne.findMany = jest.fn().mockResolvedValue([
+      ...ORACLE_BILAN_LIGNES.map((l) => ({
+        compteId: l.compteNumber,
+        compte: { number: l.compteNumber, pcgClass: l.pcgClass },
+        debit: l.debit,
+        credit: l.credit,
+      })),
+      { compteId: '281540', compte: { number: '281540', pcgClass: 2 }, debit: new Prisma.Decimal('6000.00'), credit: new Prisma.Decimal('0.00') },
+      { compteId: '675200', compte: { number: '675200', pcgClass: 6 }, debit: new Prisma.Decimal('24000.00'), credit: new Prisma.Decimal('0.00') },
+      { compteId: '215400', compte: { number: '215400', pcgClass: 2 }, debit: new Prisma.Decimal('0.00'), credit: new Prisma.Decimal('30000.00') },
+      { compteId: '512000', compte: { number: '512000', pcgClass: 5 }, debit: new Prisma.Decimal('25000.00'), credit: new Prisma.Decimal('0.00') },
+      { compteId: '775200', compte: { number: '775200', pcgClass: 7 }, debit: new Prisma.Decimal('0.00'), credit: new Prisma.Decimal('25000.00') },
+    ]);
+
+    const service = new LiasseService(prisma as unknown as PrismaService);
+    const result = await service.generate(company, { fiscalYearId: ORACLE_FY_2026.id });
+
+    expect(result.tableau2054.lignes.find((l) => l.code === 'INSTALLATIONS_TECHNIQUES')).toMatchObject({
+      valeurBruteDebut: '30000.00',
+      acquisitions: '0.00',
+      cessions: '30000.00',
+      valeurBruteFin: '0.00',
+    });
+    expect(result.tableau2054.totalGeneral).toBe('360000.00'); // 390000.00 - 30000.00
+
+    expect(result.tableau2055.lignes.find((l) => l.code === 'INSTALLATIONS_TECHNIQUES')).toMatchObject({
+      montantDebut: '3000.00',
+      dotations: '3000.00',
+      diminutions: '6000.00',
+      montantFin: '0.00',
+    });
+    expect(result.tableau2055.totalGeneral).toBe('32600.00'); // 38600.00 - 6000.00
+
+    expect(result.tableau2059.cadreA).toEqual([
+      { accountNumber: '215400', valeurOrigine: '30000.00', amortissements: '6000.00', valeurResiduelle: '24000.00' },
+    ]);
+    expect(result.tableau2059.cadreB).toEqual([
+      { accountNumber: '215400', prixDeVente: '25000.00', plusOuMoinsValue: '1000.00', qualification: null },
+    ]);
+    expect(result.tableau2059.totalNonQualifie).toBe('1000.00');
+
+    // The disposed asset's account is fully zeroed out of the bilan — Actif=Passif still holds with
+    // Machine D's old 24000.00 net contribution gone and the 25000.00 cash/plus-value flowing
+    // through instead.
     expect(result.bilan.totalActifNet).toBe(result.bilan.totalPassif);
   });
 

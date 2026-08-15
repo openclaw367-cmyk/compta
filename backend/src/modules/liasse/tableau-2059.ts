@@ -1,35 +1,47 @@
 import { ConflictException } from '@nestjs/common';
+import { Money } from '../../common/decimal';
 
 /**
  * 2059-A-SD (Détermination des plus et moins-values) — see
- * specs/liasse-2056-2059-implementation-spec.md §4.
+ * specs/liasse-2056-2059-implementation-spec.md §4 and CLAUDE.md
+ * "Immobilisations / cession" for the écriture side this table reads
+ * off of.
  *
- * Every row on the real form (Cadre A — valeur résiduelle des éléments
- * cédés; Cadre B — plus-values/moins-values, qualification court terme
- * / long terme / taxable à 19%) is a per-disposal line item. Cession
- * logic doesn't exist in this app yet (see CLAUDE.md "Known scope
- * boundaries" — FixedAsset.cessionDate/cessionPrice exist in the schema
- * but stay null; no DTO/UI surface, no plus/moins-value computation).
- * So unlike 2054/2055 (which had real non-cession movement to show even
- * with their cession columns pinned to 0,00), 2059-A has nothing at all
- * to report today — not a partial table, a structurally empty one.
- *
- * This is not a silent no-op: it asserts that no FixedAsset in the
- * reported fiscal year actually has a cessionDate set. If one ever
- * does, returning an empty table would be actively wrong (a real
- * disposal happened and the tax plus-value/moins-value on it would be
- * missing from the filing), so this throws instead — a future cession
- * feature must touch this guard (and build the actual qualification
- * logic, deliberately out of scope here) before it can be relaxed.
+ * The real form has SIX Cadre A columns (nature+date, valeur d'origine,
+ * valeur nette réévaluée, amortissements pratiqués en franchise
+ * d'impôt, autres amortissements, valeur résiduelle) and Cadre B splits
+ * the plus/moins-value by court-terme (col 9) / long-terme (col 10) /
+ * taxable à 19% (col 11) — a genuine CGI tax-qualification judgment
+ * call (holding period, nature of the gain) this app does not attempt.
+ * What IS computed, mechanically, from data this app already has:
+ *  - Cadre A: valeur d'origine (acquisitionValue), amortissements
+ *    (posted dotations cumulés at disposal), valeur résiduelle (VNC) —
+ *    "valeur nette réévaluée" and "amortissements en franchise d'impôt"
+ *    are structurally N/A (no revaluation feature, no tax/book
+ *    amortization divergence — this app only computes linéaire, same
+ *    reasoning as 2055's Cadre B being N/A).
+ *  - Cadre B: prix de vente (cessionPrice), montant global de la
+ *    plus/moins-value (cessionPrice − VNC) — the qualification column
+ *    stays `null`, and totalCourtTerme/totalLongTerme stay "0.00" even
+ *    when real disposals are present, since allocating between them
+ *    needs the tax judgment this pass doesn't attempt. The real,
+ *    computed net total is still surfaced via `totalNonQualifie` so the
+ *    figure isn't silently dropped — same "flag, don't fake" discipline
+ *    as 2057's maturity split.
  */
 
-export interface FixedAssetCessionCheck {
-  id: string;
+export interface Tableau2059AAsset {
   accountNumber: string;
-  cessionDate: Date | null;
+  /** Guaranteed non-null and within the reported fiscal year — the caller pre-filters to disposals this year, same convention as 2054/2055/2056. */
+  cessionDate: Date;
+  cessionPrice: Money;
+  /** Always FixedAsset.acquisitionValue — see fixed-asset-invariants.ts's own doc comment on why valeurBrute never reads any other field. */
+  valeurBrute: Money;
+  /** Sum of this asset's posted dotations, up to and including the disposal year's own (possibly prorated) final entry. */
+  amortissementsCumules: Money;
 }
 
-/** Cadre A row shape (valeur résiduelle des éléments cédés) — defined for forward-compatibility with a future cession feature; never populated by this pass. */
+/** Cadre A row — valeur résiduelle des éléments cédés. See module doc comment for why "valeur nette réévaluée" and "amortissements en franchise d'impôt" aren't represented. */
 export interface Tableau2059ACadreARow {
   accountNumber: string;
   valeurOrigine: string;
@@ -37,54 +49,85 @@ export interface Tableau2059ACadreARow {
   valeurResiduelle: string;
 }
 
-/** Cadre B row shape (plus-values/moins-values) — same forward-compatibility note as Cadre A. */
+/** Cadre B row — plus-values/moins-values. `qualification` is always null this pass — see module doc comment. */
 export interface Tableau2059ACadreBRow {
   accountNumber: string;
   prixDeVente: string;
   plusOuMoinsValue: string;
-  qualification: 'COURT_TERME' | 'LONG_TERME';
+  qualification: 'COURT_TERME' | 'LONG_TERME' | null;
 }
 
 export interface Tableau2059A {
-  /** Always empty — see module doc comment. */
   cadreA: Tableau2059ACadreARow[];
-  /** Always empty — see module doc comment. */
   cadreB: Tableau2059ACadreBRow[];
-  /** CADRE A total — plus/moins-value nette à court terme. Always "0.00" this pass. */
+  /** CADRE A total — plus/moins-value nette à court terme. Always "0.00" — see module doc comment. */
   totalCourtTerme: string;
-  /** CADRE B total — plus/moins-value nette à long terme. Always "0.00" this pass. */
+  /** CADRE B total — plus/moins-value nette à long terme. Always "0.00" — see module doc comment. */
   totalLongTerme: string;
+  /** The real, computed net plus/moins-value across every disposal this year, not yet allocated between court/long terme. */
+  totalNonQualifie: string;
   note: string;
 }
 
 const NOTE =
-  "Les cessions d'immobilisations ne sont pas encore prises en charge dans cette application — " +
-  'aucune ligne ne peut être produite tant que la logique de cession (calcul de la plus ou moins-' +
-  "value, qualification court terme / long terme) n'est pas implémentée.";
+  "La qualification fiscale (court terme / long terme / taxable à 19 %) n'est pas calculée : elle " +
+  "dépend d'une analyse fiscale (durée de détention, nature du bien) que cette application ne fait " +
+  "pas. Le montant global de la plus ou moins-value par cession est calculé (prix de cession − " +
+  'valeur résiduelle) et apparaît dans « totalNonQualifie » plutôt que réparti entre CADRE A et ' +
+  'CADRE B.';
+
+const EMPTY_NOTE =
+  "Aucune cession d'immobilisation n'a eu lieu au cours de cet exercice.";
 
 /**
- * Pure computation, no I/O. `assets` should be every FixedAsset in
- * scope for the reported fiscal year (same set fetchImmobilisations
- * already retrieves for the VNC check and 2054/2055 — no separate
- * query needed).
+ * Pure computation, no I/O. `disposedAssets` must already be scoped by
+ * the caller to assets whose cessionDate falls within the reported
+ * fiscal year — this function defensively re-checks that, same
+ * precondition/re-check pattern as tableau-2054/2055/2056.
  */
-export function computeTableau2059A(assets: FixedAssetCessionCheck[]): Tableau2059A {
-  const withCession = assets.filter((a) => a.cessionDate != null);
-  if (withCession.length > 0) {
-    throw new ConflictException(
-      `${withCession.length} FixedAsset(s) have a cessionDate set (e.g. account ` +
-        `"${withCession[0].accountNumber}"), but 2059-A's plus-value/moins-value computation isn't ` +
-        'implemented — generating an empty table would silently omit a real disposal from the ' +
-        'filing. Cession support must be built (see specs/liasse-2056-2059-implementation-spec.md ' +
-        '§4) before a liasse can be generated for a fiscal year with any cession in it.',
-    );
+export function computeTableau2059A(
+  disposedAssets: Tableau2059AAsset[],
+  fiscalYear: { startDate: Date; endDate: Date },
+): Tableau2059A {
+  for (const asset of disposedAssets) {
+    if (asset.cessionDate < fiscalYear.startDate || asset.cessionDate > fiscalYear.endDate) {
+      throw new ConflictException(
+        `Asset with account "${asset.accountNumber}" has a cessionDate ` +
+          `(${asset.cessionDate.toISOString().slice(0, 10)}) outside the reported fiscal year ` +
+          `(${fiscalYear.startDate.toISOString().slice(0, 10)} – ` +
+          `${fiscalYear.endDate.toISOString().slice(0, 10)}) — it must be excluded by the caller ` +
+          'before computing 2059-A, not passed in.',
+      );
+    }
   }
 
+  const cadreA: Tableau2059ACadreARow[] = disposedAssets.map((asset) => ({
+    accountNumber: asset.accountNumber,
+    valeurOrigine: asset.valeurBrute.toApiString(),
+    amortissements: asset.amortissementsCumules.toApiString(),
+    valeurResiduelle: asset.valeurBrute.minus(asset.amortissementsCumules).toApiString(),
+  }));
+
+  const cadreB: Tableau2059ACadreBRow[] = disposedAssets.map((asset) => {
+    const vnc = asset.valeurBrute.minus(asset.amortissementsCumules);
+    return {
+      accountNumber: asset.accountNumber,
+      prixDeVente: asset.cessionPrice.toApiString(),
+      plusOuMoinsValue: asset.cessionPrice.minus(vnc).toApiString(),
+      qualification: null,
+    };
+  });
+
+  const totalNonQualifie = cadreB
+    .reduce((sum, row) => sum.plus(Money.fromString(row.plusOuMoinsValue)), Money.zero())
+    .toApiString();
+
   return {
-    cadreA: [],
-    cadreB: [],
+    cadreA,
+    cadreB,
     totalCourtTerme: '0.00',
     totalLongTerme: '0.00',
-    note: NOTE,
+    totalNonQualifie,
+    note: disposedAssets.length > 0 ? NOTE : EMPTY_NOTE,
   };
 }

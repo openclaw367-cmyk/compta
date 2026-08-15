@@ -5,16 +5,21 @@ import {
   NotFoundException,
   NotImplementedException,
 } from '@nestjs/common';
-import { Account, DepreciationEntry, FixedAsset, JournalType } from '@prisma/client';
+import { Account, DepreciationEntry, FiscalYear, FixedAsset, JournalType } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { Money } from '../../common/decimal';
 import { EntriesService } from '../entries/entries.service';
 import { CreateEcritureDto } from '../entries/dto/create-ecriture.dto';
+import { CreateEcritureLigneDto } from '../entries/dto/create-ecriture-ligne.dto';
 import { CreateFixedAssetDto } from './dto/create-fixed-asset.dto';
 import { FixedAssetListItemDto } from './dto/fixed-asset-list-item.dto';
 import { DepreciationEntryDto } from './dto/depreciation-entry.dto';
+import { CessionFixedAssetDto } from './dto/cession-fixed-asset.dto';
+import { CessionResultDto } from './dto/cession-result.dto';
 import { computeLinearSchedule } from './depreciation-schedule';
+import { computeFinalPeriodDotation } from './cession-proration';
+import { CESSION_ACCOUNTS, resolveCessionNature, assertValidCompteReglement } from './cession-invariants';
 import {
   assertValidAccountTriplet,
   assertWithinDepreciableBase,
@@ -243,6 +248,259 @@ export class DepreciationService {
       postedEcritureId: updated.postedEcritureId,
       postedEcritureNum: validated.ecritureNum ?? null,
     };
+  }
+
+  /**
+   * Disposal (cession) of a fixed asset — see CLAUDE.md "Immobilisations
+   * / cession" for the full écriture design this implements and why
+   * (PCG Art. 942-20 / Art. 944-46). Every posting goes through
+   * EntriesService.create()/validate(), no privileged write path — the
+   * final prorated dotation reuses postDotation() itself rather than
+   * duplicating it.
+   *
+   * Order of operations:
+   *  1. Guard: not already disposed, cessionDate not before serviceStartDate.
+   *  2. Resolve the fiscal year covering cessionDate, and the 675x/775x
+   *     accounts for this asset's nature (incorporelle/corporelle) —
+   *     required to already exist, never auto-created (same discipline
+   *     as a-nouveau.service.ts's 120/129 lookup).
+   *  3. Guard: every fiscal year between the asset's service-start year
+   *     and the disposal year has a POSTED dotation — otherwise VNC at
+   *     cession would be understated by however much depreciation is
+   *     missing.
+   *  4. Post the disposal year's own dotation, prorated by day-count
+   *     from périodeStart (max of the fiscal year's start and the
+   *     asset's serviceStartDate) to cessionDate — skipped if a correct
+   *     dotation already covers this period, refused if an INCORRECT
+   *     (full-year) one is already posted (must be reversed first).
+   *  5. With VNC now current, post the disposal écriture: débit
+   *     amortissementsCumules + débit VNC (675x) = crédit valeurBrute
+   *     (21x); plus, unless cessionPrice is 0 (mise au rebut), débit
+   *     compte de règlement = crédit produit (775x). Zero-valued lines
+   *     are omitted (EntriesService rejects a 0.00 débit/crédit line).
+   *  6. Mark the FixedAsset disposed (cessionDate/cessionPrice set on
+   *     the same row — never deleted; 2054/2055/2059-A all key off this).
+   */
+  async disposeFixedAsset(
+    company: CompanyContext,
+    fixedAssetId: string,
+    dto: CessionFixedAssetDto,
+  ): Promise<CessionResultDto> {
+    const asset = await this.findOne(company, fixedAssetId);
+    if (asset.cessionDate) {
+      throw new ConflictException(
+        `"${asset.label}" was already disposed on ${asset.cessionDate.toISOString().slice(0, 10)}.`,
+      );
+    }
+
+    const cessionDate = new Date(dto.cessionDate);
+    const cessionPrice = Money.fromString(dto.cessionPrice);
+    if (cessionPrice.isNegative()) {
+      throw new BadRequestException('cessionPrice cannot be negative.');
+    }
+    if (cessionDate < asset.serviceStartDate) {
+      throw new BadRequestException(
+        `cessionDate (${dto.cessionDate}) is before this asset's serviceStartDate ` +
+          `(${asset.serviceStartDate.toISOString().slice(0, 10)}).`,
+      );
+    }
+
+    const disposalFiscalYear = await this.findFiscalYearContaining(company, cessionDate);
+    if (!disposalFiscalYear) {
+      throw new NotFoundException(`No fiscal year covers cessionDate ${dto.cessionDate}.`);
+    }
+
+    const assetAccount = await this.prisma.account.findFirst({
+      where: { id: asset.accountId, companyId: company.companyId },
+    });
+    if (!assetAccount) {
+      throw new NotFoundException(`Account ${asset.accountId} not found`);
+    }
+    const nature = resolveCessionNature(assetAccount.number);
+    const { vnc: vncAccountNumber, produit: produitAccountNumber } = CESSION_ACCOUNTS[nature];
+    const vncAccount = await this.requireAccountByNumber(company, vncAccountNumber);
+    const produitAccount = await this.requireAccountByNumber(company, produitAccountNumber);
+
+    let compteReglement: Account;
+    if (dto.compteReglementId) {
+      const found = await this.prisma.account.findFirst({
+        where: { id: dto.compteReglementId, companyId: company.companyId },
+      });
+      if (!found) {
+        throw new BadRequestException('compteReglementId does not belong to this company.');
+      }
+      compteReglement = found;
+    } else {
+      compteReglement = await this.requireAccountByNumber(company, '462000');
+    }
+    assertValidCompteReglement(compteReglement);
+
+    await this.assertPriorYearsPosted(company, asset, disposalFiscalYear);
+
+    const periodStart =
+      disposalFiscalYear.startDate > asset.serviceStartDate
+        ? disposalFiscalYear.startDate
+        : asset.serviceStartDate;
+
+    const existingDisposalEntry = await this.prisma.depreciationEntry.findFirst({
+      where: { fixedAssetId: asset.id, fiscalYearId: disposalFiscalYear.id },
+    });
+    if (existingDisposalEntry?.postedEcritureId) {
+      throw new ConflictException(
+        `The dotation for "${asset.label}" (${disposalFiscalYear.label}) is already posted at ` +
+          `${Money.fromDecimal(existingDisposalEntry.amount).toApiString()} — a mid-year disposal ` +
+          "needs a prorated amount instead. Reverse (contre-passer) that écriture first, then retry.",
+      );
+    }
+
+    const proratedAmount = computeFinalPeriodDotation(asset, periodStart, cessionDate);
+    let finalDotationEcritureNum: string | null = null;
+    if (!proratedAmount.isZero()) {
+      const entry = await this.prisma.depreciationEntry.upsert({
+        where: {
+          fixedAssetId_fiscalYearId: { fixedAssetId: asset.id, fiscalYearId: disposalFiscalYear.id },
+        },
+        create: {
+          companyId: company.companyId,
+          fixedAssetId: asset.id,
+          fiscalYearId: disposalFiscalYear.id,
+          amount: proratedAmount.toDecimal(),
+        },
+        update: { amount: proratedAmount.toDecimal() },
+      });
+      const posted = await this.postDotation(company, entry.id);
+      finalDotationEcritureNum = posted.postedEcritureNum;
+    }
+
+    const postedEntries = await this.prisma.depreciationEntry.findMany({
+      where: { fixedAssetId: asset.id, postedEcritureId: { not: null } },
+    });
+    const { valeurBrute, amortissementsCumules, vnc } = computeFixedAssetSummary(
+      asset,
+      postedEntries,
+    );
+
+    const odJournal = await this.prisma.journal.findFirst({
+      where: { companyId: company.companyId, type: JournalType.OPERATIONS_DIVERSES },
+      orderBy: { code: 'asc' },
+    });
+    if (!odJournal) {
+      throw new NotFoundException(
+        'No opérations diverses journal (type OPERATIONS_DIVERSES) exists for this company — ' +
+          'create one first.',
+      );
+    }
+
+    const lignes: CreateEcritureLigneDto[] = [];
+    if (!amortissementsCumules.isZero()) {
+      lignes.push({ compteId: asset.depreciationAccountId, debit: amortissementsCumules.toApiString() });
+    }
+    if (!vnc.isZero()) {
+      lignes.push({ compteId: vncAccount.id, debit: vnc.toApiString() });
+    }
+    lignes.push({ compteId: asset.accountId, credit: valeurBrute.toApiString() });
+    if (!cessionPrice.isZero()) {
+      lignes.push({ compteId: compteReglement.id, debit: cessionPrice.toApiString() });
+      lignes.push({ compteId: produitAccount.id, credit: cessionPrice.toApiString() });
+    }
+
+    const cessionEcritureDto: CreateEcritureDto = {
+      journalId: odJournal.id,
+      fiscalYearId: disposalFiscalYear.id,
+      ecritureDate: dto.cessionDate,
+      libelle: `Cession - ${asset.label} (${disposalFiscalYear.label})`,
+      lignes,
+    };
+    const draft = await this.entriesService.create(company, cessionEcritureDto);
+    const validated = await this.entriesService.validate(company, draft.id);
+
+    await this.prisma.fixedAsset.update({
+      where: { id: asset.id },
+      data: { cessionDate, cessionPrice: cessionPrice.toDecimal() },
+    });
+
+    return {
+      finalDotationEcritureNum,
+      cessionEcritureNum: validated.ecritureNum!,
+      vnc: vnc.toApiString(),
+      cessionPrice: cessionPrice.toApiString(),
+      plusOuMoinsValue: cessionPrice.minus(vnc).toApiString(),
+    };
+  }
+
+  private async findFiscalYearContaining(
+    company: CompanyContext,
+    date: Date,
+  ): Promise<FiscalYear | null> {
+    return this.prisma.fiscalYear.findFirst({
+      where: { companyId: company.companyId, startDate: { lte: date }, endDate: { gte: date } },
+    });
+  }
+
+  private async requireAccountByNumber(company: CompanyContext, number: string): Promise<Account> {
+    const account = await this.prisma.account.findFirst({
+      where: { companyId: company.companyId, number },
+    });
+    if (!account) {
+      throw new NotFoundException(
+        `Account "${number}" is required to post a cession écriture — create it first.`,
+      );
+    }
+    return account;
+  }
+
+  /**
+   * Every fiscal year strictly between the asset's own service-start
+   * year and the disposal year must already have a posted dotation —
+   * otherwise the disposal's VNC would be silently understated by
+   * whatever depreciation never got posted. Compares a COUNT of
+   * qualifying fiscal years against a count of posted entries within
+   * that same range, rather than trying to guess which years "should"
+   * exist — if the schedule was never generated/posted for a prior
+   * year, this throws rather than silently treating it as zero.
+   */
+  private async assertPriorYearsPosted(
+    company: CompanyContext,
+    asset: FixedAsset,
+    disposalFiscalYear: FiscalYear,
+  ): Promise<void> {
+    const serviceStartFiscalYear = await this.findFiscalYearContaining(
+      company,
+      asset.serviceStartDate,
+    );
+    if (!serviceStartFiscalYear) {
+      throw new NotFoundException(
+        `No fiscal year covers this asset's serviceStartDate ` +
+          `(${asset.serviceStartDate.toISOString().slice(0, 10)}).`,
+      );
+    }
+
+    const priorFiscalYears = await this.prisma.fiscalYear.findMany({
+      where: {
+        companyId: company.companyId,
+        startDate: { gte: serviceStartFiscalYear.startDate },
+        endDate: { lt: disposalFiscalYear.startDate },
+      },
+    });
+    if (priorFiscalYears.length === 0) {
+      return;
+    }
+
+    const priorEntries = await this.prisma.depreciationEntry.findMany({
+      where: {
+        fixedAssetId: asset.id,
+        fiscalYearId: { in: priorFiscalYears.map((fy) => fy.id) },
+        postedEcritureId: { not: null },
+      },
+    });
+    if (priorEntries.length !== priorFiscalYears.length) {
+      throw new ConflictException(
+        `${priorEntries.length} of ${priorFiscalYears.length} fiscal year(s) before the disposal ` +
+          `year (${disposalFiscalYear.label}) have a posted dotation for "${asset.label}" — post the ` +
+          "missing one(s) first (see generateSchedule()/postDotation()), otherwise VNC at cession " +
+          'would be understated.',
+      );
+    }
   }
 
   private toListItem(

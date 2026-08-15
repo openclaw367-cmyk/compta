@@ -26,13 +26,14 @@ import {
 import { ImmobilisationMovementAsset, Tableau2054, computeTableau2054 } from './tableau-2054';
 import {
   ImmobilisationDepreciationMovement,
+  ImmobilisationDisposal,
   Tableau2055,
   computeTableau2055,
 } from './tableau-2055';
 import { ProvisionMovementLigne, Tableau2056, computeTableau2056 } from './tableau-2056';
 import { PROVISION_ACCOUNT_CLASS_PREFIXES } from './provision-categories';
 import { Tableau2057, computeTableau2057 } from './tableau-2057';
-import { Tableau2059A, computeTableau2059A } from './tableau-2059';
+import { Tableau2059AAsset, Tableau2059A, computeTableau2059A } from './tableau-2059';
 
 export interface LiasseResult {
   bilan: Bilan2050;
@@ -122,18 +123,25 @@ export class LiasseService {
     const compteResultat = computeCompteResultat2052_2053(compteResultatAccounts);
     const bilan = computeBilan2050(bilanAccounts, Money.fromString(compteResultat.beneficeOuPerte));
 
-    // One fetch, shared by the VNC check and both 2054/2055 — scoped to "acquired/posted in or
-    // before the reported fiscal year" (see fetchImmobilisations' own doc comment for why this
-    // scoping is load-bearing, not incidental).
-    const assets = await this.fetchImmobilisations(company, fiscalYear.endDate);
+    // One fetch, shared by the VNC check, 2054/2055, and 2059-A — scoped to "acquired in or before
+    // the reported fiscal year, AND not disposed before it" (see fetchImmobilisations' own doc
+    // comment for why both halves of that scoping are load-bearing, not incidental).
+    const assets = await this.fetchImmobilisations(company, fiscalYear);
+    const assetsDisposedThisYear = assets.filter(
+      (asset) =>
+        asset.cessionDate &&
+        asset.cessionDate >= fiscalYear.startDate &&
+        asset.cessionDate <= fiscalYear.endDate,
+    );
 
-    const vncByLine = this.buildVncByLine(assets);
+    const vncByLine = this.buildVncByLine(assets, assetsDisposedThisYear);
     assertLiasseArticulation({ bilan, vncByLine });
 
     const tableau2054Assets: ImmobilisationMovementAsset[] = assets.map((asset) => ({
       accountNumber: asset.account.number,
       acquisitionDate: asset.acquisitionDate,
       acquisitionValue: Money.fromDecimal(asset.acquisitionValue),
+      cessionDate: asset.cessionDate,
     }));
     const tableau2054 = computeTableau2054(tableau2054Assets, fiscalYear);
 
@@ -145,10 +153,16 @@ export class LiasseService {
         amount: Money.fromDecimal(entry.amount),
       })),
     );
-    const tableau2055 = computeTableau2055(tableau2055Entries, {
-      id: fiscalYear.id,
-      endDate: fiscalYear.endDate,
-    });
+    const tableau2055Disposals: ImmobilisationDisposal[] = assetsDisposedThisYear.map((asset) => ({
+      accountNumber: asset.account.number,
+      amortissementsCumules: computeFixedAssetSummary(asset, asset.depreciationEntries)
+        .amortissementsCumules,
+    }));
+    const tableau2055 = computeTableau2055(
+      tableau2055Entries,
+      { id: fiscalYear.id, endDate: fiscalYear.endDate },
+      tableau2055Disposals,
+    );
 
     assertTableauxTieToBilan({ bilan, tableau2054, tableau2055 });
 
@@ -168,13 +182,17 @@ export class LiasseService {
     const tableau2057 = computeTableau2057(bilan);
     assertTableau2057TiesToBilan({ bilan, tableau2057 });
 
-    const tableau2059 = computeTableau2059A(
-      assets.map((asset) => ({
-        id: asset.id,
+    const tableau2059Assets: Tableau2059AAsset[] = assetsDisposedThisYear.map((asset) => {
+      const summary = computeFixedAssetSummary(asset, asset.depreciationEntries);
+      return {
         accountNumber: asset.account.number,
-        cessionDate: asset.cessionDate,
-      })),
-    );
+        cessionDate: asset.cessionDate!,
+        cessionPrice: Money.fromDecimal(asset.cessionPrice!),
+        valeurBrute: summary.valeurBrute,
+        amortissementsCumules: summary.amortissementsCumules,
+      };
+    });
+    const tableau2059 = computeTableau2059A(tableau2059Assets, fiscalYear);
     assertTableau2059TiesToCompteResultat({ compteResultat, tableau2059 });
 
     return {
@@ -189,23 +207,44 @@ export class LiasseService {
   }
 
   /**
-   * Every FixedAsset acquired in or before the reported fiscal year,
-   * with its posted depreciation entries from that same fiscal year or
-   * earlier — the shared "as of this year" dataset the VNC check and
-   * both 2054/2055 all need. Filtering only depreciationEntries and not
-   * the assets themselves was a real, separately-fixed bug here (see
-   * git history): a company that later acquired more assets would get
-   * a wrong VNC when reporting a past year. Fetched once and reused
-   * across all three consumers below rather than three separate
-   * queries.
+   * Every FixedAsset acquired in or before the reported fiscal year AND
+   * not disposed before it, with its posted depreciation entries from
+   * that same fiscal year or earlier — the shared "as of this year"
+   * dataset the VNC check, 2054/2055, and 2059-A all need.
+   *
+   * Both halves of the WHERE are load-bearing, fixed as real bugs, not
+   * incidental: filtering only depreciationEntries and not the assets
+   * themselves by acquisitionDate was the original bug (see git
+   * history) — a company that later acquired more assets would get a
+   * wrong VNC when reporting a past year. The cessionDate half is the
+   * disposal-side analog, found while building cession support: without
+   * it, an asset disposed in a PRIOR fiscal year would still contribute
+   * its full valeurBrute/amortissementsCumules to every LATER year's
+   * bilan forever (computeFixedAssetSummary's valeurBrute is always
+   * FixedAsset.acquisitionValue, independent of disposal — see that
+   * function's own doc comment), even though the asset is genuinely
+   * gone and the ledger's own 21x/28x balances for it are already zero.
+   * An asset disposed WITHIN the reported year is still included (its
+   * 2054/2055/2059-A movement needs to show for that year); only a
+   * disposal strictly BEFORE the reported year's start excludes it.
    */
-  private async fetchImmobilisations(company: CompanyContext, asOfEndDate: Date) {
+  private async fetchImmobilisations(
+    company: CompanyContext,
+    fiscalYear: { startDate: Date; endDate: Date },
+  ) {
     return this.prisma.fixedAsset.findMany({
-      where: { companyId: company.companyId, acquisitionDate: { lte: asOfEndDate } },
+      where: {
+        companyId: company.companyId,
+        acquisitionDate: { lte: fiscalYear.endDate },
+        OR: [{ cessionDate: null }, { cessionDate: { gte: fiscalYear.startDate } }],
+      },
       include: {
         account: true,
         depreciationEntries: {
-          where: { postedEcritureId: { not: null }, fiscalYear: { endDate: { lte: asOfEndDate } } },
+          where: {
+            postedEcritureId: { not: null },
+            fiscalYear: { endDate: { lte: fiscalYear.endDate } },
+          },
           include: { fiscalYear: true },
         },
       },
@@ -217,12 +256,31 @@ export class LiasseService {
    * rolls up to, summing valeurBrute/amortissementsCumules per line
    * using the same formula as the immobilisations module itself
    * (fixed-asset-invariants.ts) — never re-derived.
+   *
+   * `disposedThisYear` assets are excluded from this tie-out entirely —
+   * found live while adding cession support: computeFixedAssetSummary's
+   * valeurBrute is always FixedAsset.acquisitionValue "independent of
+   * residualValue or postings" (see that function's own doc comment),
+   * so it keeps reporting a disposed asset's full historical gross
+   * value forever, while the LEDGER (which this tie-out compares
+   * against) correctly nets that same account to zero once the
+   * disposal écriture's débit 28x/crédit 21x lines land. Comparing
+   * those two for a disposed asset would always mismatch — not a bug
+   * to paper over, a sign the two figures mean different things once
+   * disposal exists. The bilan's own Actif=Passif check (a genuinely
+   * separate, still-live tie-out) is what actually verifies the
+   * disposal posted correctly.
    */
   private buildVncByLine(
     assets: Awaited<ReturnType<LiasseService['fetchImmobilisations']>>,
+    disposedThisYear: Awaited<ReturnType<LiasseService['fetchImmobilisations']>>,
   ): VncCheckLine[] {
+    const disposedIds = new Set(disposedThisYear.map((a) => a.id));
     const byLine = new Map<string, { valeurBrute: Money; amortissementsCumules: Money }>();
     for (const asset of assets) {
+      if (disposedIds.has(asset.id)) {
+        continue;
+      }
       const summary = computeFixedAssetSummary(asset, asset.depreciationEntries);
       const lineCode = resolveImmobilisationLineCode(asset.account.number);
       const existing = byLine.get(lineCode) ?? {

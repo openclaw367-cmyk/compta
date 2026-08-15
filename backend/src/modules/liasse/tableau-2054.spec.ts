@@ -50,7 +50,8 @@ describe('computeTableau2054', () => {
       valeurBruteFin: '6000.00',
     });
 
-    // Every touched row has cessions/virements at 0.00 — the cession gap, stated per-column.
+    // No disposals in this fixture — every row's cessions is 0.00 (virements stays a real gap,
+    // FixedAsset has no reclassify endpoint).
     for (const l of result.lignes) {
       expect(l.cessions).toBe('0.00');
       expect(l.virements).toBe('0.00');
@@ -93,5 +94,33 @@ describe('computeTableau2054', () => {
     expect(() => computeTableau2054([...ORACLE_ASSETS, LATER_ASSET], FY_2026)).toThrow(
       /after the reported fiscal year ends/,
     );
+  });
+
+  it('a disposal WITHIN the reported year reduces fin via the cessions column, without touching début', () => {
+    const disposed = ORACLE_ASSETS.map((a) =>
+      a.accountNumber === '215400' ? { ...a, cessionDate: new Date('2026-07-01') } : a,
+    );
+    const result = computeTableau2054(disposed, FY_2026);
+    expect(ligne(result, 'INSTALLATIONS_TECHNIQUES')).toMatchObject({
+      valeurBruteDebut: '30000.00',
+      acquisitions: '0.00',
+      cessions: '30000.00',
+      valeurBruteFin: '0.00',
+    });
+    // Total général drops by exactly the disposed asset's valeurBrute.
+    expect(result.totalGeneral).toBe('360000.00'); // 390000.00 - 30000.00
+  });
+
+  it('an asset disposed in a STRICTLY EARLIER fiscal year is excluded entirely — no contribution to début', () => {
+    const disposedLastYear = ORACLE_ASSETS.map((a) =>
+      a.accountNumber === '215400' ? { ...a, cessionDate: new Date('2025-11-01') } : a,
+    );
+    const result = computeTableau2054(disposedLastYear, FY_2026);
+    expect(ligne(result, 'INSTALLATIONS_TECHNIQUES')).toMatchObject({
+      valeurBruteDebut: '0.00',
+      acquisitions: '0.00',
+      cessions: '0.00',
+      valeurBruteFin: '0.00',
+    });
   });
 });

@@ -20,7 +20,7 @@ import { JournalType } from '@prisma/client';
 export const PCG_ACCOUNTS: readonly { number: string; label: string }[] = [
   // Classe 1 — Comptes de capitaux
   { number: '101000', label: 'Capital' },
-  { number: '104000', label: "Primes liées au capital social" },
+  { number: '104000', label: 'Primes liées au capital social' },
   { number: '106100', label: 'Réserve légale' },
   { number: '106800', label: 'Autres réserves' },
   { number: '110000', label: 'Report à nouveau (solde créditeur)' },
@@ -76,6 +76,7 @@ export const PCG_ACCOUNTS: readonly { number: string; label: string }[] = [
   { number: '445710', label: 'TVA collectée' },
   { number: '447000', label: 'Autres impôts, taxes et versements assimilés' },
   { number: '455000', label: 'Associés - Comptes courants' },
+  { number: '462000', label: "Créances sur cessions d'immobilisations" },
   { number: '486000', label: "Charges constatées d'avance" },
   { number: '487000', label: "Produits constatés d'avance" },
 
@@ -110,6 +111,14 @@ export const PCG_ACCOUNTS: readonly { number: string; label: string }[] = [
   { number: '661000', label: "Charges d'intérêts" },
   { number: '666000', label: 'Pertes de change' },
   { number: '671000', label: 'Charges exceptionnelles sur opérations de gestion' },
+  {
+    number: '675100',
+    label: "Valeurs comptables des éléments d'actif cédés - Immobilisations incorporelles",
+  },
+  {
+    number: '675200',
+    label: "Valeurs comptables des éléments d'actif cédés - Immobilisations corporelles",
+  },
   { number: '681100', label: 'Dotations aux amortissements sur immobilisations' },
   { number: '695000', label: 'Impôts sur les bénéfices' },
 
@@ -126,7 +135,14 @@ export const PCG_ACCOUNTS: readonly { number: string; label: string }[] = [
   { number: '765000', label: 'Escomptes obtenus' },
   { number: '766000', label: 'Gains de change' },
   { number: '771000', label: 'Produits exceptionnels sur opérations de gestion' },
-  { number: '775000', label: "Produits des cessions d'éléments d'actif" },
+  {
+    number: '775100',
+    label: "Produits des cessions d'éléments d'actif - Immobilisations incorporelles",
+  },
+  {
+    number: '775200',
+    label: "Produits des cessions d'éléments d'actif - Immobilisations corporelles",
+  },
   { number: '777000', label: "Quote-part des subventions d'investissement virée au résultat" },
   { number: '781000', label: 'Reprises sur amortissements, dépréciations et provisions' },
 ];

@@ -5,20 +5,31 @@ import { resolveImmobilisationCategory } from './immobilisation-categories';
 /**
  * 2054-SD (Immobilisations), Cadre A/B — movement of gross
  * immobilisation values over the fiscal year. See
- * specs/liasse-2054-2055-implementation-spec.md §2/§3/§5.
+ * specs/liasse-2054-2055-implementation-spec.md §2/§3/§5 and CLAUDE.md
+ * "Immobilisations / cession" for how cessions are now real.
  *
- * Cessions (Cadre B col 2) and virements de poste à poste (Cadre A
- * col 3's other half, Cadre B col 1) are always 0.00 — no cession
- * logic exists, and FixedAsset has no update/reclassify endpoint. The
- * réévaluation/mise-en-équivalence columns (Cadre A col 2, Cadre B
- * col 4) aren't in this output at all — no revaluation field exists on
- * FixedAsset, structurally out of scope, not a zero-valued gap.
+ * Cessions (Cadre B col 2) is real: an asset whose cessionDate falls
+ * within the reported fiscal year contributes its valeurBrute to the
+ * category's cessions bucket, and `fin` is now `debut + acquisitions −
+ * cessions`. An asset disposed in a STRICTLY EARLIER fiscal year is
+ * skipped entirely (no contribution to début either) — it's gone
+ * before this year even starts; the caller (liasse.service.ts's
+ * fetchImmobilisations) already excludes such assets at the query
+ * level, this is a defensive re-check, not the load-bearing filter.
+ * Virements de poste à poste (Cadre A col 3's other half, Cadre B col
+ * 1) stay always 0.00 — FixedAsset has no update/reclassify endpoint,
+ * unrelated to cession. The réévaluation/mise-en-équivalence columns
+ * (Cadre A col 2, Cadre B col 4) aren't in this output at all — no
+ * revaluation field exists on FixedAsset, structurally out of scope,
+ * not a zero-valued gap.
  */
 
 export interface ImmobilisationMovementAsset {
   accountNumber: string;
   acquisitionDate: Date;
   acquisitionValue: Money;
+  /** Null if never disposed. See module doc comment for how this drives the cessions column. */
+  cessionDate: Date | null;
 }
 
 export interface Tableau2054Ligne {
@@ -27,9 +38,9 @@ export interface Tableau2054Ligne {
   label: string;
   valeurBruteDebut: string;
   acquisitions: string;
-  /** Always "0.00" this pass. */
+  /** Sum of valeurBrute for assets in this category disposed within the reported fiscal year. */
   cessions: string;
-  /** Always "0.00" this pass. */
+  /** Always "0.00" — FixedAsset has no update/reclassify endpoint. */
   virements: string;
   valeurBruteFin: string;
 }
@@ -160,7 +171,7 @@ export function computeTableau2054(
   assets: ImmobilisationMovementAsset[],
   fiscalYear: { startDate: Date; endDate: Date },
 ): Tableau2054 {
-  const byCategory = new Map<string, { debut: Money; acquisitions: Money }>();
+  const byCategory = new Map<string, { debut: Money; acquisitions: Money; cessions: Money }>();
   for (const asset of assets) {
     if (asset.acquisitionDate > fiscalYear.endDate) {
       throw new ConflictException(
@@ -170,15 +181,30 @@ export function computeTableau2054(
           'before computing 2054, not passed in.',
       );
     }
+    // Disposed in a strictly earlier fiscal year — gone before this year even starts, no
+    // contribution to début/acquisitions/cessions at all. The caller's fetch already excludes
+    // this case at the query level; this is a defensive re-check, not the load-bearing filter.
+    if (asset.cessionDate && asset.cessionDate < fiscalYear.startDate) {
+      continue;
+    }
+
     const category = resolveImmobilisationCategory(asset.accountNumber);
     const bucket = byCategory.get(category.code) ?? {
       debut: Money.zero(),
       acquisitions: Money.zero(),
+      cessions: Money.zero(),
     };
     if (asset.acquisitionDate < fiscalYear.startDate) {
       bucket.debut = bucket.debut.plus(asset.acquisitionValue);
     } else {
       bucket.acquisitions = bucket.acquisitions.plus(asset.acquisitionValue);
+    }
+    if (
+      asset.cessionDate &&
+      asset.cessionDate >= fiscalYear.startDate &&
+      asset.cessionDate <= fiscalYear.endDate
+    ) {
+      bucket.cessions = bucket.cessions.plus(asset.acquisitionValue);
     }
     byCategory.set(category.code, bucket);
   }
@@ -186,20 +212,22 @@ export function computeTableau2054(
   const lignes: Tableau2054Ligne[] = ROWS_2054.map((row) => {
     let debut = Money.zero();
     let acquisitions = Money.zero();
+    let cessions = Money.zero();
     for (const categoryCode of row.categories) {
       const bucket = byCategory.get(categoryCode);
       if (bucket) {
         debut = debut.plus(bucket.debut);
         acquisitions = acquisitions.plus(bucket.acquisitions);
+        cessions = cessions.plus(bucket.cessions);
       }
     }
-    const fin = debut.plus(acquisitions); // cessions/virements always 0 — see module doc comment
+    const fin = debut.plus(acquisitions).minus(cessions); // virements always 0 — see module doc comment
     return {
       code: row.code,
       label: row.label,
       valeurBruteDebut: debut.toApiString(),
       acquisitions: acquisitions.toApiString(),
-      cessions: '0.00',
+      cessions: cessions.toApiString(),
       virements: '0.00',
       valeurBruteFin: fin.toApiString(),
     };

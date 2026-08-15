@@ -420,7 +420,7 @@ export interface Tableau2057 {
   note: string;
 }
 
-/** Cadre A row shape (valeur résiduelle des éléments cédés) — defined for forward-compatibility, never populated until cession support exists. */
+/** Cadre A row shape (valeur résiduelle des éléments cédés) — "valeur nette réévaluée" and "amortissements en franchise d'impôt" aren't represented, see tableau-2059.ts's doc comment. */
 export interface Tableau2059ACadreARow {
   accountNumber: string;
   valeurOrigine: string;
@@ -428,27 +428,28 @@ export interface Tableau2059ACadreARow {
   valeurResiduelle: string;
 }
 
-/** Cadre B row shape (plus-values/moins-values) — same forward-compatibility note as Cadre A. */
+/** Cadre B row shape (plus-values/moins-values). `qualification` is always null — the court-terme/long-terme tax split isn't computed, see tableau-2059.ts's doc comment. */
 export interface Tableau2059ACadreBRow {
   accountNumber: string;
   prixDeVente: string;
   plusOuMoinsValue: string;
-  qualification: 'COURT_TERME' | 'LONG_TERME';
+  qualification: 'COURT_TERME' | 'LONG_TERME' | null;
 }
 
 /**
  * Response shape for the 2059-A half of POST /liasse/generate — see
- * tableau-2059.ts on the backend. Structurally empty this pass: cession
- * logic doesn't exist yet, so cadreA/cadreB are always [] and both
- * totals are always "0.00" — not a partial table, see `note`.
+ * tableau-2059.ts on the backend. cadreA/cadreB now hold one row per
+ * asset disposed within the reported fiscal year.
  */
 export interface Tableau2059A {
   cadreA: Tableau2059ACadreARow[];
   cadreB: Tableau2059ACadreBRow[];
-  /** CADRE A total — plus/moins-value nette à court terme. Always "0.00" this pass. */
+  /** CADRE A total — plus/moins-value nette à court terme. Always "0.00" — the tax qualification isn't computed, see `note`. */
   totalCourtTerme: string;
-  /** CADRE B total — plus/moins-value nette à long terme. Always "0.00" this pass. */
+  /** CADRE B total — plus/moins-value nette à long terme. Always "0.00" — same reason. */
   totalLongTerme: string;
+  /** The real, computed net plus/moins-value across every disposal this year, not yet allocated between court/long terme. */
+  totalNonQualifie: string;
   note: string;
 }
 

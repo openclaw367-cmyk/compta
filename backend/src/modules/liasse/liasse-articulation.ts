@@ -274,16 +274,16 @@ export function assertTableau2059TiesToCompteResultat(input: {
     );
 
   const netCession = sum(CESSION_PRODUIT_CODES).minus(sum(CESSION_CHARGE_CODES));
-  const tableau2059Net = Money.fromString(input.tableau2059.totalCourtTerme).plus(
-    Money.fromString(input.tableau2059.totalLongTerme),
-  );
+  // totalCourtTerme/totalLongTerme stay "0.00" even for a real disposal (the court/long-terme tax
+  // qualification isn't computed — see tableau-2059.ts's doc comment) — totalNonQualifie is the
+  // real, complete net figure to tie out against.
+  const tableau2059Net = Money.fromString(input.tableau2059.totalNonQualifie);
 
   if (!netCession.equals(tableau2059Net)) {
     throw new ConflictException(
-      `2059-A's CADRE A + CADRE B (${tableau2059Net.toApiString()}) does not equal the compte de ` +
-        `résultat's net cession result (${netCession.toApiString()}, from lignes F1/G2/HD minus ` +
-        'G1/G3/HH). This means a cession was posted to the ledger without going through 2059-A, or ' +
-        'vice versa.',
+      `2059-A's total (${tableau2059Net.toApiString()}) does not equal the compte de résultat's net ` +
+        `cession result (${netCession.toApiString()}, from lignes F1/G2/HD minus G1/G3/HH). This ` +
+        'means a cession was posted to the ledger without going through 2059-A, or vice versa.',
     );
   }
 }

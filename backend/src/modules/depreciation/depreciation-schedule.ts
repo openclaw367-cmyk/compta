@@ -20,6 +20,29 @@ export interface ScheduleLine {
 }
 
 /**
+ * The flat full-year dotation amount — base ÷ usefulLifeYears, rounded to
+ * 2 decimals immediately (matching NUMERIC(15,2) storage). Shared between
+ * the normal schedule (below, where the LAST year additionally absorbs
+ * whatever rounding remainder is left) and cession-proration.ts's final-
+ * period calculation (which prorates this same flat amount by a day-count
+ * fraction — see that module's doc comment for why it does NOT use the
+ * last-year-absorbs-remainder logic).
+ */
+export function computeAnnualDotationAmount(asset: {
+  acquisitionValue: Prisma.Decimal;
+  residualValue: Prisma.Decimal;
+  usefulLifeYears: number;
+}): Money {
+  const base = Money.fromDecimal(asset.acquisitionValue).minus(
+    Money.fromDecimal(asset.residualValue),
+  );
+  if (!base.isPositive()) {
+    throw new Error('Depreciable base (acquisitionValue - residualValue) must be positive.');
+  }
+  return Money.fromString(base.dividedBy(asset.usefulLifeYears).toApiString());
+}
+
+/**
  * Straight-line (linéaire) depreciation only — declining-balance
  * (dégressif) is not implemented (see DepreciationService). Only handles
  * fiscal years fully contained within the asset's depreciation window
@@ -28,6 +51,9 @@ export interface ScheduleLine {
  * mid-year acquisition, which needs prorata temporis — is not handled.
  * This throws rather than silently producing an approximate amount; see
  * CLAUDE.md's "no silent fallbacks on compliance-relevant logic" rule.
+ * (Cession — the mid-year DISPOSAL analog of this same gap — IS handled,
+ * by cession-proration.ts's computeFinalPeriodDotation(); acquisition-year
+ * proration remains this function's own open gap.)
  *
  * The last covered fiscal year absorbs whatever rounding remainder is
  * left so the schedule always sums to exactly `acquisitionValue -
@@ -71,11 +97,12 @@ export function computeLinearSchedule(
     );
   }
 
-  // Round to 2 decimals immediately (matching NUMERIC(15,2) storage), so
-  // the last-year remainder below is computed against the same rounded
-  // values that actually get persisted — otherwise per-year rounding at
-  // the DB layer could leave the schedule a cent short or over.
-  const annualAmount = Money.fromString(base.dividedBy(asset.usefulLifeYears).toApiString());
+  // Rounded to 2 decimals immediately (matching NUMERIC(15,2) storage) by
+  // computeAnnualDotationAmount, so the last-year remainder below is
+  // computed against the same rounded values that actually get persisted
+  // — otherwise per-year rounding at the DB layer could leave the
+  // schedule a cent short or over.
+  const annualAmount = computeAnnualDotationAmount(asset);
   let allocated = Money.zero();
 
   return relevantYears.map((fiscalYear, index) => {

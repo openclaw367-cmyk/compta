@@ -742,9 +742,9 @@ function Tableau2054Section({ tableau2054 }: { tableau2054: Tableau2054 }) {
       </div>
 
       <p className="text-[12px] text-ink-faint">
-        La colonne Cessions affiche toujours 0,00 € — les cessions d'immobilisations ne sont pas
-        encore prises en charge (aucune écriture de sortie ni calcul de plus/moins-value). Les
-        virements de poste à poste ne le sont pas non plus.
+        La colonne Cessions reflète les immobilisations cédées au cours de l'exercice (voir « Cession
+        d'immobilisation » sur la fiche de l'actif). Les virements de poste à poste affichent
+        toujours 0,00 € — aucune fonctionnalité de reclassement d'immobilisation n'existe.
       </p>
     </section>
   );
@@ -760,7 +760,7 @@ function Tableau2054Row({ ligne }: { ligne: Tableau2054Ligne }) {
       <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
         {formatMoneyFr(ligne.acquisitions)}
       </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-faint">
+      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
         {formatMoneyFr(ligne.cessions)}
       </td>
       <td className="px-4 py-2 text-right tabular-nums text-ink">
@@ -817,8 +817,8 @@ function Tableau2055Section({ tableau2055 }: { tableau2055: Tableau2055 }) {
       </div>
 
       <p className="text-[12px] text-ink-faint">
-        La colonne Reprises affiche toujours 0,00 € — les cessions d'immobilisations ne sont pas
-        encore prises en charge, donc aucun amortissement n'est jamais repris. Le cadre B
+        La colonne Reprises reflète les amortissements cumulés des immobilisations cédées au cours
+        de l'exercice (voir « Cession d'immobilisation » sur la fiche de l'actif). Le cadre B
         (amortissements dérogatoires) n'est pas applicable : cette application ne calcule que
         l'amortissement linéaire, qui ne peut jamais diverger de l'amortissement fiscal.
       </p>
@@ -836,7 +836,7 @@ function Tableau2055Row({ ligne }: { ligne: Tableau2055Ligne }) {
       <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
         {formatMoneyFr(ligne.dotations)}
       </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-faint">
+      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
         {formatMoneyFr(ligne.diminutions)}
       </td>
       <td className="px-4 py-2 text-right tabular-nums text-ink">
@@ -1186,6 +1186,8 @@ function Tableau2057Row({ ligne }: { ligne: Tableau2057Ligne }) {
 // ---------------------------------------------------------------------------
 
 function Tableau2059Section({ tableau2059 }: { tableau2059: Tableau2059A }) {
+  const hasDisposals = tableau2059.cadreA.length > 0;
+
   return (
     <section className="flex flex-col gap-4">
       <div>
@@ -1195,26 +1197,118 @@ function Tableau2059Section({ tableau2059 }: { tableau2059: Tableau2059A }) {
         </p>
       </div>
 
+      {hasDisposals ? (
+        <>
+          <div className="overflow-hidden rounded-lg border border-border bg-surface">
+            <table className="w-full border-collapse text-[13px]">
+              <thead>
+                <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+                  <th className="px-4 py-2.5 font-semibold">
+                    Cadre A — Valeur résiduelle des éléments cédés
+                  </th>
+                  <th className="px-4 py-2.5 text-right font-semibold">Valeur d'origine</th>
+                  <th className="px-4 py-2.5 text-right font-semibold">Amortissements</th>
+                  <th className="px-4 py-2.5 text-right font-semibold">Valeur résiduelle</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tableau2059.cadreA.map((row) => (
+                  <tr key={row.accountNumber} className="border-b border-border last:border-b-0">
+                    <td className="px-4 py-2 text-ink">
+                      <span className="mr-2 font-medium tabular-nums text-ink-faint">
+                        {row.accountNumber}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+                      {formatMoneyFr(row.valeurOrigine)}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+                      {formatMoneyFr(row.amortissements)}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums text-ink">
+                      {formatMoneyFr(row.valeurResiduelle)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border border-border bg-surface">
+            <table className="w-full border-collapse text-[13px]">
+              <thead>
+                <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+                  <th className="px-4 py-2.5 font-semibold">Cadre B — Plus-values, moins-values</th>
+                  <th className="px-4 py-2.5 text-right font-semibold">Prix de vente</th>
+                  <th className="px-4 py-2.5 text-right font-semibold">
+                    Plus ou moins-value
+                  </th>
+                  <th className="px-4 py-2.5 text-right font-semibold">Qualification</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tableau2059.cadreB.map((row) => {
+                  const isMoinsValue = row.plusOuMoinsValue.startsWith('-');
+                  return (
+                    <tr key={row.accountNumber} className="border-b border-border last:border-b-0">
+                      <td className="px-4 py-2 text-ink">
+                        <span className="mr-2 font-medium tabular-nums text-ink-faint">
+                          {row.accountNumber}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+                        {formatMoneyFr(row.prixDeVente)}
+                      </td>
+                      <td
+                        className={[
+                          'px-4 py-2 text-right tabular-nums',
+                          isMoinsValue ? 'text-negative' : 'text-positive',
+                        ].join(' ')}
+                      >
+                        {formatMoneyFr(row.plusOuMoinsValue)}
+                      </td>
+                      <td className="px-4 py-2 text-right text-ink-faint">
+                        {row.qualification ?? 'non qualifiée'}
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr className="bg-bg">
+                  <td className="px-4 py-2.5 font-semibold text-ink">TOTAL (non qualifié)</td>
+                  <td className="px-4 py-2.5" />
+                  <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
+                    {formatMoneyFr(tableau2059.totalNonQualifie)}
+                  </td>
+                  <td className="px-4 py-2.5" />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
+
       <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
         <p className="text-[13px] text-ink-muted">{tableau2059.note}</p>
-        <div className="flex flex-wrap gap-8 border-t border-border pt-4">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-              Plus/moins-value nette à court terme
+        {hasDisposals && (
+          <div className="flex flex-wrap gap-8 border-t border-border pt-4">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+                Plus/moins-value nette à court terme
+              </div>
+              <div className="mt-1 text-[16px] font-semibold tabular-nums text-ink">
+                {formatMoneyFr(tableau2059.totalCourtTerme)}
+              </div>
             </div>
-            <div className="mt-1 text-[16px] font-semibold tabular-nums text-ink">
-              {formatMoneyFr(tableau2059.totalCourtTerme)}
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+                Plus/moins-value nette à long terme
+              </div>
+              <div className="mt-1 text-[16px] font-semibold tabular-nums text-ink">
+                {formatMoneyFr(tableau2059.totalLongTerme)}
+              </div>
             </div>
           </div>
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-              Plus/moins-value nette à long terme
-            </div>
-            <div className="mt-1 text-[16px] font-semibold tabular-nums text-ink">
-              {formatMoneyFr(tableau2059.totalLongTerme)}
-            </div>
-          </div>
-        </div>
+        )}
         <p className="text-[12px] text-ink-faint">
           Cohérence avec le compte de résultat (lignes 775/675) vérifiée côté serveur à chaque
           calcul — si une cession était enregistrée sans être reflétée ici, ou l'inverse, le calcul

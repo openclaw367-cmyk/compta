@@ -29,16 +29,23 @@ depreciation (amortissements), VAT (TVA), and liasse fiscale.
   has its own two screens: an asset list (valeur brute / amortissements
   cumulés / VNC per asset) and a per-asset detail page showing the plan
   d'amortissement, where a "Comptabiliser la dotation" action posts each
-  period's dotation as a real validated écriture. Liasse fiscale now has
-  a real screen too (`LiassePage`) — bilan (2050/2051), compte de
-  résultat (2052/2053), the 2054/2055 movement annexes
-  (immobilisations/amortissements), 2056 (provisions), 2057 (état des
-  créances et des dettes, montant brut only — its own maturity split is
-  blocked, not the whole table), and 2059-A (plus/moins-values, a
-  guarded always-empty stub pending cession support), régime réel
-  normal only, read-only report — see "Liasse fiscale / bilan & compte
-  de résultat" and "Liasse fiscale annexes 2056/2059" below. The régime
-  réel simplifié (2033-series) variant remains honest "non implémenté"
+  period's dotation as a real validated écriture. Cession (disposal) is
+  now a real backend endpoint (see "Immobilisations / cession" below)
+  but has no frontend action yet — posting a disposal today means
+  calling `POST /depreciation/fixed-assets/:id/cession` directly; a
+  "Céder l'immobilisation" UI action is future work, not
+  existing-but-unwired. Liasse fiscale has a real screen too
+  (`LiassePage`) — bilan (2050/2051), compte de résultat (2052/2053),
+  the 2054/2055 movement annexes (immobilisations/amortissements, now
+  including real cessions/reprises columns), 2056 (provisions), 2057
+  (état des créances et des dettes, montant brut only — its own
+  maturity split is blocked, not the whole table), and 2059-A
+  (plus/moins-values — Cadre A/B now populate for real per disposal,
+  the court-terme/long-terme tax qualification stays unbuilt, see
+  "Immobilisations / cession" below), régime réel normal only,
+  read-only report — see "Liasse fiscale / bilan & compte de résultat"
+  and "Liasse fiscale annexes 2056/2059" below. The régime réel
+  simplifié (2033-series) variant remains honest "non implémenté"
   territory, matching the backend's own scope.
 - **Package manager**: npm.
 - **Testing**: Jest (unit + e2e, NestJS default).
@@ -93,21 +100,41 @@ around deliberately as a standing fixture:
 
 - **Two fiscal years**: 2025 (`cmsm0xdk80002o5j89nbzom2a`) and 2026
   (`cmsm0xdlq0004o5j8ja1yc84k`), both open.
-- **14 validated écritures**: the original opening block plus 2
+- **16 validated écritures**: the original opening block plus 2
   immobilisation acquisitions and 7 dotation postings spread across both
-  years (`tableau-2054-2055-oracle-fixture.ts`'s dataset), plus 4 more
-  added 2026-08-09 for the 2056 verification — a vente à crédit, a
-  dotation + partial reprise on a "provisions pour garanties clients"
-  (151200), and a dotation on a "dépréciation clients douteux" (491000)
-  — matching `tableau-2056-oracle-fixture.ts`.
+  years (`tableau-2054-2055-oracle-fixture.ts`'s dataset); 4 more added
+  2026-08-09 for the 2056 verification — a vente à crédit, a dotation +
+  partial reprise on a "provisions pour garanties clients" (151200),
+  and a dotation on a "dépréciation clients douteux" (491000) —
+  matching `tableau-2056-oracle-fixture.ts`; and 2 more added
+  2026-08-15 for the cession verification (see below) — a prorated
+  final dotation and the disposal écriture itself.
 - **6 `FixedAsset` records** spanning both years and multiple 2054/2055
   categories on purpose (a 2025 terrain, a 2025 bâtiment, a 2026 entrepôt,
   a 2025 machine, a 2026 office-equipment purchase, a 2025 véhicule) —
   chosen specifically to exercise "début vs. this year's movement"
   splitting in `tableau-2054.ts`/`tableau-2055.ts`, not just closing
-  balances. All 6 have `cessionDate: null` — also used, via a
-  temporary Prisma script that set and reverted one `cessionDate`, to
-  live-verify 2059-A's cession guard.
+  balances. **One of them, Entrepôt C (214000), is now genuinely
+  disposed** — see "Immobilisations / cession" below for the full
+  écriture design this reproduces: acquired 2026-04-01 for 80 000,00,
+  disposed 2026-09-01 for 90 000,00. `computeFinalPeriodDotation`
+  prorates a 1 677,78 final dotation (151 days on the 30E/360
+  convention, from serviceStartDate since this is the asset's first
+  year), giving VNC 78 322,22 at disposal and a plus-value of
+  11 677,78 — booked through the real `POST
+  /depreciation/fixed-assets/:id/cession` endpoint, not a temporary
+  script. This is a **deliberate, permanent extension** of the fixture
+  (matching the "don't post ad-hoc test entries" rule below by being
+  documented here), kept specifically so 2054's Cessions column, 2055's
+  Reprises column, and 2059-A's Cadre A/B all have a real, hand-traceable
+  example to check against — not reverted after verification, unlike
+  the temporary Prisma script used earlier to prove 2059-A's
+  now-removed throw-on-cessionDate guard. The other 5 assets still have
+  `cessionDate: null`. Verifying this also required creating three
+  accounts on this company that the shared `PCG_ACCOUNTS` seed didn't
+  yet have at the time this fixture was built by hand (now fixed for
+  future companies, see "Immobilisations / cession" below): `675200`,
+  `775200`, `462000`.
 - This is the exact dataset hand-traced in
   `backend/src/modules/liasse/tableau-2054-2055-oracle-fixture.ts` and
   `tableau-2056-oracle-fixture.ts`, used as the unit-test oracles — the
@@ -503,6 +530,141 @@ the French form or "the convention probably says."
   Cadre C (lignes 70-75, supplier-origin breakdown of déductible TVA —
   informational only per the form's own note, doesn't feed B1/B2/B3/48).
 
+## Immobilisations / cession
+
+`src/modules/depreciation/`'s `DepreciationService.disposeFixedAsset()`
+(as of 2026-08-15) posts a fixed asset's disposal as real, validated
+écritures — `POST /depreciation/fixed-assets/:id/cession`. Built the
+same review-first-then-post discipline as à-nouveau and dotation
+posting: the écriture structure was reviewed and confirmed before any
+posting code was written, quoting Art. 942-20 and Art. 944-46 of
+`specs/Reglt 2014-03_Plan comptable general.pdf` (the PCG regulation
+text itself, not the DGFiP commentary).
+
+- **The écriture, confirmed against the PCG's own commentary**: "Lors
+  des cessions, la valeur d'entrée des éléments cédés et les
+  amortissements correspondants sont sortis des comptes où ils
+  figurent. Le montant net en résultant est porté au débit du compte
+  675 «Valeurs comptables des éléments d'actifs cédés». Simultanément,
+  le compte 775 «Produits des cessions d'éléments d'actif» est crédité
+  par le débit du compte 462 «Créances sur cessions d'immobilisations»"
+  (Art. 942-20). One combined écriture per disposal (not two): débit
+  amortissementsCumules (28x) + débit VNC (675x) = crédit valeurBrute
+  (21x); débit compte de règlement = crédit produit de cession (775x).
+  Zero-valued lines are omitted (`EntriesService` rejects a 0,00 line)
+  — a `cessionPrice` of "0.00" (mise au rebut, no resale value) simply
+  drops the produit/règlement pair entirely, leaving only the VNC
+  write-off. Posted through `EntriesService.create()`/`validate()`
+  exactly like every other écriture in this app — no privileged write
+  path.
+- **Depreciation is brought current FIRST.** A mid-year disposal needs
+  that year's own (necessarily partial) dotation posted before VNC can
+  be computed — `disposeFixedAsset()` reuses `postDotation()` itself
+  for this (no duplicated posting logic), after upserting a
+  `DepreciationEntry` with the prorated amount. Refuses outright,
+  naming the posted amount, if that year's dotation was already posted
+  in full before the disposal was known about (the fix is to reverse
+  that écriture first, not silently repost).
+- **Prorata temporis: 30E/360 ("commercial year"), inclusive of both
+  endpoints, counted from date de mise en service.** A confirmed
+  decision, not a default — `computeLinearSchedule()` has never
+  supported ANY proration (it throws on a partially-overlapping fiscal
+  year, including for acquisition-year proration, which remains
+  unbuilt); cession's day-count (`cession-proration.ts`) is the first
+  place in this app any proration actually happens, and the SAME
+  convention is meant to apply symmetrically if/when acquisition-year
+  proration is ever built. Every month = 30 days, both the period-start
+  day and the disposal day count as a day of use (not the exclusive
+  interest-accrual convention some finance day-counts use) — verified
+  by a test asserting a disposal exactly on a fiscal year's own last day
+  reproduces the same amount a normal full dotation would.
+- **Compte de règlement is caller-supplied, not hardcoded** — 462
+  "Créances sur cessions d'immobilisations" (paid later, reconciled by
+  a normal separate écriture, mirroring how 411 client receivables
+  already work here) by default, or any class-5 cash/bank account for
+  an immediate sale. `assertValidCompteReglement()` rejects anything
+  else.
+- **VAT on the cession is explicitly out of scope this pass** —
+  `cessionPrice` is booked as the full proceeds, no TVA collectée line.
+  `FixedAsset` has no `vatRateId`/HT-vs-TTC field to build this
+  properly, and whether a disposal is even in-scope for this app's
+  basic-case CA3 treatment (`ca3-declaration.ts`) was never decided —
+  see "VAT / CA3 declaration" above for the same discipline applied to
+  every other deferred VAT case. Mechanically, tagging the 775x line
+  with a `vatRateId` matching an existing `VatRate` would fold straight
+  into the existing rate buckets with zero `ca3-declaration.ts` changes
+  — the gap is the schema field and the scope decision, not the VAT
+  engine.
+- **675x/775x account resolution is automatic, not caller-chosen** —
+  `resolveCessionNature()` reads the FixedAsset's own account prefix
+  (20x → incorporelle, `675100`/`775100`; 21x/218x family → corporelle,
+  `675200`/`775200`) and requires the resolved account to already exist
+  (`NotFoundException` naming it, never auto-created — same discipline
+  as à-nouveau's 120/129 lookup). Financières (26x/27x — participations,
+  titres) are explicitly rejected as not implemented: PCG Art. 944-46's
+  TIAP treatment is a genuinely different pattern (462 credited by 775
+  OR debited by 675 depending on gain/loss, never both), and no fixture
+  data or real usage exercises a financial immobilisation in this app.
+  **A real, latent chart-of-accounts gap was found and fixed while
+  building this**: the seeded `PCG_ACCOUNTS` had `775000` as a bare,
+  unsubdivided account — `compte-resultat-2052-2053.ts` only ever
+  matched the 4-digit CERFA subdivisions (`7751`/`7752`/`7756`/`7758`),
+  so posting to bare `775000` would have thrown "no CDR line mapped" the
+  moment a liasse was generated. Fixed: the seed now has `675100`,
+  `675200`, `775100`, `775200`, and `462000` (`775000` removed, nothing
+  else in the app ever referenced it).
+- **A second real bug, found by the end-to-end test, not by
+  inspection**: `buildVncByLine()`'s bilan tie-out
+  (`assertVncTiesToLedger`) compared the immobilisations module's VNC
+  figures against the ledger for EVERY fetched asset, including ones
+  disposed within the reported year. `computeFixedAssetSummary()`'s
+  `valeurBrute` is always `FixedAsset.acquisitionValue`, "independent of
+  residualValue or postings" (its own doc comment) — meaning it kept
+  reporting a disposed asset's full historical gross value forever,
+  while the ledger (correctly) nets that account to zero once the
+  disposal écriture lands. Comparing those for a disposed asset would
+  always mismatch. Fixed: `buildVncByLine()` now excludes assets
+  disposed within the reported year from this specific tie-out — the
+  bilan's own, fully independent Actif=Passif check is what actually
+  verifies a disposal posted correctly, and did, live (see below).
+- **`fetchImmobilisations()` now also excludes assets disposed BEFORE
+  the reported fiscal year** — the disposal-side analog of the
+  already-fixed acquisitionDate-scoping bug (see "Liasse fiscale / bilan
+  & compte de résultat" below): without this, a disposed asset would
+  keep contributing its full valeurBrute/amortissementsCumules to every
+  LATER year's bilan forever. An asset disposed WITHIN the reported year
+  is still included (its 2054/2055/2059-A movement needs to show for
+  that year) — only a disposal strictly before the reported year's
+  start excludes it entirely, from début onward.
+- **FixedAsset is marked disposed on the same row, never deleted** —
+  `cessionDate`/`cessionPrice` (already in the schema, added
+  pre-emptively before this feature existed) are simply set at the end
+  of `disposeFixedAsset()`'s transaction. 2054's Cessions column, 2055's
+  Reprises column, and 2059-A's Cadre A/B all key off this same flag.
+- **2059-A's court-terme/long-terme tax qualification remains
+  unbuilt, deliberately** — see "Liasse fiscale annexes 2056/2059"
+  below for what IS computed (Cadre A/B populate for real per disposal)
+  vs. what stays a genuine, stated gap (which CGI tax bucket a gain
+  falls into needs holding-period/nature-of-asset judgment this app
+  doesn't attempt).
+- **Verified two ways.** `cession-proration.spec.ts` and
+  `cession-invariants.spec.ts` cover the day-count/nature-resolution
+  logic in isolation; `disposal.service.spec.ts` is a full hand-computed
+  oracle (mid-year disposal, plus-value and moins-value cases, every
+  guard) against a mocked-but-stateful Prisma layer. Separately, live
+  against the "Société Test Multi-Année" fixture (see "Test fixtures"
+  above): disposed Entrepôt C for real through the actual endpoint,
+  confirmed the exact same VNC/plus-value figures the oracle predicted,
+  confirmed the écriture lines posted exactly as designed, confirmed the
+  guard correctly refuses a disposal when that year's dotation was
+  already posted in full (tried on Véhicule F), and confirmed the full
+  liasse (`POST /liasse/generate`) generates successfully afterward with
+  every articulation check passing on real data — bilan Actif=Passif,
+  the 2054/2055 tie-out, and 2059-A's own compte-de-résultat tie-out all
+  held.
+- **Not built this pass**: a frontend "Céder l'immobilisation" action
+  (posting today means calling the API directly) — see "Stack" above.
+
 ## Liasse fiscale / bilan & compte de résultat
 
 `src/modules/liasse/` computes the two foundational forms of the régime
@@ -582,9 +744,10 @@ facts that must never be re-derived from memory.
     *produits d'exploitation*; 7756 (financières) → **G2**, inside
     *produits financiers*; only 7758 stays in **HD**, *produits
     exceptionnels* — confirmed from where F1/G2 actually sit on the
-    rendered form. Mirrored on charges (675 → G1/G3/HH). These lines
-    compute to 0.00 today regardless, since cession isn't implemented
-    in the immobilisations module yet (see "Known scope boundaries").
+    rendered form. Mirrored on charges (675 → G1/G3/HH). Cession is now
+    implemented (see "Immobilisations / cession" below) and F1/G1 carry
+    real amounts on a company with a real disposal — confirmed live
+    against the "Société Test Multi-Année" fixture.
 - **Verified two ways.** A hand-computed oracle
   (`liasse-oracle-fixture.ts`, 26 tests across four spec files) — a
   23-transaction dataset, individually balanced by construction, hand-
@@ -615,10 +778,13 @@ facts that must never be re-derived from memory.
   always wins over that default), and `tableau-2054.ts`/
   `tableau-2055.ts` split "début" from "this year's movement" using
   `FixedAsset.acquisitionDate` and `DepreciationEntry.fiscalYearId`
-  respectively — both already shaped for exactly this. Cessions,
-  virements de poste à poste, and 2055's Cadre B are all genuinely
-  N/A/zero, not faked — see "Known scope boundaries" below.
-  `assertTableauxTieToBilan()` is the annexe's version of Actif=Passif:
+  respectively — both already shaped for exactly this. Cessions (2054)
+  and reprises (2055) are now real — see "Immobilisations / cession"
+  below; virements de poste à poste and 2055's Cadre B remain genuinely
+  N/A/zero, not faked (no reclassify endpoint exists; this app only
+  computes linéaire, so book and tax amortization never diverge) — see
+  "Known scope boundaries" below. `assertTableauxTieToBilan()` is the
+  annexe's version of Actif=Passif:
   one aggregate identity (2054 fin − 2055 fin = bilan's total
   immobilisations net), verified on a hand-traced, multi-asset,
   multi-year oracle. `LiassePage` renders both tables in form order
@@ -660,26 +826,34 @@ facts that must never be re-derived from memory.
   (groupe et associés into BZ/EA/DY alongside unrelated families) — not
   a mapping problem the account numbers can solve, so 2057 reproduces
   the bilan's own (coarser) line groupings instead, each row stating
-  which bilan line it reproduces. **2059-A** renders as a status card,
-  not a table with nothing in it — every row on the real form is a
-  per-disposal line item and none exist yet, so an empty table would
-  look broken rather than informative; the card shows the backend's
-  note plus both totals (always 0,00 today). It's a guarded
-  always-empty stub, not a silent no-op: cession logic doesn't exist
-  anywhere in this app (`FixedAsset.cessionDate`/`cessionPrice` are
-  schema-only, never set) — `computeTableau2059A()` throws rather than
-  silently returning an empty table if it ever finds a non-null
-  `cessionDate`, verified live by setting one via a temporary Prisma
-  script and confirming the 409. All three verified live against the
+  which bilan line it reproduces. **2059-A** (as of 2026-08-15) renders
+  real Cadre A (valeur d'origine / amortissements / valeur résiduelle)
+  and Cadre B (prix de vente / montant global de la plus-value) rows,
+  one per asset actually disposed within the reported fiscal year — see
+  "Immobilisations / cession" above for the écriture side this reads
+  off of. When there are no disposals this year, it still renders as a
+  status card (not an empty table with nothing in it) showing the
+  backend's note. `qualification` (court terme / long terme / taxable à
+  19 %) stays `null` on every row and `totalCourtTerme`/`totalLongTerme`
+  stay "0,00" even with real disposals — allocating a gain between them
+  needs CGI tax judgment (holding period, nature of the asset) this app
+  doesn't attempt; the real, computed net figure is still surfaced via
+  `totalNonQualifie` rather than silently dropped, same "flag, don't
+  fake" discipline as 2057's maturity split. `assertTableau2059TiesToCompteResultat`
+  ties `totalNonQualifie` (not the always-zero court/long-terme split)
+  to the compte de résultat's own 775/675 lines — the real, live
+  articulation check. All four annexe tables verified live against the
   "Société Test Multi-Année" fixture, matching the backend verification
-  exactly.
+  exactly, including a real disposal (see "Immobilisations / cession"
+  above).
 - Remaining liasse work: the 2033-series (régime réel simplifié)
   mapping as a second pass over the same shared engine — the concrete
   test of whether the engine shape actually supports a second mapping
   layer the way it was designed to. Real 2057 maturity tracking (a new
   schema field + UI to set it) remains open if ever wanted, but the
   montant-brut version is a complete, real screen on its own — not a
-  placeholder waiting on that decision.
+  placeholder waiting on that decision. 2059-A's court-terme/long-terme
+  tax qualification remains open too, same reasoning.
 
 ## Known scope boundaries
 
@@ -754,25 +928,25 @@ assume they're covered either:
   the FEC section above has been verified against
   `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md`; §VIII specifically
   has not.
-- **Immobilisations: cession and dégressif are still deferred; 2054/2055
-  are now built.** `FixedAsset` has `cessionDate` / `cessionPrice`
-  columns so disposal doesn't need a schema retrofit later, but no
-  cession logic exists yet (plus/moins-value computation, posting the
-  disposal écriture) — both fields stay null and there's no DTO/UI
-  surface for them. This is exactly why 2054's Cessions column and
-  2055's Reprises column always compute to 0.00 (see "Liasse fiscale /
-  bilan & compte de résultat" above) — not a mapping gap, a real
-  upstream one. `DepreciationMethod.DECLINING` (dégressif) still throws
+- **Immobilisations: cession is now built (as of 2026-08-15); dégressif
+  remains deferred.** See "Immobilisations / cession" above for the full
+  écriture design, the prorata-temporis convention, and the two real
+  bugs its own build surfaced and fixed (the bare-775000 chart gap, and
+  `buildVncByLine`'s tie-out never excluding disposed-this-year assets).
+  `DepreciationMethod.DECLINING` (dégressif) still throws
   `NotImplementedException` in `generateSchedule()`; only linéaire is
   computed — which is also why 2055's Cadre B (amortissements
   dérogatoires) isn't represented at all: it only exists when the tax
-  method diverges from the book method, which can't happen here. What
-  *is* done (as of 2026-08-02): `DepreciationService.postDotation()`
-  posts a period's dotation (débit compte 681x / crédit compte 28x)
-  through the normal `EntriesService.create()`/`validate()` layer — no
-  privileged write path — and sets `DepreciationEntry.postedEcritureId`;
-  VNC on the list/detail screens is computed from posted entries only,
-  so it ties to the bilan rather than the projected schedule.
+  method diverges from the book method, which can't happen here.
+  Acquisition-year proration (as opposed to cession's disposal-year
+  proration, now built) also remains unbuilt —
+  `computeLinearSchedule()` still throws on a partially-overlapping
+  fiscal year. `DepreciationService.postDotation()` posts a period's
+  dotation (débit compte 681x / crédit compte 28x) through the normal
+  `EntriesService.create()`/`validate()` layer — no privileged write
+  path — and sets `DepreciationEntry.postedEcritureId`; VNC on the
+  list/detail screens is computed from posted entries only, so it ties
+  to the bilan rather than the projected schedule.
 - **Nothing stops a class-2 immobilisation from being posted through
   the journal grid without a `FixedAsset` record — an "orphaned
   immobilisation."** The journal entry grid lets you debit any account,
@@ -844,11 +1018,14 @@ Reachable from the fiscal-year management screen.
 half (asset list, per-asset plan d'amortissement) and closes the
 previously-logged "depreciation never posts to the ledger" gap: dotations
 post through the normal entries validation layer and VNC is computed
-from posted entries only — see "Known scope boundaries" above for what's
-still deferred there (cession, dégressif) and for the newly-logged
-"orphaned immobilisation" gap (a class-2 écriture with no `FixedAsset`
-behind it, currently only caught at liasse-generation time by the
-2054/2055 tie-out, not at entry time).
+from posted entries only. **Cession (disposal) is also done** (as of
+2026-08-15) — see "Immobilisations / cession" above for the full
+écriture design, verified live against the multi-year fixture; no
+frontend action to trigger it yet. See "Known scope boundaries" above
+for what's still deferred (dégressif, acquisition-year proration) and
+for the newly-logged "orphaned immobilisation" gap (a class-2 écriture
+with no `FixedAsset` behind it, currently only caught at
+liasse-generation time by the 2054/2055 tie-out, not at entry time).
 
 **VAT (TVA)** — `computeDeclaration()` is no longer a stub: it computes
 and now also *displays* a real CA3 for the basic French case (`VatPage`'s
@@ -911,7 +1088,11 @@ uncross-checked).
    whether the engine shape actually supports a second mapping layer
    the way it was designed to. Real 2057 maturity tracking (a new
    schema field + UI to set it) remains open if ever wanted, not
-   blocking. Separately, worth picking up soon: the "orphaned
+   blocking; 2059-A's court-terme/long-terme tax qualification is the
+   same kind of open, non-blocking item. Separately, worth picking up
+   soon: a frontend "Céder l'immobilisation" action (the backend
+   endpoint is done, see "Immobilisations / cession" above, but posting
+   a disposal today means calling the API directly) and the "orphaned
    immobilisation" guard logged in "Known scope boundaries" — warning
    at journal-entry time rather than relying on the liasse tie-out as
    the only backstop.

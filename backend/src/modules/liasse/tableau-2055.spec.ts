@@ -1,3 +1,4 @@
+import { Money } from '../../common/decimal';
 import { computeTableau2055 } from './tableau-2055';
 import {
   FY_2026,
@@ -53,6 +54,7 @@ describe('computeTableau2055', () => {
       montantFin: '600.00',
     });
 
+    // No disposals in this fixture — every row's diminutions is 0.00.
     for (const l of result.lignes) {
       expect(l.diminutions).toBe('0.00');
     }
@@ -66,5 +68,28 @@ describe('computeTableau2055', () => {
     expect(() =>
       computeTableau2055([...ORACLE_DEPRECIATION_ENTRIES, LATER_DEPRECIATION_ENTRY], FY_2026),
     ).toThrow(/after the reported fiscal year ends/);
+  });
+
+  it('a disposal within the reported year reduces fin via the diminutions column, without touching début/dotations', () => {
+    const result = computeTableau2055(ORACLE_DEPRECIATION_ENTRIES, FY_2026, [
+      { accountNumber: '215400', amortissementsCumules: Money.fromString('6000.00') },
+    ]);
+    expect(ligne(result, 'INSTALLATIONS_TECHNIQUES')).toMatchObject({
+      montantDebut: '3000.00',
+      dotations: '3000.00',
+      diminutions: '6000.00',
+      montantFin: '0.00',
+    });
+    // Total général drops by exactly the disposed asset's cumulative amortissements.
+    expect(result.totalGeneral).toBe('32600.00'); // 38600.00 - 6000.00
+  });
+
+  it('accumulates diminutions across multiple disposals in the same category', () => {
+    const result = computeTableau2055(ORACLE_DEPRECIATION_ENTRIES, FY_2026, [
+      { accountNumber: '218200', amortissementsCumules: Money.fromString('5000.00') },
+      { accountNumber: '218300', amortissementsCumules: Money.fromString('600.00') },
+    ]);
+    expect(ligne(result, 'AUTRES_CORP_MATERIEL_TRANSPORT').diminutions).toBe('5000.00');
+    expect(ligne(result, 'AUTRES_CORP_MATERIEL_BUREAU').diminutions).toBe('600.00');
   });
 });
