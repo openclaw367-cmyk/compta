@@ -1464,12 +1464,7 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
               <th className="px-4 py-2.5 font-semibold">Cadre A — État des créances</th>
               <th className="px-4 py-2.5 text-right font-semibold">Montant brut</th>
-              <th className="px-4 py-2.5 text-right font-semibold">
-                À un an au plus
-                <div className="mt-0.5 text-[10px] font-normal normal-case text-ink-faint">
-                  dont échéances non renseignées
-                </div>
-              </th>
+              <th className="px-4 py-2.5 text-right font-semibold">À un an au plus</th>
               <th className="px-4 py-2.5 text-right font-semibold">À plus d'un an</th>
             </tr>
           </thead>
@@ -1495,12 +1490,7 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
               <th className="px-4 py-2.5 font-semibold">Cadre B — État des dettes</th>
               <th className="px-4 py-2.5 text-right font-semibold">Montant brut</th>
-              <th className="px-4 py-2.5 text-right font-semibold">
-                À un an au plus
-                <div className="mt-0.5 text-[10px] font-normal normal-case text-ink-faint">
-                  dont échéances non renseignées
-                </div>
-              </th>
+              <th className="px-4 py-2.5 text-right font-semibold">À un an au plus</th>
               <th className="px-4 py-2.5 text-right font-semibold">À plus d'1 an et 5 ans au plus</th>
               <th className="px-4 py-2.5 text-right font-semibold">À plus de 5 ans</th>
             </tr>

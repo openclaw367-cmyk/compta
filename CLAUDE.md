@@ -101,6 +101,30 @@ The seeded demo company (SIREN `123456789`, "Société Démo SARL") only ever
 has one fiscal year, so it can't exercise cross-year logic — and cross-year
 bugs are real: the liasse VNC-scoping bug (see "Liasse fiscale" below) only
 surfaced once a second, later fiscal year existed to leak into the first.
+
+**The demo company also now carries a handful of deliberate, permanent
+2057-maturity-split test écritures (validated 2026-08-15, n°14/15/16/17/
+18/19/20)** — no longer a pure `npm run seed` reproduction, same
+"deliberate and documented, not ad-hoc" discipline as "Société Test
+Multi-Année" below. n°14 (411000 client, 2 500,00, `dateEcheance`
+2028-06-30) and n°20 (164000 emprunt, 9 000,00, `dateEcheance` 2034-01-01)
+are clean, isolated live proofs that a real due date correctly overrides
+both the short-term default (BX) and the long-term-by-nature default
+(DU) — see "Liasse fiscale / 2057 — maturity split" below. n°15–19 are a
+messier trail on account 404 (dettes sur immobilisations, DZ) from
+iterating on a broken first attempt (touched a class-2 account with no
+`FixedAsset`, correctly refused by the 2054/2055 orphaned-immobilisation
+tie-out) — the two contre-passations (n°16, n°18) don't carry the
+original lines' `dateEcheance` forward (reversal never copies it, same
+as `lettrage`), so DZ's own bucket split now shows a negative
+`aPlusDUnAnEt5AnsAuPlus` artifact even though the TOTAL (montantBrut,
+6 540,00) still ties out correctly to the bilan — no invariant was
+violated, only DZ's own bucket breakdown is confusing to look at. Left
+in place rather than further "corrected" with yet more postings — it's
+real evidence of a genuine, now-documented behavior (see
+`computeTableau2057`'s doc comment: reversing a dated line changes that
+reversal's OWN maturity classification to the default, since the date
+isn't copied), not a data-integrity problem.
 To keep a reference for that class of bug, a second company, **"Société
 Test Multi-Année"** (id `cmsm0x5cc0000o5j8z8a3rr53`, FR/`REEL_NORMAL`, no
 SIREN), was built by hand through the real APIs on 2026-08-09 and is kept
@@ -1007,13 +1031,23 @@ recorded above.
   "two-independently-sourced-numbers" articulation discipline as
   `assertVncTiesToLedger` and the rest of this app's cross-checks, not
   a cosmetic addition.
-- **A line with no `dateEcheance` falls into the CONSERVATIVE
-  short-term bucket** ("à un an au plus" for both cadres) — a
-  documented convention (`Tableau2057.maturityNote`, distinct from the
-  existing `note` field), not a guess: most trade créances/dettes this
-  app would encounter genuinely are short-term, and defaulting short
-  is the standard conservative accounting assumption for an unknown
-  due date.
+- **A line with no `dateEcheance` follows a TWO-TIER default, not one
+  blanket bucket** — corrected the same day, from a live spot-check
+  (see below), not from inspection. The first version defaulted every
+  undated line to "à un an au plus" uniformly, justified as
+  "conservative for exploitation-courante créances/dettes" — but
+  applied to every Cadre A/B code regardless, that silently mis-defaulted
+  BB/BF/BH (immobilisations financières — long-term by their own PCG
+  classification, sitting in ACTIF IMMOBILISÉ not ACTIF CIRCULANT) and
+  DS/DT/DU/DV/DZ (emprunts and dettes sur immobilisations — financing
+  debt, not operating debt) into the short-term bucket. Fixed:
+  `LONG_TERM_BY_NATURE_CADRE_A_CODES`/`_CADRE_B_CODES` in
+  `tableau-2057.ts` route those specific codes' undated amounts to "à
+  plus d'un an" (Cadre A) / "à plus d'1 an et 5 ans au plus" (Cadre B —
+  the least-arbitrary single bucket for undated financing debt) instead.
+  Genuinely exploitation-courante codes (BV/BX/BZ/CH; DW/DX/DY/EA/EB)
+  keep the short-term default, which now actually fits every line it's
+  applied to. Documented in `Tableau2057.maturityNote`, not silent.
 - **A real bug found by this pass's own self-consistency check, not by
   inspection**: the first version classified each raw ligne's Cadre A/B
   code independently, per-ligne, including for dual-nature accounts
@@ -1043,17 +1077,30 @@ recorded above.
   reuse the exact same prefix-matching/dual-nature logic without
   duplicating it by hand. `bilan-2050.ts`'s `ACTIF_RULES`/
   `PASSIF_RULES`/`DUAL_NATURE_RULES` are now exported for this reuse.
-- **Verified two ways.** Hand-computed oracle tests in
-  `tableau-2057.spec.ts`: the existing bilan-oracle regression (every
-  line defaults to short-term, since that fixture tags no due dates)
-  plus a new dedicated maturity scenario (a créance split
+- **Verified two ways, and the live pass is what actually caught the
+  default-bucket bug above.** Hand-computed oracle tests in
+  `tableau-2057.spec.ts` (6 tests): the existing bilan-oracle
+  regression, a dedicated dated-split scenario (a créance split
   10 000,00/5 000,00 across the two Cadre A buckets, a dette split
-  8 000,00/12 000,00/3 000,00 across all three Cadre B buckets).
-  Separately, `dateEcheance` was round-tripped live through a real
-  draft écriture against the FR demo company (created, fetched back
-  confirming the exact date persisted, deleted) — the schema/DTO/
-  service wiring, which is the genuinely new capture mechanism; the
-  maturity math itself is the oracle tests' job.
+  8 000,00/12 000,00/3 000,00 across all three Cadre B buckets), a
+  long-term-by-nature default test (BF/DU with no date), and an
+  override test (a real date always wins over the nature-based
+  default, both directions). Separately, live against the FR demo
+  company (validated écritures n°14/20, kept permanently — see "Test
+  fixtures" above): n°14 (411000 client, 2 500,00, due 2028-06-30)
+  confirmed BX splits 3 550,00 short-term (undated pre-existing lines)
+  / 2 500,00 long-term (the dated one) exactly as expected; n°20
+  (164000 emprunt, 9 000,00, due 2034-01-01) confirmed DU lands
+  entirely in "à plus de 5 ans", not the short-term default a
+  pre-fix run would have shown. Getting to n°20 also surfaced two
+  more real things live, not by inspection: first, an early attempt
+  that debited a class-2 account with no `FixedAsset` was correctly
+  refused by the 2054/2055 orphaned-immobilisation tie-out (the guard
+  working exactly as designed); second, reversing two dated attempts
+  left a documented bucket-level artifact on account 404 (see "Test
+  fixtures" above and `computeTableau2057`'s own doc comment) — the
+  reversal-doesn't-copy-`dateEcheance` behavior above, discovered this
+  way, not anticipated in advance.
 
 ## Liasse fiscale — comparison view, 2057 maturity columns, dateEcheance capture
 

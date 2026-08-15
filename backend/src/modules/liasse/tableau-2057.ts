@@ -34,10 +34,44 @@ import { resolveLineCode } from './liasse-line-rules';
  * are independently derived and asserted to tie out per line
  * (`aUnAnAuPlus + aPlusDUnAn === montantBrut`, etc.), the same
  * "two-independently-sourced-numbers" discipline used everywhere else
- * in this app's articulation checks. A line with no `dateEcheance` set
- * falls into the CONSERVATIVE short-term bucket ("à un an au plus" for
- * both cadres) rather than being guessed a date — documented, not
- * silent: `maturityNote` on the result states this explicitly.
+ * in this app's articulation checks.
+ *
+ * **The default bucket for a line with no `dateEcheance` is NOT a
+ * single blanket choice — it depends on the account's own structural
+ * nature, per `LONG_TERM_BY_NATURE_CADRE_A_CODES`/`_CADRE_B_CODES`
+ * below.** An earlier version of this function defaulted every
+ * undated line to "à un an au plus" uniformly, justified as
+ * "conservative" — that justification only actually holds for
+ * exploitation-courante créances/dettes (clients, fournisseurs, dettes
+ * fiscales et sociales, ...). Applied uniformly, it silently
+ * mis-defaulted BB/BF/BH (immobilisations financières — long-term by
+ * their own PCG classification, sitting in ACTIF IMMOBILISÉ not ACTIF
+ * CIRCULANT on the bilan itself) and DS/DT/DU/DV/DZ (emprunts and
+ * dettes sur immobilisations — financing debt, typically repaid over
+ * several years, not operating debt) into the short-term bucket —
+ * found and fixed live, not by inspection: a real "dettes sur
+ * immobilisations" balance defaulting to "à un an au plus" was
+ * flagged as implausible. Fixed: these structurally-long-term codes
+ * now default to "à plus d'un an" (Cadre A) / "à plus d'1 an et 5 ans
+ * au plus" (Cadre B, the least-arbitrary single bucket for undated
+ * financing debt — jumping straight to "à plus de 5 ans" would be an
+ * equally ungrounded guess in the other direction). Genuinely
+ * exploitation-courante codes keep the short-term default, which now
+ * actually fits every line it's applied to. Documented, not silent:
+ * `maturityNote` states the two-tier convention explicitly.
+ *
+ * **A reversal (contre-passation) does NOT carry the original line's
+ * `dateEcheance` forward** — `EntriesService.reverse()` never copies it
+ * (same as `lettrage`/`dateLettrage`). This means the reversal's OWN
+ * maturity bucket is resolved from the DEFAULT convention above, not
+ * from whatever real date the line it's undoing had. For a validated,
+ * dated line that later gets reversed, the original and its reversal
+ * cancel out at the TOTAL (montantBrut) level — that tie-out still
+ * holds exactly — but may land in DIFFERENT buckets, leaving a
+ * temporary-looking (but entirely correct) split-level artifact. Found
+ * live while manually testing this feature (see CLAUDE.md "Test
+ * fixtures" — the FR demo company's account 404 carries exactly this
+ * artifact, kept deliberately rather than posted around).
  */
 
 export interface Tableau2057CadreALigne {
@@ -109,6 +143,24 @@ const CADRE_B_ROWS: { code: string; label: string }[] = [
 ];
 const CADRE_B_CODES = new Set(CADRE_B_ROWS.map((r) => r.code));
 
+/**
+ * BB/BF/BH sit in ACTIF IMMOBILISÉ on the bilan itself (bilan-2050.ts's
+ * ACTIF_SECTIONS groups them under "Immobilisations financières") —
+ * structurally long-term by their own PCG classification, not a new
+ * judgment call layered on top. Every other Cadre A code (BV/BX/BZ/CH)
+ * sits in ACTIF CIRCULANT and keeps the short-term default.
+ */
+const LONG_TERM_BY_NATURE_CADRE_A_CODES = new Set(['BB', 'BF', 'BH']);
+
+/**
+ * DS/DT/DU/DV (emprunts obligataires/bancaires/financiers divers) and DZ
+ * (dettes sur immobilisations) are financing debt — typically repaid
+ * over several years, unlike DW/DX/DY/EA/EB's exploitation-courante
+ * nature (avances, fournisseurs, fiscal/social, divers, produits
+ * constatés d'avance), which keep the short-term default.
+ */
+const LONG_TERM_BY_NATURE_CADRE_B_CODES = new Set(['DS', 'DT', 'DU', 'DV', 'DZ']);
+
 const NOTE =
   'Montant brut par nature, régime réel normal — voir CLAUDE.md « Liasse fiscale annexes ' +
   '2056/2059 » pour les subdivisions du formulaire non séparables du plan comptable actuel ' +
@@ -116,12 +168,18 @@ const NOTE =
 
 const MATURITY_NOTE =
   "L'échéance est calculée à partir de dateEcheance sur chaque ligne d'écriture, quand elle est " +
-  "renseignée, par rapport à la date de clôture de l'exercice. Une ligne sans dateEcheance est " +
-  'placée par défaut dans le compartiment « à un an au plus » (hypothèse conservatrice pour les ' +
-  "créances/dettes d'exploitation courantes) plutôt que devinée. La répartition par ORIGINE du " +
-  "prêt (à 1 an maximum / à plus d'1 an à l'origine, ligne « Emprunts et dettes auprès des " +
-  "établissements de crédit ») reste non renseignée : dateEcheance est une date d'échéance, pas " +
-  "la durée d'origine du prêt.";
+  "renseignée, par rapport à la date de clôture de l'exercice. Une ligne sans dateEcheance suit un " +
+  'défaut à DEUX niveaux selon la nature du poste, pas un compartiment unique : les créances/dettes ' +
+  "d'exploitation courantes (clients, fournisseurs, dettes fiscales et sociales, avances, produits " +
+  "constatés d'avance, ...) sont placées par défaut « à un an au plus » (hypothèse conservatrice) ; " +
+  'les postes structurellement long terme par nature — immobilisations financières (créances ' +
+  'rattachées à des participations, prêts, autres immobilisations financières) côté créances, ' +
+  "emprunts et dettes sur immobilisations côté dettes — sont placés par défaut « à plus d'un an » " +
+  "(Cadre A) ou « à plus d'1 an et 5 ans au plus » (Cadre B) plutôt que « à un an au plus », qui ne " +
+  'refléterait pas leur nature réelle. Dans tous les cas, une échéance renseignée prime toujours sur ' +
+  "le défaut. La répartition par ORIGINE du prêt (à 1 an maximum / à plus d'1 an à l'origine, ligne " +
+  '« Emprunts et dettes auprès des établissements de crédit ») reste non renseignée : dateEcheance ' +
+  "est une date d'échéance, pas la durée d'origine du prêt.";
 
 function addYears(date: Date, years: number): Date {
   const result = new Date(date);
@@ -132,16 +190,24 @@ function addYears(date: Date, years: number): Date {
 type CreanceBucket = 'aUnAnAuPlus' | 'aPlusDUnAn';
 type DetteBucket = 'aUnAnAuPlus' | 'aPlusDUnAnEt5AnsAuPlus' | 'aPlusDe5Ans';
 
-function creanceBucket(dateEcheance: Date | null, fiscalYearEndDate: Date): CreanceBucket {
+function creanceBucket(
+  code: string,
+  dateEcheance: Date | null,
+  fiscalYearEndDate: Date,
+): CreanceBucket {
   if (!dateEcheance) {
-    return 'aUnAnAuPlus';
+    return LONG_TERM_BY_NATURE_CADRE_A_CODES.has(code) ? 'aPlusDUnAn' : 'aUnAnAuPlus';
   }
   return dateEcheance <= addYears(fiscalYearEndDate, 1) ? 'aUnAnAuPlus' : 'aPlusDUnAn';
 }
 
-function detteBucket(dateEcheance: Date | null, fiscalYearEndDate: Date): DetteBucket {
+function detteBucket(
+  code: string,
+  dateEcheance: Date | null,
+  fiscalYearEndDate: Date,
+): DetteBucket {
   if (!dateEcheance) {
-    return 'aUnAnAuPlus';
+    return LONG_TERM_BY_NATURE_CADRE_B_CODES.has(code) ? 'aPlusDUnAnEt5AnsAuPlus' : 'aUnAnAuPlus';
   }
   if (dateEcheance <= addYears(fiscalYearEndDate, 1)) {
     return 'aUnAnAuPlus';
@@ -199,12 +265,12 @@ function buildMaturityTotals(
     const balance = Money.fromDecimal(ligne.debit).minus(Money.fromDecimal(ligne.credit));
 
     if (CADRE_A_CODES.has(code)) {
-      const bucket = creanceBucket(ligne.dateEcheance, fiscalYearEndDate);
+      const bucket = creanceBucket(code, ligne.dateEcheance, fiscalYearEndDate);
       const byBucket = creances.get(code) ?? new Map<CreanceBucket, Money>();
       byBucket.set(bucket, (byBucket.get(bucket) ?? Money.zero()).plus(balance));
       creances.set(code, byBucket);
     } else if (CADRE_B_CODES.has(code)) {
-      const bucket = detteBucket(ligne.dateEcheance, fiscalYearEndDate);
+      const bucket = detteBucket(code, ligne.dateEcheance, fiscalYearEndDate);
       const byBucket = dettes.get(code) ?? new Map<DetteBucket, Money>();
       byBucket.set(bucket, (byBucket.get(bucket) ?? Money.zero()).minus(balance)); // credit-direction
       dettes.set(code, byBucket);

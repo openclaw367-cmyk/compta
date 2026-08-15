@@ -45,18 +45,27 @@ describe('computeTableau2057', () => {
 
     const byCodeB = new Map(tableau2057.cadreB.map((l) => [l.code, l]));
     // T2: 164000 emprunt bancaire 40 000,00 + T23: 514000 overdraft 3 000,00 (dual-nature) → DU.
+    // DU is long-term-by-nature (emprunts) — no dateEcheance in this fixture, so it defaults to the
+    // middle bucket, NOT à un an au plus (see LONG_TERM_BY_NATURE_CADRE_B_CODES).
     expect(byCodeB.get('DU')).toMatchObject({
       montantBrut: '43000.00',
-      aUnAnAuPlus: '43000.00',
-      aPlusDUnAnEt5AnsAuPlus: '0.00',
+      aUnAnAuPlus: '0.00',
+      aPlusDUnAnEt5AnsAuPlus: '43000.00',
       aPlusDe5Ans: '0.00',
     });
-    // T7/T8/T11/T23: 401000 net credit 7 000,00 (27 000 achats − 20 000 réglé).
-    expect(byCodeB.get('DX')?.montantBrut).toBe('7000.00');
+    // T7/T8/T11/T23: 401000 net credit 7 000,00 (27 000 achats − 20 000 réglé). DX is
+    // exploitation-courante (fournisseurs) — keeps the short-term default.
+    expect(byCodeB.get('DX')).toMatchObject({ montantBrut: '7000.00', aUnAnAuPlus: '7000.00' });
     // T13 (431 sécu 6 000) + T18 (444 impôts bénéfices 4 000) + T9 (445710 TVA 6 000) + T22 (428 dual 1 000).
     expect(byCodeB.get('DY')?.montantBrut).toBe('17000.00');
-    // T4: 404000 (dettes sur immobilisations) 40 000,00.
-    expect(byCodeB.get('DZ')?.montantBrut).toBe('40000.00');
+    // T4: 404000 (dettes sur immobilisations) 40 000,00 — DZ is long-term-by-nature too, same
+    // middle-bucket default as DU.
+    expect(byCodeB.get('DZ')).toMatchObject({
+      montantBrut: '40000.00',
+      aUnAnAuPlus: '0.00',
+      aPlusDUnAnEt5AnsAuPlus: '40000.00',
+      aPlusDe5Ans: '0.00',
+    });
     expect(byCodeB.get('DS')?.montantBrut).toBe('0.00');
     expect(byCodeB.get('DT')?.montantBrut).toBe('0.00');
     expect(byCodeB.get('DV')?.montantBrut).toBe('0.00');
@@ -165,5 +174,78 @@ describe('computeTableau2057', () => {
     });
     expect(tableau2057.maturityNote).toMatch(/à un an au plus/);
     expect(tableau2057.note).toBeTruthy();
+  });
+
+  it('a long-term-by-nature line with no dateEcheance defaults to the LONG-term bucket, not à un an au plus', () => {
+    // BF (prêts, immobilisations financières) and DU (emprunt bancaire) are both
+    // long-term-by-nature — see LONG_TERM_BY_NATURE_CADRE_A_CODES/_CADRE_B_CODES. Neither line
+    // carries a dateEcheance, so this exercises the corrected default directly.
+    const lignes = [
+      {
+        compteNumber: '274000',
+        pcgClass: 2,
+        debit: d('2000.00'),
+        credit: d('0.00'),
+        dateEcheance: null,
+      },
+      {
+        compteNumber: '164000',
+        pcgClass: 1,
+        debit: d('0.00'),
+        credit: d('9000.00'),
+        dateEcheance: null,
+      },
+    ];
+    const bilan = computeBilan2050(buildTrialBalance(lignes), Money.zero());
+    const tableau2057 = computeTableau2057(bilan, lignes, FISCAL_YEAR_END);
+
+    const bf = tableau2057.cadreA.find((l) => l.code === 'BF')!;
+    expect(bf).toMatchObject({
+      montantBrut: '2000.00',
+      aUnAnAuPlus: '0.00',
+      aPlusDUnAn: '2000.00',
+    });
+
+    const du = tableau2057.cadreB.find((l) => l.code === 'DU')!;
+    expect(du).toMatchObject({
+      montantBrut: '9000.00',
+      aUnAnAuPlus: '0.00',
+      aPlusDUnAnEt5AnsAuPlus: '9000.00',
+      aPlusDe5Ans: '0.00',
+    });
+  });
+
+  it('a real dateEcheance always overrides the nature-based default, both directions', () => {
+    // BF (long-term-by-nature) with a SHORT-term due date still lands short-term; DX
+    // (exploitation-courante) with a LONG-term due date still lands long-term. The default only
+    // applies when dateEcheance is genuinely absent.
+    const lignes = [
+      {
+        compteNumber: '274000',
+        pcgClass: 2,
+        debit: d('1000.00'),
+        credit: d('0.00'),
+        dateEcheance: new Date('2027-03-01'), // ≤ FY end + 1 an
+      },
+      {
+        compteNumber: '401000',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('4000.00'),
+        dateEcheance: new Date('2029-03-01'), // > FY end + 1 an, ≤ FY end + 5 ans
+      },
+    ];
+    const bilan = computeBilan2050(buildTrialBalance(lignes), Money.zero());
+    const tableau2057 = computeTableau2057(bilan, lignes, FISCAL_YEAR_END);
+
+    const bf = tableau2057.cadreA.find((l) => l.code === 'BF')!;
+    expect(bf).toMatchObject({ aUnAnAuPlus: '1000.00', aPlusDUnAn: '0.00' });
+
+    const dx = tableau2057.cadreB.find((l) => l.code === 'DX')!;
+    expect(dx).toMatchObject({
+      aUnAnAuPlus: '0.00',
+      aPlusDUnAnEt5AnsAuPlus: '4000.00',
+      aPlusDe5Ans: '0.00',
+    });
   });
 });
