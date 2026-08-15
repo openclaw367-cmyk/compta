@@ -102,7 +102,7 @@ export function EcritureEditor({
   fiscalYearId: string;
   accounts: Account[];
   existing: Ecriture | null;
-  onSaved: () => void;
+  onSaved: (warnings: string[]) => void;
   onCancel: () => void;
 }) {
   const [ecritureDate, setEcritureDate] = useState(
@@ -207,12 +207,10 @@ export function EcritureEditor({
     };
 
     try {
-      if (existing) {
-        await updateEcriture.mutateAsync({ id: existing.id, dto });
-      } else {
-        await createEcriture.mutateAsync(dto);
-      }
-      onSaved();
+      const result = existing
+        ? await updateEcriture.mutateAsync({ id: existing.id, dto })
+        : await createEcriture.mutateAsync(dto);
+      onSaved(result.warnings);
     } catch (error) {
       setSubmitError(error instanceof ApiError ? error.details : ['Une erreur est survenue.']);
     }

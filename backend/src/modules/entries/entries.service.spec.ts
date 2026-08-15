@@ -40,6 +40,8 @@ function makePrismaMock() {
     },
     ecritureLigne: { deleteMany: jest.fn() },
     vatRate: { findMany: jest.fn().mockResolvedValue([]) },
+    account: { findMany: jest.fn().mockResolvedValue([]) },
+    fixedAsset: { findMany: jest.fn().mockResolvedValue([]) },
     $transaction: jest.fn(),
   };
   prisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(prisma));
@@ -59,6 +61,7 @@ describe('EntriesService', () => {
     const ecriture = await service.create(company, baseDto());
     expect(prisma.ecriture.create).toHaveBeenCalled();
     expect(ecriture).toBeDefined();
+    expect(ecriture.warnings).toEqual([]);
   });
 
   it('rejects an écriture where debit != credit', async () => {
@@ -265,7 +268,9 @@ describe('EntriesService', () => {
   });
 
   it('creates an écriture with a vatRateId tag that belongs to the company', async () => {
-    prisma.vatRate.findMany.mockResolvedValue([{ id: 'vat-rate-20', companyId: company.companyId }]);
+    prisma.vatRate.findMany.mockResolvedValue([
+      { id: 'vat-rate-20', companyId: company.companyId },
+    ]);
     const dto = baseDto({
       lignes: [
         { compteId: 'account-707', credit: '100.00', vatRateId: 'vat-rate-20' },
@@ -295,5 +300,98 @@ describe('EntriesService', () => {
   it('does not query vatRate at all when no line carries a vatRateId', async () => {
     await service.create(company, baseDto());
     expect(prisma.vatRate.findMany).not.toHaveBeenCalled();
+  });
+
+  describe('orphaned-immobilisation warning', () => {
+    const account218300 = {
+      id: 'account-218300',
+      number: '218300',
+      label: 'Matériel de bureau',
+      pcgClass: 2,
+    };
+
+    it('warns when a debited class-2 account has no linked FixedAsset', async () => {
+      prisma.account.findMany.mockResolvedValueOnce([account218300]);
+      prisma.fixedAsset.findMany.mockResolvedValueOnce([]);
+      const dto = baseDto({
+        lignes: [
+          { compteId: 'account-218300', debit: '450.00' },
+          { compteId: 'account-401', credit: '450.00' },
+        ],
+      });
+      const ecriture = await service.create(company, dto);
+      expect(ecriture.warnings).toHaveLength(1);
+      expect(ecriture.warnings[0]).toContain('218300');
+      expect(prisma.ecriture.create).toHaveBeenCalled(); // non-blocking — the write still happens
+    });
+
+    it('does not warn when the debited class-2 account already has a linked FixedAsset', async () => {
+      prisma.account.findMany.mockResolvedValueOnce([account218300]);
+      prisma.fixedAsset.findMany.mockResolvedValueOnce([{ accountId: 'account-218300' }]);
+      const dto = baseDto({
+        lignes: [
+          { compteId: 'account-218300', debit: '450.00' },
+          { compteId: 'account-401', credit: '450.00' },
+        ],
+      });
+      const ecriture = await service.create(company, dto);
+      expect(ecriture.warnings).toEqual([]);
+    });
+
+    it('does not warn when the class-2 account is only credited, not debited', async () => {
+      // account.findMany is still queried (for the debited account-401), but scoped to
+      // debitCompteIds only — account-218300 (credited, not debited) is never looked up,
+      // so it can never surface a warning regardless of whether it has a FixedAsset.
+      const dto = baseDto({
+        lignes: [
+          { compteId: 'account-401', debit: '450.00' },
+          { compteId: 'account-218300', credit: '450.00' },
+        ],
+      });
+      const ecriture = await service.create(company, dto);
+      expect(prisma.account.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: ['account-401'] } }),
+        }),
+      );
+      expect(ecriture.warnings).toEqual([]);
+    });
+
+    it('excludes 28x/29x amortissements contra-accounts from the check', async () => {
+      const contraAccount = {
+        id: 'account-281300',
+        number: '281300',
+        label: 'Amortissements',
+        pcgClass: 2,
+      };
+      prisma.account.findMany.mockResolvedValueOnce([contraAccount]);
+      const dto = baseDto({
+        lignes: [
+          { compteId: 'account-281300', debit: '100.00' },
+          { compteId: 'account-401', credit: '100.00' },
+        ],
+      });
+      const ecriture = await service.create(company, dto);
+      expect(prisma.fixedAsset.findMany).not.toHaveBeenCalled();
+      expect(ecriture.warnings).toEqual([]);
+    });
+
+    it('carries through on update() too', async () => {
+      prisma.ecriture.findFirst.mockResolvedValueOnce({
+        id: 'ecriture-1',
+        validatedAt: null,
+        lignes: [],
+      });
+      prisma.account.findMany.mockResolvedValueOnce([account218300]);
+      prisma.fixedAsset.findMany.mockResolvedValueOnce([]);
+      const dto = baseDto({
+        lignes: [
+          { compteId: 'account-218300', debit: '450.00' },
+          { compteId: 'account-401', credit: '450.00' },
+        ],
+      });
+      const ecriture = await service.update(company, 'ecriture-1', dto);
+      expect(ecriture.warnings).toHaveLength(1);
+    });
   });
 });

@@ -8,6 +8,7 @@ import type {
   Company,
   DepreciationEntry,
   Ecriture,
+  EcritureWriteResult,
   FiscalYear,
   FixedAsset,
   ImportBatch,
@@ -218,7 +219,7 @@ export function useEcritures() {
 export function useCreateEcriture() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (dto: CreateEcritureDto) => api.post<Ecriture>('/entries', dto),
+    mutationFn: (dto: CreateEcritureDto) => api.post<EcritureWriteResult>('/entries', dto),
     onSuccess: () => invalidateEcrituresAndLedger(queryClient),
   });
 }
@@ -227,7 +228,7 @@ export function useUpdateEcriture() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, dto }: { id: string; dto: CreateEcritureDto }) =>
-      api.patch<Ecriture>(`/entries/${id}`, dto),
+      api.patch<EcritureWriteResult>(`/entries/${id}`, dto),
     onSuccess: () => invalidateEcrituresAndLedger(queryClient),
   });
 }

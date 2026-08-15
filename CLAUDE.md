@@ -954,28 +954,41 @@ assume they're covered either:
   path — and sets `DepreciationEntry.postedEcritureId`; VNC on the
   list/detail screens is computed from posted entries only, so it ties
   to the bilan rather than the projected schedule.
-- **Nothing stops a class-2 immobilisation from being posted through
-  the journal grid without a `FixedAsset` record — an "orphaned
-  immobilisation."** The journal entry grid lets you debit any account,
-  including class 2 (excluding 28x/29x contra-accounts), with no check
-  that a `FixedAsset` exists for it. Found live (2026-08-09): the FR
-  demo company had exactly this — a validated écriture debiting 218300
-  for 450,00 € with no `FixedAsset` behind it at all. The *old* VNC
-  check (`assertVncTiesToLedger`) never caught it, because it only
-  validates lines that already have `FixedAsset` data — a line with
-  none is silently skipped, not flagged as missing. The 2054/2055
-  tie-out (`assertTableauxTieToBilan`, exhaustive by construction) does
-  catch it, refusing to generate the liasse — which is how this one was
-  found and fixed (a `FixedAsset` created for the existing asset via
-  the real API, not a raw DB edit). **That tie-out is a backstop at
-  liasse-generation time, not a guard at entry time** — a company can
-  still post an orphaned immobilisation any time between now and the
-  next liasse run with no warning. The real fix belongs in the journal
-  grid / entries flow: warn (or block) when a line debits a class-2
-  immobilisation account with no linked `FixedAsset`, surfacing the
-  risk when the écriture is created rather than months later when the
-  liasse refuses to generate. Not built — logged here as a known gap /
-  future feature, not a bug to silently work around.
+- **Orphaned-immobilisation guard is now built (2026-08-15)** — closes
+  the gap below. `EntriesService.create()`/`update()` both compute a
+  non-blocking warning (`EcritureWriteResult.warnings: string[]`) when
+  a line **debits** a class-2 account (excluding 28x/29x
+  contra-accounts, same predicate as `ImmobilisationsPage.tsx`'s own
+  filter, factored out to `orphaned-immobilisation.ts`'s
+  `isImmobilisationAccount()`) that has no `FixedAsset` linked to it
+  for this company. Deliberately a warning, not a hard block — there
+  are legitimate reasons an account might not have a fiche yet (e.g.
+  registering it right after) — but it's now surfaced at entry time
+  via the journal grid's own save flow (`JournalEntriesPage.tsx` shows
+  it as a dismissible warning-styled banner after save, not inline
+  validation, since it doesn't block the write), not just discovered
+  months later by the 2054/2055 tie-out. Verified live against the FR
+  demo company: debiting `218200` (Matériel de transport, no
+  `FixedAsset`) returned the warning naming that account; the écriture
+  still posted (non-blocking, confirmed); the test draft was deleted
+  after. **Scoped to `EntriesService.create()`/`update()` only** — the
+  journal grid's own write path. À-nouveau and Excel import both write
+  écritures directly via Prisma, bypassing `EntriesService` entirely
+  (a pre-existing structural fact, not new), so neither goes through
+  this check; not extended to them this pass. Original bug this closes,
+  kept for context: the journal entry grid let you debit any account,
+  including class 2, with no check that a `FixedAsset` existed for it.
+  Found live (2026-08-09): the FR demo company had exactly this — a
+  validated écriture debiting 218300 for 450,00 € with no `FixedAsset`
+  behind it at all. The *old* VNC check (`assertVncTiesToLedger`) never
+  caught it (it only validates lines that already have `FixedAsset`
+  data — a line with none was silently skipped). The 2054/2055 tie-out
+  (`assertTableauxTieToBilan`, exhaustive by construction) does catch
+  it, refusing to generate the liasse — which is how this one was found
+  and fixed originally (a `FixedAsset` created for the existing asset
+  via the real API). That tie-out remains a real, independent backstop
+  at liasse-generation time; the new guard above is the entry-time
+  warning that was missing alongside it.
 - **`EcritureLigne.dateLettrage` isn't settable through the API.**
   `lettrage` (EcritureLet) is exposed on `CreateEcritureLigneDto` and
   settable at line-creation time, but there's no lettering
@@ -1029,12 +1042,12 @@ from posted entries only. **Cession (disposal) is also done, backend and
 frontend** (as of 2026-08-15) — see "Immobilisations / cession" above
 for the full écriture design, verified live against the multi-year
 fixture, and the "Céder l'immobilisation" action on
-`FixedAssetDetailPage` (see "Stack" above) to trigger it. See "Known
-scope boundaries" above
-for what's still deferred (dégressif, acquisition-year proration) and
-for the newly-logged "orphaned immobilisation" gap (a class-2 écriture
-with no `FixedAsset` behind it, currently only caught at
-liasse-generation time by the 2054/2055 tie-out, not at entry time).
+`FixedAssetDetailPage` (see "Stack" above) to trigger it. The
+"orphaned immobilisation" gap is also closed (same day, later pass) —
+`EntriesService.create()`/`update()` now warn (non-blocking) when a
+line debits a class-2 account with no linked `FixedAsset`, see "Known
+scope boundaries" above. What's still deferred: dégressif,
+acquisition-year proration.
 
 **VAT (TVA)** — `computeDeclaration()` is no longer a stub: it computes
 and now also *displays* a real CA3 for the basic French case (`VatPage`'s

@@ -132,6 +132,16 @@ export interface Ecriture {
   lignes: EcritureLigne[];
 }
 
+/**
+ * Response for POST /entries and PATCH /entries/:id only — the écriture
+ * plus any non-blocking compliance warnings (see EntriesService's
+ * "orphaned immobilisation" guard in CLAUDE.md). Every other read of an
+ * Ecriture (list, find one, validate, reverse) stays the plain shape.
+ */
+export interface EcritureWriteResult extends Ecriture {
+  warnings: string[];
+}
+
 export interface ApiErrorBody {
   statusCode: number;
   error: string;

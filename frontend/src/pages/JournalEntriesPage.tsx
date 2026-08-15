@@ -38,6 +38,7 @@ export function JournalEntriesPage() {
   const [editor, setEditor] = useState<EditorState>({ mode: 'closed' });
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [actionWarnings, setActionWarnings] = useState<string[] | null>(null);
 
   const journals = journalsQuery.data ?? NO_JOURNALS;
   const fiscalYears = fiscalYearsQuery.data ?? NO_FISCAL_YEARS;
@@ -192,6 +193,23 @@ export function JournalEntriesPage() {
         </div>
       )}
 
+      {actionWarnings && actionWarnings.length > 0 && (
+        <div className="flex items-start justify-between gap-3 rounded-md bg-warning-soft px-4 py-2.5 text-[13px] text-warning">
+          <div className="flex flex-col gap-1">
+            {actionWarnings.map((warning, i) => (
+              <span key={i}>{warning}</span>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setActionWarnings(null)}
+            className="shrink-0 font-medium"
+          >
+            Fermer
+          </button>
+        </div>
+      )}
+
       {editor.mode !== 'closed' && journalId && fiscalYearId && (
         <EcritureEditor
           key={editor.mode === 'edit' ? editor.ecriture.id : 'new'}
@@ -199,7 +217,10 @@ export function JournalEntriesPage() {
           fiscalYearId={fiscalYearId}
           accounts={accounts}
           existing={editor.mode === 'edit' ? editor.ecriture : null}
-          onSaved={() => setEditor({ mode: 'closed' })}
+          onSaved={(warnings) => {
+            setEditor({ mode: 'closed' });
+            setActionWarnings(warnings.length > 0 ? warnings : null);
+          }}
           onCancel={() => setEditor({ mode: 'closed' })}
         />
       )}
