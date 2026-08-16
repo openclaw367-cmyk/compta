@@ -30,9 +30,14 @@ const REQUIRED_COLUMNS = [
  * exceljs cell values can be a rich union (Date, RichText, Hyperlink,
  * formula result, ...), not just primitives — a blind `String(cell.value)`
  * risks silently producing "[object Object]". This only trusts the shapes
- * we actually expect from an accounting import sheet.
+ * we actually expect from an accounting import sheet. Exported for reuse
+ * by the AI chatbot's invoice extraction (see
+ * ../ai-chat/invoice-extraction.service.ts) — the same cell-reading
+ * primitive, not a parallel reimplementation, per CLAUDE.md "AI chatbot
+ * Phase 2 — invoice extraction": "reuse the Excel-import module's
+ * parsing, don't reinvent extraction."
  */
-function cellValueToString(value: unknown): string {
+export function cellValueToString(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (value instanceof Date) return value.toISOString();
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {

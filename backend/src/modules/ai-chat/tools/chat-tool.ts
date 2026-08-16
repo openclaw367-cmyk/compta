@@ -45,3 +45,40 @@ export function optionalBoolean(args: Record<string, unknown>, key: string): boo
   const value = args[key];
   return value === true;
 }
+
+/**
+ * Extracts a model-readable message from a thrown error — found live,
+ * not by inspection: Nest's `ValidationPipe`/class-validator throw a
+ * `BadRequestException` constructed from an ARRAY of constraint messages
+ * (e.g. "debit must be a valid money string", "lignes must contain at
+ * least 2 elements"), and for that array-constructed form
+ * `err.message` degrades to the generic HTTP status text ("Bad Request
+ * Exception") — the real per-field messages only live in
+ * `err.getResponse().message`. A tool-calling loop that feeds the model
+ * "Bad Request Exception" with no detail cannot self-correct; this was
+ * observed live during Phase 2 verification (a malformed propose_ecriture
+ * call — wrong money format, wrong line count — got this generic message
+ * twice in a row and the model gave up rather than fixing the specific
+ * problem). Every other exception in this app (NotFoundException etc.)
+ * is constructed with a single string, where `.message` already IS that
+ * string — this helper is a strict superset, never worse than the old
+ * `err.message` fallback.
+ */
+export function extractErrorMessage(err: unknown): string {
+  if (err && typeof err === 'object' && 'getResponse' in err) {
+    const getResponse = (err as { getResponse?: unknown }).getResponse;
+    if (typeof getResponse === 'function') {
+      const response: unknown = getResponse.call(err);
+      if (response && typeof response === 'object' && 'message' in response) {
+        const message = response.message;
+        if (Array.isArray(message)) {
+          return message.join('; ');
+        }
+        if (typeof message === 'string') {
+          return message;
+        }
+      }
+    }
+  }
+  return err instanceof Error ? err.message : String(err);
+}

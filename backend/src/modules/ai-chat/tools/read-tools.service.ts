@@ -11,20 +11,30 @@ import { FinancialAnalysisService } from '../../financial-analysis/financial-ana
 import { ResultatFiscalService } from '../../resultat-fiscal/resultat-fiscal.service';
 import { DepreciationService } from '../../depreciation/depreciation.service';
 import { EntriesService } from '../../entries/entries.service';
-import { ChatTool, optionalBoolean, optionalString, requireString } from './chat-tool';
+import {
+  ChatTool,
+  extractErrorMessage,
+  optionalBoolean,
+  optionalString,
+  requireString,
+} from './chat-tool';
 
 /**
- * The Phase 1 tool registry — READ ONLY. Every `execute` below is a thin
- * dispatch onto an existing, already-tested domain service method: no
- * tool contains its own aggregation, classification, or money math. This
- * is an enforced invariant, not a style preference — see chat-tool.ts's
- * doc comment and CLAUDE.md "AI chatbot". A new kind of question the
- * model needs answered is a new/extended service method, reviewed and
- * tested independently of the chatbot, never inline logic added here.
+ * The Phase 1 tool registry — READ ONLY, unchanged by Phase 2. Every
+ * `execute` below is a thin dispatch onto an existing, already-tested
+ * domain service method: no tool contains its own aggregation,
+ * classification, or money math. This is an enforced invariant, not a
+ * style preference — see chat-tool.ts's doc comment and CLAUDE.md "AI
+ * chatbot". A new kind of question the model needs answered is a
+ * new/extended service method, reviewed and tested independently of the
+ * chatbot, never inline logic added here.
  *
- * `propose_ecriture` (Phase 2) deliberately does NOT live in this file or
- * this registry — see ai-chat.module.ts: Phase 1 is write-incapable by
- * the simple absence of any write tool, not a runtime permission check.
+ * `propose_ecriture` (Phase 2, now active) deliberately does NOT live in
+ * this file — it's the ONLY tool in a separate registry,
+ * ProposeToolsService (tools/propose-tools.service.ts). Keeping it out
+ * of this file means this registry's own "read only" claim stays
+ * grep-verifiable: nothing here can ever accidentally become write-
+ * capable by editing this one file.
  */
 @Injectable()
 export class ReadToolsService {
@@ -63,7 +73,7 @@ export class ReadToolsService {
       const value = await tool.execute(company, args);
       return { ok: true, value };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return { ok: false, error: extractErrorMessage(err) };
     }
   }
 

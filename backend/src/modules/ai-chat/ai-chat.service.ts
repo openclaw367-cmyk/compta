@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ChatMessage, ChatMessageRole, ChatSession, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -5,6 +6,7 @@ import { CompanyContext } from '../../common/tenant/company-context';
 import { LOCAL_MODEL_PORT, LocalModelPort } from './local-model/local-model.port';
 import { LocalChatMessage, LocalModelAvailability } from './local-model/local-model.types';
 import { ChatOrchestratorService, OrchestratedMessage } from './chat-orchestrator.service';
+import { InvoiceExtractionService } from './invoice-extraction.service';
 
 const TITLE_MAX_LENGTH = 60;
 
@@ -19,6 +21,7 @@ export class AiChatService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly orchestrator: ChatOrchestratorService,
+    private readonly invoiceExtraction: InvoiceExtractionService,
     @Inject(LOCAL_MODEL_PORT) private readonly model: LocalModelPort,
   ) {}
 
@@ -52,18 +55,21 @@ export class AiChatService {
   }
 
   /**
-   * Persists the user's message, runs the tool-calling loop (or, if no
+   * Persists the user's message, extracts any attached invoice files
+   * DETERMINISTICALLY (before the model ever runs — see
+   * invoice-extraction.service.ts), runs the tool-calling loop (or, if no
    * local model is reachable, skips straight to a clear degraded-state
    * reply — never lets a raw fetch failure surface), persists every
-   * message the turn produced (assistant text, tool calls, tool results,
-   * in order), and returns all of it — including the user's own row — so
-   * the frontend can append the whole turn to its message list without a
-   * refetch.
+   * message the turn produced (the extraction trace, assistant text, tool
+   * calls, tool results, in order), and returns all of it — including the
+   * user's own row — so the frontend can append the whole turn to its
+   * message list without a refetch.
    */
   async sendMessage(
     company: CompanyContext,
     sessionId: string,
     content: string,
+    files: Express.Multer.File[] = [],
   ): Promise<ChatMessage[]> {
     const session = await this.getSession(company, sessionId);
     const isFirstMessage = session.messages.length === 0;
@@ -89,6 +95,7 @@ export class AiChatService {
       createdRows.push(row);
     } else {
       const history: LocalChatMessage[] = session.messages.map(toLocalChatMessage);
+      const filePrelude = await this.extractFilePrelude(files);
       // A local model can fail mid-turn (timeout, the daemon dropping
       // connection) on real hardware — observed live during Phase 1
       // verification, not a hypothetical. This must degrade the same
@@ -97,9 +104,14 @@ export class AiChatService {
       // this app computed, so it's reported the same honest way.
       let produced: OrchestratedMessage[];
       try {
-        produced = await this.orchestrator.runTurn(company, history, content);
+        produced = await this.orchestrator.runTurn(company, history, content, filePrelude);
       } catch (err) {
+        // filePrelude is kept even on failure: the deterministic extraction
+        // already happened and succeeded independently of the model call
+        // that failed afterward — losing it would silently discard real
+        // work the user is entitled to see, just because the LLM timed out.
         produced = [
+          ...filePrelude,
           {
             role: 'assistant',
             content:
@@ -136,6 +148,47 @@ export class AiChatService {
     });
 
     return createdRows;
+  }
+
+  /**
+   * Deterministic extraction happens HERE — eagerly, before the model
+   * turn starts, never as something the model triggers itself. Each
+   * file becomes a synthesized assistant-tool-call + tool-result pair
+   * (as `extract_invoice_facts`) so it renders through the EXACT SAME
+   * trace UI a model-initiated tool call would, with zero new frontend
+   * code — see AssistantPage.tsx's generic ToolResultTrace. A file this
+   * app can't parse (wrong type, corrupt) becomes a `{ error }` result
+   * for that one file, same non-blocking pattern as every other tool
+   * failure — it never aborts the whole message.
+   */
+  private async extractFilePrelude(files: Express.Multer.File[]): Promise<OrchestratedMessage[]> {
+    const prelude: OrchestratedMessage[] = [];
+    for (const file of files) {
+      const callId = `extract-${randomUUID()}`;
+      prelude.push({
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          { id: callId, name: 'extract_invoice_facts', arguments: { fileName: file.originalname } },
+        ],
+      });
+      let resultContent: string;
+      try {
+        const facts = await this.invoiceExtraction.extract(file);
+        resultContent = JSON.stringify(facts);
+      } catch (err) {
+        resultContent = JSON.stringify({
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      prelude.push({
+        role: 'tool',
+        content: resultContent,
+        toolName: 'extract_invoice_facts',
+        toolCallId: callId,
+      });
+    }
+    return prelude;
   }
 }
 

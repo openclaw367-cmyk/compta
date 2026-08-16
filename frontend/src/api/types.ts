@@ -838,3 +838,40 @@ export interface LocalModelAvailability {
   available: boolean;
   detail: string;
 }
+
+/**
+ * The tool result shape of propose_ecriture (AI chatbot Phase 2 — see
+ * CLAUDE.md "AI chatbot Phase 2"). `dto` is a plain object shaped exactly
+ * like CreateEcritureDto (imported as a type for the request side — this
+ * is the RESPONSE shape, so it's hand-authored like every other response
+ * type in this file) — AssistantPage sends it, possibly edited, straight
+ * to the ordinary POST /entries endpoint via useCreateEcriture(). Nothing
+ * here is ever auto-posted: `dto` existing in a chat message is not the
+ * same as it existing in the ledger.
+ */
+export interface ProposedEcritureLigne {
+  compteId: string;
+  compteAuxId?: string;
+  debit?: string;
+  credit?: string;
+  vatRateId?: string;
+  dateEcheance?: string;
+}
+
+export interface ProposedEcritureDto {
+  journalId: string;
+  fiscalYearId: string;
+  ecritureDate: string;
+  pieceRef?: string;
+  pieceDate?: string;
+  libelle: string;
+  lignes: ProposedEcritureLigne[];
+}
+
+export interface ProposedEcriture {
+  dto: ProposedEcritureDto;
+  /** Non-blocking compliance warnings (e.g. orphaned-immobilisation). */
+  warnings: string[];
+  /** Judgment calls the model made — surfaced, never silently decided. */
+  assumptions: string[];
+}

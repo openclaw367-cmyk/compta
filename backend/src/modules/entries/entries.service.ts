@@ -7,11 +7,9 @@ import {
 import { Ecriture } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
-import { Money } from '../../common/decimal';
 import { assertFiscalYearOpen } from '../../common/ledger/assert-fiscal-year-open';
 import { CreateEcritureDto } from './dto/create-ecriture.dto';
-import { CreateEcritureLigneDto } from './dto/create-ecriture-ligne.dto';
-import { isImmobilisationAccount } from './orphaned-immobilisation';
+import { EntryValidationService } from './entry-validation.service';
 
 /** Response shape for create()/update() — the écriture plus any non-blocking compliance warnings. */
 export type EcritureWriteResult = Ecriture & { warnings: string[] };
@@ -20,16 +18,26 @@ export type EcritureWriteResult = Ecriture & { warnings: string[] };
  * Écritures (journal entries). Implements CLAUDE.md "Ledger integrity":
  * balance-on-write, sequential gapless numbering assigned at validation,
  * and immutability once validated (corrections via a reversing entry).
+ * Balance/reference/VAT/orphaned-immob checks live in
+ * EntryValidationService (extracted 2026-08-16) — shared verbatim with
+ * the AI chatbot's propose_ecriture tool, which runs the identical
+ * checks without persisting. See that file's own doc comment.
  */
 @Injectable()
 export class EntriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly validation: EntryValidationService,
+  ) {}
 
   async create(company: CompanyContext, dto: CreateEcritureDto): Promise<EcritureWriteResult> {
-    const lignesData = this.buildBalancedLignes(company, dto.lignes);
-    await this.assertReferencesBelongToCompany(company, dto.journalId, dto.fiscalYearId);
-    await this.assertVatRatesBelongToCompany(company, dto.lignes);
-    const warnings = await this.computeOrphanedImmobilisationWarnings(company, dto.lignes);
+    const lignesData = this.validation.buildBalancedLignes(company, dto.lignes);
+    await this.validation.assertReferencesBelongToCompany(company, dto.journalId, dto.fiscalYearId);
+    await this.validation.assertVatRatesBelongToCompany(company, dto.lignes);
+    const warnings = await this.validation.computeOrphanedImmobilisationWarnings(
+      company,
+      dto.lignes,
+    );
 
     const ecriture = await this.prisma.ecriture.create({
       data: {
@@ -75,10 +83,13 @@ export class EntriesService {
     const existing = await this.findOne(company, id);
     this.assertDraft(existing);
 
-    const lignesData = this.buildBalancedLignes(company, dto.lignes);
-    await this.assertReferencesBelongToCompany(company, dto.journalId, dto.fiscalYearId);
-    await this.assertVatRatesBelongToCompany(company, dto.lignes);
-    const warnings = await this.computeOrphanedImmobilisationWarnings(company, dto.lignes);
+    const lignesData = this.validation.buildBalancedLignes(company, dto.lignes);
+    await this.validation.assertReferencesBelongToCompany(company, dto.journalId, dto.fiscalYearId);
+    await this.validation.assertVatRatesBelongToCompany(company, dto.lignes);
+    const warnings = await this.validation.computeOrphanedImmobilisationWarnings(
+      company,
+      dto.lignes,
+    );
 
     const ecriture = await this.prisma.$transaction(async (tx) => {
       await tx.ecritureLigne.deleteMany({ where: { ecritureId: id } });
@@ -201,146 +212,6 @@ export class EntriesService {
     if (ecriture.validatedAt) {
       throw new ConflictException(
         'Validated écritures are immutable. Post a reversing entry instead of editing or deleting.',
-      );
-    }
-  }
-
-  private buildBalancedLignes(company: CompanyContext, lignes: CreateEcritureLigneDto[]) {
-    let totalDebit = Money.zero();
-    let totalCredit = Money.zero();
-
-    const data = lignes.map((ligne) => {
-      const debit = Money.fromString(ligne.debit ?? '0.00');
-      const credit = Money.fromString(ligne.credit ?? '0.00');
-
-      if (!debit.isZero() && !credit.isZero()) {
-        throw new BadRequestException('A line cannot have both a debit and a credit amount.');
-      }
-      if (debit.isZero() && credit.isZero()) {
-        throw new BadRequestException('A line must have either a debit or a credit amount.');
-      }
-
-      totalDebit = totalDebit.plus(debit);
-      totalCredit = totalCredit.plus(credit);
-
-      return {
-        companyId: company.companyId,
-        compteId: ligne.compteId,
-        compteAuxId: ligne.compteAuxId,
-        debit: debit.toDecimal(),
-        credit: credit.toDecimal(),
-        lettrage: ligne.lettrage,
-        montantDevise: ligne.montantDevise
-          ? Money.fromString(ligne.montantDevise).toDecimal()
-          : undefined,
-        idDevise: ligne.idDevise,
-        vatRateId: ligne.vatRateId,
-        dateEcheance: ligne.dateEcheance ? new Date(ligne.dateEcheance) : undefined,
-      };
-    });
-
-    if (!totalDebit.equals(totalCredit)) {
-      throw new BadRequestException(
-        `Écriture does not balance: debit ${totalDebit.toApiString()} != credit ${totalCredit.toApiString()}.`,
-      );
-    }
-
-    return data;
-  }
-
-  private async assertReferencesBelongToCompany(
-    company: CompanyContext,
-    journalId: string,
-    fiscalYearId: string,
-  ): Promise<void> {
-    const [journal, fiscalYear] = await Promise.all([
-      this.prisma.journal.findFirst({ where: { id: journalId, companyId: company.companyId } }),
-      this.prisma.fiscalYear.findFirst({
-        where: { id: fiscalYearId, companyId: company.companyId },
-      }),
-    ]);
-    if (!journal) {
-      throw new NotFoundException(`Journal ${journalId} not found`);
-    }
-    if (!fiscalYear) {
-      throw new NotFoundException(`Fiscal year ${fiscalYearId} not found`);
-    }
-    assertFiscalYearOpen(fiscalYear);
-  }
-
-  /**
-   * "Orphaned immobilisation" guard (see CLAUDE.md "Known scope
-   * boundaries" / "Immobilisations / cession") — a debit to a class-2
-   * immobilisation account with no FixedAsset behind it silently misses
-   * the 2054/2055/2059-A liasse annexes and dépreciation posting, and
-   * was previously only ever caught (if at all) by the liasse's own
-   * tie-out at generation time, months later. Non-blocking by design:
-   * there are legitimate reasons an account might not have a fiche yet
-   * (e.g. registering it separately right after), so this returns a
-   * warning for the caller to surface, never throws. Scoped to DEBIT
-   * lines only — that's the acquisition-posting shape the known bug
-   * matched; a credit to an already-tracked asset's account (disposal,
-   * correction) isn't a new orphan.
-   */
-  private async computeOrphanedImmobilisationWarnings(
-    company: CompanyContext,
-    lignes: CreateEcritureLigneDto[],
-  ): Promise<string[]> {
-    const debitCompteIds = [
-      ...new Set(
-        lignes.filter((l) => !Money.fromString(l.debit ?? '0.00').isZero()).map((l) => l.compteId),
-      ),
-    ];
-    if (debitCompteIds.length === 0) {
-      return [];
-    }
-    const accounts = await this.prisma.account.findMany({
-      where: { id: { in: debitCompteIds }, companyId: company.companyId },
-    });
-    const immobilisationAccounts = accounts.filter(isImmobilisationAccount);
-    if (immobilisationAccounts.length === 0) {
-      return [];
-    }
-    const linkedAssets = await this.prisma.fixedAsset.findMany({
-      where: {
-        companyId: company.companyId,
-        accountId: { in: immobilisationAccounts.map((a) => a.id) },
-      },
-      select: { accountId: true },
-    });
-    const linkedAccountIds = new Set(linkedAssets.map((fa) => fa.accountId));
-    return immobilisationAccounts
-      .filter((a) => !linkedAccountIds.has(a.id))
-      .map(
-        (a) =>
-          `Le compte ${a.number} (« ${a.label} ») est un compte d'immobilisation débité sans ` +
-          "fiche immobilisation associée — elle n'apparaîtra pas dans les tableaux 2054/2055/" +
-          "2059 de la liasse ni dans le plan d'amortissement. Créez la fiche depuis l'écran " +
-          "Immobilisations si ce n'est pas volontaire.",
-      );
-  }
-
-  /**
-   * A tagged vatRateId must belong to this company — same multi-tenant
-   * scoping rule as every other reference, see CLAUDE.md. Cheap to check
-   * since most lines won't carry one.
-   */
-  private async assertVatRatesBelongToCompany(
-    company: CompanyContext,
-    lignes: CreateEcritureLigneDto[],
-  ): Promise<void> {
-    const vatRateIds = [
-      ...new Set(lignes.map((l) => l.vatRateId).filter((id): id is string => Boolean(id))),
-    ];
-    if (vatRateIds.length === 0) {
-      return;
-    }
-    const rates = await this.prisma.vatRate.findMany({
-      where: { id: { in: vatRateIds }, companyId: company.companyId },
-    });
-    if (rates.length !== vatRateIds.length) {
-      throw new BadRequestException(
-        'One or more VAT rate references do not belong to this company.',
       );
     }
   }

@@ -13,20 +13,27 @@ import { DepreciationModule } from '../depreciation/depreciation.module';
 import { EntriesModule } from '../entries/entries.module';
 import { LocalModelModule } from './local-model/local-model.module';
 import { ReadToolsService } from './tools/read-tools.service';
+import { ProposeToolsService } from './tools/propose-tools.service';
 import { ChatContextService } from './chat-context.service';
 import { ChatOrchestratorService } from './chat-orchestrator.service';
+import { InvoiceExtractionService } from './invoice-extraction.service';
 import { AiChatService } from './ai-chat.service';
 import { AiChatController } from './ai-chat.controller';
 
 /**
- * Phase 1 — read-only. This module's provider list is the actual proof of
- * the "write-incapable by absence" guarantee described in CLAUDE.md "AI
- * chatbot": there is no write-tool service imported here, no
- * EntriesService.create() call anywhere in this module's own code (only
- * EntriesService.findAll/findOne, via ReadToolsService, both read paths),
- * and no `propose_ecriture` entry in ReadToolsService's registry. Phase 2
- * adds exactly that — a new tool + a new confirmation-gate endpoint — on
- * top of this module, never a change to how Phase 1 itself behaves.
+ * Phase 1 (read-only) + Phase 2 (propose-only writes). This module's
+ * provider list is the actual proof of the write boundary described in
+ * CLAUDE.md "AI chatbot": `ReadToolsService` (Phase 1) has zero write
+ * capability, grep-verifiable — see its own doc comment. The ONLY
+ * write-adjacent surface anywhere in this module is
+ * `ProposeToolsService`'s single `propose_ecriture` tool, which never
+ * calls `EntriesService.create()` or persists anything — see that file's
+ * own doc comment and `entry-validation.service.ts` for the shared
+ * validation it runs instead. There is no `validate_ecriture` tool, no
+ * `EntriesService.validate()`/`.update()`/`.remove()` call anywhere in
+ * this module: a confirmed proposal reaches the ledger only through the
+ * frontend's ORDINARY `POST /entries` call — this module has no code
+ * path to that write at all, gated or otherwise.
  * `CompaniesModule` is imported for `ChatContextService`'s eager-context
  * fetch (see that file), which calls `CompaniesService.findCurrent()`
  * only — `updateCurrent()` exists on that class but nothing in this
@@ -49,6 +56,13 @@ import { AiChatController } from './ai-chat.controller';
     LocalModelModule,
   ],
   controllers: [AiChatController],
-  providers: [ReadToolsService, ChatContextService, ChatOrchestratorService, AiChatService],
+  providers: [
+    ReadToolsService,
+    ProposeToolsService,
+    ChatContextService,
+    ChatOrchestratorService,
+    InvoiceExtractionService,
+    AiChatService,
+  ],
 })
 export class AiChatModule {}

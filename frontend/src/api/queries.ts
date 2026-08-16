@@ -578,11 +578,35 @@ export function useChatSession(id: string | null) {
  * caller must show a clear "thinking" state, not assume this resolves
  * quickly.
  */
+/**
+ * Attached files (PDF/Excel invoices) go through `postForm` as
+ * multipart/form-data — the backend parses them deterministically before
+ * the model ever runs (see CLAUDE.md "AI chatbot Phase 2 — invoice
+ * extraction"). Only the user's own files, attached to this exact
+ * request, are ever read — never a filesystem path.
+ */
 export function useSendChatMessage() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ sessionId, dto }: { sessionId: string; dto: SendChatMessageDto }) =>
-      api.post<ChatMessage[]>(`/ai-chat/sessions/${sessionId}/messages`, dto),
+    mutationFn: ({
+      sessionId,
+      dto,
+      files,
+    }: {
+      sessionId: string;
+      dto: SendChatMessageDto;
+      files?: File[];
+    }) => {
+      if (!files || files.length === 0) {
+        return api.post<ChatMessage[]>(`/ai-chat/sessions/${sessionId}/messages`, dto);
+      }
+      const formData = new FormData();
+      formData.append('content', dto.content);
+      for (const file of files) {
+        formData.append('files', file);
+      }
+      return api.postForm<ChatMessage[]>(`/ai-chat/sessions/${sessionId}/messages`, formData);
+    },
     onSuccess: (_data, { sessionId }) => {
       void queryClient.invalidateQueries({ queryKey: ['ai-chat-session', sessionId] });
       void queryClient.invalidateQueries({ queryKey: ['ai-chat-sessions'] });

@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { EntriesService } from './entries.service';
+import { EntryValidationService } from './entry-validation.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { CreateEcritureDto } from './dto/create-ecriture.dto';
@@ -54,7 +55,8 @@ describe('EntriesService', () => {
 
   beforeEach(() => {
     prisma = makePrismaMock();
-    service = new EntriesService(prisma as unknown as PrismaService);
+    const validation = new EntryValidationService(prisma as unknown as PrismaService);
+    service = new EntriesService(prisma as unknown as PrismaService, validation);
   });
 
   it('creates a balanced écriture', async () => {
