@@ -590,7 +590,7 @@ export type LiasseAnyResult = LiasseResult | LiasseSimplifieResult;
  * Flux d'exploitation — see cash-flow-statement.ts's CAF formula and the
  * gross-vs-net (brut, not net) discipline on variationCreancesClients/
  * variationStocks. total = capaciteAutofinancement − variationCreancesClients
- * − variationStocks + variationDettesExploitation.
+ * − variationStocks − variationTvaDeductibleAutres + variationDettesExploitation.
  */
 export interface FluxExploitation {
   resultatNet: string;
@@ -601,13 +601,17 @@ export interface FluxExploitation {
   capaciteAutofinancement: string;
   variationCreancesClients: string;
   variationStocks: string;
+  /** Δ445660 (TVA déductible sur autres biens et services) — carved out of BZ, see cash-flow-statement.ts's doc comment. */
+  variationTvaDeductibleAutres: string;
   variationDettesExploitation: string;
   total: string;
 }
 
-/** Flux d'investissement — cash actually paid/received nets against Δ404/405 and Δ462, see cash-flow-statement.ts. */
+/** Flux d'investissement — cash actually paid/received nets against Δ404/405, Δ462, and Δ445662, see cash-flow-statement.ts. */
 export interface FluxInvestissement {
   acquisitionsImmobilisations: string;
+  /** Δ445662 (TVA déductible sur immobilisations) — carved out of BZ, added to acquisitions (HT → TTC) before netting against DZ. */
+  variationTvaDeductibleImmobilisations: string;
   variationDettesSurImmobilisations: string;
   cessionsImmobilisations: string;
   variationCreancesSurCessions: string;

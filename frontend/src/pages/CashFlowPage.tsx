@@ -244,6 +244,11 @@ function FluxExploitationSection({ flux }: { flux: FluxExploitation }) {
             />
             <Row label="− Variation des stocks (brut)" value={flux.variationStocks} muted />
             <Row
+              label="− Variation TVA déductible (autres biens et services, 445660)"
+              value={flux.variationTvaDeductibleAutres}
+              muted
+            />
+            <Row
               label="+ Variation des dettes d'exploitation"
               value={flux.variationDettesExploitation}
             />
@@ -278,6 +283,11 @@ function FluxInvestissementSection({ flux }: { flux: FluxInvestissement }) {
             <Row
               label="− Acquisitions d'immobilisations"
               value={flux.acquisitionsImmobilisations}
+              muted
+            />
+            <Row
+              label="− Variation TVA déductible (immobilisations, 445662)"
+              value={flux.variationTvaDeductibleImmobilisations}
               muted
             />
             <Row
