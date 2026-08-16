@@ -1193,6 +1193,140 @@ backend change to make the "have both, display either" design work.
   need the user's own browser or a future session with browser
   tooling.
 
+## Tableau des flux de trésorerie (cash flow statement)
+
+`src/modules/cash-flow/` (as of 2026-08-16) computes the tableau des flux
+de trésorerie, méthode indirecte, for a fiscal year —
+`POST /cash-flow/generate`. Backend only, deliberately, per the build
+instruction: no UI this pass. Not a CERFA form — there's no official
+line-numbered spec to quote here the way FEC/CA3/liasse have; the
+structure (résultat net → CAF → three flux sections) came directly from
+the build instruction, and every number is independently re-derivable
+from the ledger, not modeled on any external document.
+
+- **THE oracle, enforced exactly like Actif=Passif**: the sum of the
+  three flux sections' totals must equal the actual Δtrésorerie between
+  the opening and closing bilan (`assertCashFlowReconciles()` in
+  `cash-flow-statement.ts`, `ConflictException` naming both figures on
+  mismatch). `computeCashFlowStatement()` is a pure function, no I/O —
+  `CashFlowService.generate()` is the fetch/wiring layer, following the
+  same controller/module/`.forRoutes()` pattern as every other domain
+  module (see "Multi-tenant data model" above).
+- **CAF (capacité d'autofinancement)**: `résultat net + dotations
+  amortissements/provisions (GA+GB+GC+GD+GQ) + valeur comptable des
+  éléments cédés (G1+G3) − reprises (FP+GM) − produits des cessions
+  (F1+G2+HD)`. The cession codes reuse `CESSION_PRODUIT_CODES`/
+  `CESSION_CHARGE_CODES`, now exported from `liasse-articulation.ts`
+  (previously module-private, used only by the 2059-A tie-out) —
+  including that tie-out's own known imprecision (HD/HH also catch
+  non-cession exceptional items like amendes/dons). Not a new gap, the
+  same simplification this codebase already accepted for 2059-A.
+- **BFR movement (variation du besoin en fonds de roulement) uses GROSS
+  (brut) créances/stocks, never `BilanActifLigne.net`** — the standard
+  French tableau-de-financement convention, and load-bearing, not
+  cosmetic. CAF already reintegrates every same-year dépréciation
+  dotation/reprise on stocks and créances as a non-cash item via GC/FP.
+  Using the net (already-reduced-by-that-same-dotation) closing balance
+  in the BFR line would then only capture part of the true movement in
+  uncollected cash, silently pocketing the rest. **Found live, not by
+  inspection**: a first version used `.net` and left a residual,
+  non-reconciling gap of exactly 1 200,00 on the multi-year fixture,
+  matching to the centime a same-year dotation aux dépréciations
+  clients douteux (6817/491000) — `assertCashFlowReconciles` caught it
+  exactly as designed. Fixed by adding a `brutActif()` helper alongside
+  the existing `netActif()` and using it for the BX/stock BFR lines
+  specifically (CF/disponibilités and the passif lines are unaffected —
+  disponibilités and dettes have no dépréciation contra to net against).
+  A dedicated oracle test
+  (`cash-flow-statement.spec.ts`, "a same-year dotation aux
+  dépréciations clients does not distort Δcréances") reproduces this
+  exact scenario in isolation.
+- **BFR scope, deliberately narrow**: only BX (clients), the 5 stock
+  lines, and DX+DY (dettes fournisseurs/fiscales/sociales). BZ ("autres
+  créances") is excluded entirely — it commingles genuinely-operating
+  items (TVA déductible) with non-operating ones (462, créances sur
+  cessions) that `bilan-2050.ts`'s line mapping can't separate; folding
+  it into BFR would silently mix an investing-flow item into
+  exploitation.
+- **Investing cash actually paid/received nets against Δ404/405 (DZ, a
+  clean dedicated bilan line) and Δ462** (NOT clean — 462 is one of
+  several accounts folded into BZ, so it's supplied to
+  `computeCashFlowStatement()` as a raw account balance, not read off
+  the bilan) — an asset bought or sold partly on credit doesn't move
+  cash until the receivable/payable is settled.
+- **`distributions` is always `"0.00"`** — no affectation-du-résultat
+  mechanism exists anywhere in this app (à-nouveau carries the whole
+  prior result into 120/129 with no distribution/réserve split), so
+  there's nothing to read. A documented, permanent gap, not a guess.
+- **Opening bilan lines are identified by `ecritureDate ===
+  fiscalYear.startDate`, not by journal type.** `a-nouveau.service.ts`
+  always dates the opening écriture it generates at exactly
+  `target.startDate` — a genuine structural invariant of the real
+  feature. Two earlier approaches were tried and found wrong, both live
+  against the multi-year fixture, not by inspection:
+  1. Filtering by `journal.type === JournalType.A_NOUVEAU` found **zero**
+     lines — the fixture's own opening écriture was hand-built through
+     a generic "OD" (Opérations diverses) journal (this fixture company
+     has no `A_NOUVEAU`-type journal at all), silently producing an
+     all-zero opening bilan and a wildly inflated, meaningless
+     reconciliation gap (300 200,00 vs. the real 14 000,00).
+  2. Summing every validated ligne dated strictly before
+     `fiscalYear.startDate` (reasoning that balance-sheet accounts
+     never reset between fiscal years) also failed: this fixture's
+     FY2025 has no acquisition/capital écritures of its own at all
+     (only 3 stray dotation postings) — everything before FY2026
+     (terrain, bâtiment, machine, véhicule, capital) lives entirely
+     inside the single `AN-2026` écriture, which is dated exactly on
+     FY2026's own `startDate` and itself belongs to FY2026, not FY2025.
+     There was nothing "strictly before" to sum.
+  Matching on the exact `startDate` is therefore not a fallback
+  heuristic but the only signal this data actually offers, and it's
+  exactly the real feature's own dating invariant. **Known limitation**:
+  a genuine operational écriture dated exactly on the fiscal year's own
+  first day would also be swept into "opening" by this signal —
+  accepted since no sharper distinguishing signal exists anywhere in
+  the schema, and no such collision exists in any data this module has
+  been verified against. Accounts 120000/129000 are excluded from the
+  opening lines: `bilan-2050.ts` has no `PASSIF_RULE` for them (DI is
+  always constructed from HN, never read off the ledger — see "Liasse
+  fiscale / bilan & compte de résultat" above), so `classifyAccounts`
+  would throw "unmapped account" on the opening écriture's own 120/129
+  line. The opening bilan's own DI/résultat is never used by this
+  module (only specific asset/liability lines are), so dropping 120/129
+  loses nothing this needs.
+- **Deliberately does NOT reuse `LiasseService.generate()`/
+  `computeReelNormal()`** — that pipeline's immobilisations VNC tie-out
+  (`assertVncTiesToLedger`) throws for a fiscal year like the multi-year
+  fixture's own FY2025 (see two paragraphs up: its 2025-dated assets'
+  full gross value only ever lands in the ledger via the FY2026-dated
+  `AN-2026` opening écriture, so a *standalone* FY2025 liasse can't tie
+  out against `FixedAsset.acquisitionValue` the normal way). This module
+  builds its own trial-balance/bilan/compte-de-résultat calls directly
+  from `trial-balance-engine.ts`/`bilan-2050.ts`/
+  `compte-resultat-2052-2053.ts` instead, sidestepping that guard
+  entirely — never a reason to weaken the guard itself, which remains
+  correct and load-bearing for the liasse module's own use.
+- **Verified two ways.** Three hand-computed oracle tests in
+  `cash-flow-statement.spec.ts` (a full three-section scenario, a
+  cession-settled-on-credit case proving `variationCreancesSurCessions`
+  correctly zeroes out uncollected cession proceeds, and the
+  brut-vs-net dépréciation case above) — all against clean, literal
+  `Bilan2050`/`CompteResultat2052_2053` objects, independent of any real
+  fixture data. Separately, live against "Société Test Multi-Année"'s
+  FY2026 (`x-company-id: cmsm0x5cc0000o5j8z8a3rr53`, `fiscalYearId:
+  cmsm0xdlq0004o5j8ja1yc84k`): `POST /cash-flow/generate` returned 200
+  with `résultat -8 800,00`, `CAF 5 000,00`, `flux d'exploitation
+  0,00`, `flux d'investissement -86 000,00` (the Entrepot C acquisition
+  and cession, see "Immobilisations / cession" above), `flux de
+  financement 0,00`, reconciling exactly:
+  `variationTresorerie -86 000,00 = tresorerieCloture 14 000,00 −
+  tresorerieOuverture 100 000,00`.
+- **Not built**: any frontend/UI (explicitly out of scope this pass),
+  and FY2025's own cash flow statement was not attempted — it has no
+  prior fiscal year to diff against in this fixture (the company's
+  first year), a genuinely different "no opening bilan at all" case
+  this pass didn't need to exercise.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
@@ -1456,8 +1590,12 @@ A-1 §VIII uncross-checked).
    (judgment-heavy, no mechanical ledger source). 2059-A's
    court-terme/long-terme tax qualification is the same kind of open,
    non-blocking item.
-2. **Cash flow statement** — bilan and compte de résultat are already
-   covered by the liasse work above.
+2. **Cash flow statement backend is now built** (2026-08-16) — see
+   "Tableau des flux de trésorerie (cash flow statement)" above:
+   `POST /cash-flow/generate`, méthode indirecte, verified both by
+   hand-computed oracles and live against the multi-year fixture's
+   FY2026, reconciling exactly to the real Δtrésorerie. No UI yet —
+   that's the natural next step for this feature specifically.
 3. **Financial analysis** — ratios, free cash flow, and a DCF as an
    assumptions-driven model (explicit inputs the user can see and change,
    not a black-box number).

@@ -270,8 +270,8 @@ export function assertTableau2057TiesToBilan(input: {
  * d'éléments d'actif) routes to — see CLAUDE.md's "775/675 splits
  * across three different compte-de-résultat sections by sub-account".
  */
-const CESSION_PRODUIT_CODES = ['F1', 'G2', 'HD'];
-const CESSION_CHARGE_CODES = ['G1', 'G3', 'HH'];
+export const CESSION_PRODUIT_CODES = ['F1', 'G2', 'HD'];
+export const CESSION_CHARGE_CODES = ['G1', 'G3', 'HH'];
 
 /**
  * 2059-A's own tie-out: CADRE A + CADRE B (always 0,00 while the guard

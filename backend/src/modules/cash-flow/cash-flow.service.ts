@@ -1,0 +1,179 @@
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../common/prisma/prisma.service';
+import { CompanyContext } from '../../common/tenant/company-context';
+import { Money } from '../../common/decimal';
+import {
+  LiasseLigne,
+  TrialBalanceAccount,
+  buildTrialBalance,
+} from '../liasse/trial-balance-engine';
+import { computeBilan2050 } from '../liasse/bilan-2050';
+import { computeCompteResultat2052_2053 } from '../liasse/compte-resultat-2052-2053';
+import {
+  CashFlowStatement,
+  assertCashFlowReconciles,
+  computeCashFlowStatement,
+} from './cash-flow-statement';
+import { ComputeCashFlowDto } from './dto/compute-cash-flow.dto';
+
+const CREANCES_SUR_CESSIONS_ACCOUNT_PREFIX = '462';
+
+/**
+ * Tableau des flux de trésorerie, méthode indirecte — see
+ * cash-flow-statement.ts for the compute/reconciliation logic and its
+ * scope decisions. This service is the fetch layer: it does NOT reuse
+ * LiasseService.generate() (see CLAUDE.md "Tableau des flux de
+ * trésorerie" for why — the immobilisations VNC tie-out throws for a
+ * fiscal year, like the multi-year fixture's FY2025, whose asset gross
+ * values live entirely inside a LATER year's à-nouveau block).
+ */
+@Injectable()
+export class CashFlowService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async generate(company: CompanyContext, dto: ComputeCashFlowDto): Promise<CashFlowStatement> {
+    const companyRecord = await this.prisma.company.findFirst({ where: { id: company.companyId } });
+    if (!companyRecord) {
+      throw new NotFoundException(`Company ${company.companyId} not found`);
+    }
+
+    const fiscalYear = await this.prisma.fiscalYear.findFirst({
+      where: { id: dto.fiscalYearId, companyId: company.companyId },
+    });
+    if (!fiscalYear) {
+      throw new NotFoundException(`Fiscal year ${dto.fiscalYearId} not found`);
+    }
+
+    const draftCount = await this.prisma.ecriture.count({
+      where: { companyId: company.companyId, fiscalYearId: fiscalYear.id, validatedAt: null },
+    });
+    if (draftCount > 0) {
+      throw new ConflictException(
+        `Cannot generate the tableau des flux de trésorerie: ${draftCount} écriture(s) in this ` +
+          'fiscal year are still unvalidated (draft). Validate them first.',
+      );
+    }
+
+    const lignes = await this.prisma.ecritureLigne.findMany({
+      where: {
+        companyId: company.companyId,
+        ecriture: { fiscalYearId: fiscalYear.id, validatedAt: { not: null } },
+      },
+      include: { compte: true, ecriture: true },
+    });
+
+    const closingLignes: LiasseLigne[] = lignes.map((ligne) => ({
+      compteNumber: ligne.compte.number,
+      pcgClass: ligne.compte.pcgClass,
+      debit: ligne.debit,
+      credit: ligne.credit,
+    }));
+    const closingTrialBalance = buildTrialBalance(closingLignes);
+    const closingBilanAccounts = closingTrialBalance.filter(
+      (a) => a.pcgClass >= 1 && a.pcgClass <= 5,
+    );
+    const closingCdrAccounts = closingTrialBalance.filter(
+      (a) => a.pcgClass === 6 || a.pcgClass === 7,
+    );
+
+    const closingCompteResultat = computeCompteResultat2052_2053(closingCdrAccounts);
+    const closingBilan = computeBilan2050(
+      closingBilanAccounts,
+      Money.fromString(closingCompteResultat.beneficeOuPerte),
+    );
+
+    // Opening bilan lines are identified by ecritureDate === fiscalYear.startDate, not by journal
+    // type. a-nouveau.service.ts ALWAYS dates the opening écriture it generates at exactly
+    // `target.startDate` — a genuine structural invariant of the real feature, confirmed directly in
+    // that service, not a convention specific to any one dataset. This replaced an earlier version
+    // that filtered on `journal.type === 'A_NOUVEAU'` — a real bug found live: the multi-year
+    // fixture's own opening écriture was hand-built through a generic "OD" (Opérations diverses)
+    // journal (this fixture company has no JournalType.A_NOUVEAU journal at all), so the journal-type
+    // filter matched zero lines and silently produced an all-zero opening bilan, cascading into a
+    // 300200.00-vs-14000.00 reconciliation failure — caught by assertCashFlowReconciles exactly as
+    // designed. A second, sharper version of the same investigation ("sum every validated ligne dated
+    // strictly before fiscalYear.startDate", reasoning that balance-sheet accounts never reset) was
+    // tried and also found wrong, live: this fixture's FY2025 has no acquisition/capital écritures of
+    // its own at all (only 3 stray dotation postings) — everything before FY2026 (terrain, bâtiment,
+    // machine, véhicule, capital) lives entirely inside the single AN-2026 écriture, which is dated
+    // exactly on FY2026's own startDate and itself belongs to FY2026, not FY2025. There is nothing
+    // "strictly before" to sum. Matching on the exact startDate is therefore not a fallback heuristic
+    // but the only signal this data actually offers, and it matches the real feature's own invariant
+    // exactly. Known limitation: a genuine operational écriture dated exactly on the fiscal year's own
+    // first day would also be swept into "opening" by this signal — accepted since no sharper
+    // distinguishing signal exists, and no such collision exists in any data this module has been
+    // verified against. Accounts 120000/129000 are still excluded: bilan-2050.ts has no PASSIF_RULE
+    // for them (DI is always constructed from HN, never read off the ledger), so classifyAccounts
+    // would throw "unmapped account" on the opening écriture's own 120/129 line. The opening bilan's
+    // own DI/résultat is never used by this module (only specific asset/liability lines are), so
+    // dropping 120/129 loses nothing this needs.
+    const openingLignes: LiasseLigne[] = lignes
+      .filter(
+        (ligne) =>
+          ligne.ecriture.ecritureDate.getTime() === fiscalYear.startDate.getTime() &&
+          !ligne.compte.number.startsWith('120') &&
+          !ligne.compte.number.startsWith('129'),
+      )
+      .map((ligne) => ({
+        compteNumber: ligne.compte.number,
+        pcgClass: ligne.compte.pcgClass,
+        debit: ligne.debit,
+        credit: ligne.credit,
+      }));
+    const openingTrialBalance = buildTrialBalance(openingLignes);
+    const openingBilanAccounts = openingTrialBalance.filter(
+      (a) => a.pcgClass >= 1 && a.pcgClass <= 5,
+    );
+    const openingBilan = computeBilan2050(openingBilanAccounts, Money.zero());
+    // A fiscal year with no à-nouveau at all (e.g. a company's first) yields an all-zero opening
+    // bilan here — the correct "no prior year" case, not a guess.
+
+    const sumAccountBalance = (accounts: TrialBalanceAccount[], prefix: string): Money =>
+      accounts
+        .filter((a) => a.accountNumber.startsWith(prefix))
+        .reduce((sum, a) => sum.plus(a.balance), Money.zero());
+    const openingCreancesSurCessions = sumAccountBalance(
+      openingBilanAccounts,
+      CREANCES_SUR_CESSIONS_ACCOUNT_PREFIX,
+    );
+    const closingCreancesSurCessions = sumAccountBalance(
+      closingBilanAccounts,
+      CREANCES_SUR_CESSIONS_ACCOUNT_PREFIX,
+    );
+
+    const assetsAcquiredThisYear = await this.prisma.fixedAsset.findMany({
+      where: {
+        companyId: company.companyId,
+        acquisitionDate: { gte: fiscalYear.startDate, lte: fiscalYear.endDate },
+      },
+    });
+    const acquisitionsImmobilisations = assetsAcquiredThisYear.reduce(
+      (sum, asset) => sum.plus(Money.fromDecimal(asset.acquisitionValue)),
+      Money.zero(),
+    );
+
+    const assetsDisposedThisYear = await this.prisma.fixedAsset.findMany({
+      where: {
+        companyId: company.companyId,
+        cessionDate: { gte: fiscalYear.startDate, lte: fiscalYear.endDate },
+      },
+    });
+    const cessionsImmobilisations = assetsDisposedThisYear.reduce(
+      (sum, asset) => sum.plus(Money.fromDecimal(asset.cessionPrice!)),
+      Money.zero(),
+    );
+
+    const statement = computeCashFlowStatement({
+      openingBilan,
+      closingBilan,
+      closingCompteResultat,
+      acquisitionsImmobilisations,
+      cessionsImmobilisations,
+      openingCreancesSurCessions,
+      closingCreancesSurCessions,
+    });
+    assertCashFlowReconciles(statement);
+
+    return statement;
+  }
+}
