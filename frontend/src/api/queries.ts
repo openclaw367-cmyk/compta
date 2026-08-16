@@ -4,6 +4,7 @@ import type {
   Account,
   AccountLedgerResponse,
   Ca3Declaration,
+  CashFlowStatement,
   CessionResult,
   Company,
   DepreciationEntry,
@@ -165,6 +166,21 @@ export function useGenerateLiasseSecondary() {
   return useMutation({
     mutationFn: (params: { fiscalYearId: string }) =>
       api.post<LiasseAnyResult>('/liasse/generate-secondary', params),
+  });
+}
+
+/**
+ * Generates the tableau des flux de trésorerie (méthode indirecte) for a
+ * fiscal year — read-only, never writes to the ledger. See
+ * CashFlowService.generate on the backend: refuses (409) if any écriture
+ * in the fiscal year is still a draft, or if the three flux sections
+ * don't reconcile to the actual change in trésorerie — a successful
+ * response here is already reconciled, never a mismatch silently shown.
+ */
+export function useGenerateCashFlow() {
+  return useMutation({
+    mutationFn: (params: { fiscalYearId: string }) =>
+      api.post<CashFlowStatement>('/cash-flow/generate', params),
   });
 }
 

@@ -585,3 +585,56 @@ export interface LiasseSimplifieResult {
 
 /** Either regime's liasse — discriminate on `.regime`. Both /liasse/generate and /liasse/generate-secondary return this union. */
 export type LiasseAnyResult = LiasseResult | LiasseSimplifieResult;
+
+/**
+ * Flux d'exploitation — see cash-flow-statement.ts's CAF formula and the
+ * gross-vs-net (brut, not net) discipline on variationCreancesClients/
+ * variationStocks. total = capaciteAutofinancement − variationCreancesClients
+ * − variationStocks + variationDettesExploitation.
+ */
+export interface FluxExploitation {
+  resultatNet: string;
+  dotationsAmortissementsProvisions: string;
+  reprisesAmortissementsProvisions: string;
+  valeurComptableElementsCedes: string;
+  produitsDesCessions: string;
+  capaciteAutofinancement: string;
+  variationCreancesClients: string;
+  variationStocks: string;
+  variationDettesExploitation: string;
+  total: string;
+}
+
+/** Flux d'investissement — cash actually paid/received nets against Δ404/405 and Δ462, see cash-flow-statement.ts. */
+export interface FluxInvestissement {
+  acquisitionsImmobilisations: string;
+  variationDettesSurImmobilisations: string;
+  cessionsImmobilisations: string;
+  variationCreancesSurCessions: string;
+  total: string;
+}
+
+/** Flux de financement — distributions is always "0.00", see cash-flow-statement.ts's doc comment. */
+export interface FluxFinancement {
+  variationEmprunts: string;
+  variationCapital: string;
+  distributions: string;
+  total: string;
+}
+
+/**
+ * Response shape for POST /cash-flow/generate — tableau des flux de
+ * trésorerie, méthode indirecte. See cash-flow-statement.ts on the
+ * backend: variationTresorerie (the sum of the three sections' totals)
+ * must equal tresorerieCloture − tresorerieOuverture — the backend
+ * itself refuses (409) if it doesn't, so a successful response here is
+ * already a reconciled one, not just a computed one.
+ */
+export interface CashFlowStatement {
+  fluxExploitation: FluxExploitation;
+  fluxInvestissement: FluxInvestissement;
+  fluxFinancement: FluxFinancement;
+  variationTresorerie: string;
+  tresorerieOuverture: string;
+  tresorerieCloture: string;
+}

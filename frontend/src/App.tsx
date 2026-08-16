@@ -12,6 +12,7 @@ import { VatPage } from './pages/VatPage';
 import { ImmobilisationsPage } from './pages/ImmobilisationsPage';
 import { FixedAssetDetailPage } from './pages/FixedAssetDetailPage';
 import { LiassePage } from './pages/LiassePage';
+import { CashFlowPage } from './pages/CashFlowPage';
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="/immobilisations/:id" element={<FixedAssetDetailPage />} />
         <Route path="/tva" element={<VatPage />} />
         <Route path="/liasse" element={<LiassePage />} />
+        <Route path="/flux-tresorerie" element={<CashFlowPage />} />
       </Routes>
     </AppShell>
   );

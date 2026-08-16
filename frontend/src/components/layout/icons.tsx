@@ -119,3 +119,12 @@ export function IconUsers(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function IconFlow(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3 13.5c2 0 2-3 4-3s2 3 4 3 2-3 4-3 2-3 4-3" />
+      <path d="M12.5 4 16 3v3.5" />
+    </svg>
+  );
+}
