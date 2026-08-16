@@ -1541,6 +1541,117 @@ as its own inputs.
   denominators are genuinely zero — cost of debt, liquidité, DPO,
   rotation des stocks all showed "n/a" there, not a blank or a crash).
 
+## Détermination du résultat fiscal (2058-A/2058-B)
+
+`src/modules/resultat-fiscal/` (as of 2026-08-16) computes the
+comptable→fiscal reconciliation — `POST /resultat-fiscal/generate`.
+Full line spec, the three-bucket categorization with every notice
+citation, and the exact scope call on 2058-B are in
+`specs/resultat-fiscal-2058-implementation-spec.md` — this section
+records only the facts that must never be re-derived from memory.
+
+- **This module is categorically different from every other liasse
+  piece in this app, and that difference is load-bearing, not
+  incidental.** Every prior module (bilan, compte de résultat,
+  2054-2057/2059, cash-flow, financial-analysis) is a pure ledger
+  aggregation with a provable articulation invariant. The résultat
+  fiscal is a réintégrations/déductions reconciliation that is TAX
+  JUDGMENT — there is no oracle that proves a given résultat fiscal
+  correct, because correctness depends on which adjustments apply
+  under tax law, which no ledger read can determine.
+- **Three buckets, confirmed against `2032-NOT-SD` (the form's real
+  notice) and `CGI complet.pdf`, not inferred from the form alone**:
+  - **(a) Computed**: `WA`/`WS` (= `CompteResultat2052_2053.beneficeOuPerte`,
+    signed — the one real anchor tie-out) and `I7` (= the CDR's own
+    `HK` line, compte 695) — the latter confirmed by the notice
+    (*"le montant sera reporté ligne I7 du tableau n°2058 A-SD"*), not
+    inferable from the form alone.
+  - **(a) Computed but SUGGESTED, never auto-locked**: `WJ` (Σ compte
+    `6712`, "Pénalités, amendes fiscales et pénales" — a clean,
+    individually-addressable PCG account) and `WG` (Σ compte `63514`,
+    "Taxe sur les véhicules des sociétés", same). **Deliberately not
+    auto-populated and trusted**: a réintégration is a judgment about
+    what belongs, not a balance-sheet definition — a fine mis-posted
+    to `6788` instead of `6712` would silently understate the tax base
+    if computed and trusted blindly, and the "computed" label would
+    make a user trust it MORE. `ConfirmableLigne` always reports
+    `suggested` and `confirmed` as two separate fields; nothing merges
+    them — verified live (a `confirmed: "150.00"` override against a
+    `suggested: "0.00"` on the FR demo company correctly flowed
+    through to `resultatFiscal`, and separately a test proves a
+    suggestion never silently substitutes for its confirmation even
+    when they differ).
+  - **(c) User-declared**: everything else — a generic
+    `{ code, label, montant }` worksheet, réintégrations and
+    déductions each their own free-form list. Confirmed by the notice
+    as genuine tax judgment for the common SME set (`WD` avantages
+    personnels, `WF` dépenses somptuaires, `WI`/`WU`/2058-B cadre III
+    provisions non déductibles, `XX` ETNC, plus the long-tail —
+    régime mères-filles, zone exonérations, art. 39 decies A-G,
+    crédit-bail, art. 155/209 B — all confirmed niche/international/
+    date-expired and deferred, see the spec for the full list).
+  - **(b) Rule-based but blocked, deferred**: `WE` (art. 39-4 vehicle
+    amortissement ceiling — a real, quoted, parametrizable schedule,
+    blocked on `FixedAsset` having no CO2/WLTP fields) and `XZ` (art.
+    39-1-3°/212 bis charges financières — blocked on a related-party
+    interest-rate parameter and, per the notice, an entirely separate
+    form, `2464-SD`, not in `specs/`, for the 212 bis EBITDA-based
+    cap). Neither implemented; both documented with their exact
+    blocker in the spec.
+  - **`XE`(=`WD`+`WE`+`WF`+`WG`+`RA`) and `XW`(=`WI`+`WJ`+`XX`+`XZ`)
+    are real, notice-confirmed pure-sum columns** but are NOT modeled
+    as separate fields — a flat sum of the underlying lines produces
+    the identical `TOTAL I`. A CERFA print-layout grouping, deferred
+    to whenever a CERFA-shaped UI exists, same treatment as the
+    `WA`/`WS` positive/negative split (also collapsed into one signed
+    value here).
+- **2058-B, in this pass, means its cadre III (provisions non
+  déductibles) only — stated as a decision, not left as an implicit
+  consequence.** Cadre I (`K4`→`K6`→`YK` suivi des déficits) is a
+  genuine cross-fiscal-year chain the notice confirms explicitly
+  (*"K4: il s'agit du montant porté sur la ligne YK... déposé au titre
+  de l'exercice précédent"*) — this app has no persisted entity for
+  tax-deficit carry-forward, a parallel, TAX-only ledger distinct from
+  `DH` (the accounting report-à-nouveau `a-nouveau.service.ts` already
+  carries). **Deliberately not stubbed with a manual `K4` input** — a
+  number that looks complete but silently drifts the first time
+  someone forgets to hand-carry `YK` is worse than no cadre at all.
+  The stated prerequisite for a real cadre I (and therefore a full
+  2058-B) is a new persisted `DeficitFiscalReportable`-shaped entity,
+  almost certainly wired into fiscal-year close the way à-nouveau is
+  today. Not started. Cadre II (`ZT`, congés à payer, optional-regime
+  specific) deferred with the rest of the long-tail.
+- **The load-bearing design fact — record this so no future session
+  mistakes "arithmetic ties" for "fiscal result verified":** this
+  module guarantees its ARITHMETIC via `assertResultatFiscalArithmetic()`
+  (re-derives `totalReintegrations`/`totalDeductions`/`resultatFiscal`
+  from their own constituent lines, throws on drift — verified by test
+  to actually catch a corrupted total) — but it does NOT and CANNOT
+  guarantee tax completeness. Every constituent line except `WA`/`WS`
+  and `I7` either came from a ledger suggestion the caller could
+  confirm incorrectly, or was declared directly with zero independent
+  check on whether it belongs or whether some OTHER réintégration was
+  simply never declared. A worksheet can be arithmetically perfect and
+  still fiscally wrong by omission — this module has no way to detect
+  that BY DESIGN, since detecting it needs exactly the tax judgment
+  the (c) bucket establishes this app cannot supply. **This is a
+  categorically different "verified" than every other module's own
+  articulation invariant claims.** When UI is eventually built, this
+  must be surfaced prominently, not fine print — e.g. *"Ce tableau se
+  recoupe arithmétiquement — cela ne garantit pas que tous les
+  retraitements fiscaux applicables ont été déclarés."*
+- **Verified two ways.** Four hand-computed oracle tests in
+  `resultat-fiscal.spec.ts` (full worksheet with an override plus
+  declared lines; suggestion-never-substitutes; signed déficit not
+  flipped; arithmetic-drift throws). Live against both companies — FR
+  demo company (`resultatComptable "5405.00"` ties exactly; a
+  confirmed `WJ` override `0.00`→`150.00` plus declared `WD`
+  200.00/`XA` 75.00 correctly produced `resultatFiscal "5680.00"`) and
+  the multi-year fixture (`resultatComptable "-8800.00"` ties exactly,
+  signed, unchanged with no adjustments declared).
+- **Not built**: any frontend/UI (explicitly deferred, backend-only
+  this pass).
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
@@ -1800,10 +1911,15 @@ A-1 §VIII uncross-checked).
    réel simplifié — the same annexe build-out the 2050-series already
    went through, now that 2033-A/2033-B prove the engine supports it.
    2033-B's own résultat fiscal section (this regime's 2058-A analog)
-   and 2058-A/B for régime normal remain deliberately deferred
-   (judgment-heavy, no mechanical ledger source). 2059-A's
-   court-terme/long-terme tax qualification is the same kind of open,
-   non-blocking item.
+   remains deliberately deferred (judgment-heavy, no mechanical ledger
+   source). **2058-A/2058-B for régime normal is now built, backend
+   only** (2026-08-16) — see "Détermination du résultat fiscal
+   (2058-A/2058-B)" above: the computed anchor (`WA`/`WS`, `I7`), the
+   confirmable-suggestion lines (`WJ`/`WG`), and the generic declared
+   worksheet, verified live on both companies. 2058-B's cadre I
+   (déficits reportables) remains blocked on a new persistence entity
+   — not started. 2059-A's court-terme/long-terme tax qualification is
+   the same kind of open, non-blocking item.
 2. **Cash flow statement — backend and frontend both built** (2026-08-16)
    — see "Tableau des flux de trésorerie (cash flow statement)" above:
    `POST /cash-flow/generate`, méthode indirecte, verified by
