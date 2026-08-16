@@ -138,3 +138,13 @@ export function IconGauge(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function IconScale(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M10 3v13.5M6.5 16.5h7" />
+      <path d="M10 5.5 4 7l2.7 6.2a2.6 2.6 0 0 0 4.6 0L14 7Z" />
+      <path d="M4 7 2.5 7.3M14 7l1.5.3" />
+    </svg>
+  );
+}

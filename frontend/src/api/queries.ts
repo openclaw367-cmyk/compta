@@ -17,11 +17,13 @@ import type {
   ImportPreviewResponse,
   Journal,
   LiasseAnyResult,
+  ResultatFiscalResult,
   TrialBalanceResponse,
   VatRate,
 } from './types';
 import type {
   CessionFixedAssetDto,
+  ComputeResultatFiscalDto,
   CreateAccountDto,
   CreateEcritureDto,
   CreateFiscalYearDto,
@@ -196,6 +198,22 @@ export function useGenerateFinancialAnalysis() {
   return useMutation({
     mutationFn: (params: { fiscalYearId: string }) =>
       api.post<FinancialAnalysisResult>('/financial-analysis/generate', params),
+  });
+}
+
+/**
+ * Computes the détermination du résultat fiscal (2058-A/2058-B cadre III)
+ * for a fiscal year — read-only, never writes to the ledger. See
+ * ResultatFiscalService.generate on the backend: refuses (409) if any
+ * écriture in the fiscal year is still a draft. Unlike every other
+ * "generate" endpoint in this app, a successful response here proves the
+ * worksheet's own ARITHMETIC, never tax completeness — see
+ * ResultatFiscalPage's prominent banner.
+ */
+export function useGenerateResultatFiscal() {
+  return useMutation({
+    mutationFn: (dto: ComputeResultatFiscalDto) =>
+      api.post<ResultatFiscalResult>('/resultat-fiscal/generate', dto),
   });
 }
 

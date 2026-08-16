@@ -18,3 +18,7 @@ export type { CreateJournalDto } from '../../../backend/src/modules/journals/dto
 export type { CreateAccountDto } from '../../../backend/src/modules/accounts/dto/create-account.dto';
 export type { CreateFixedAssetDto } from '../../../backend/src/modules/depreciation/dto/create-fixed-asset.dto';
 export type { CessionFixedAssetDto } from '../../../backend/src/modules/depreciation/dto/cession-fixed-asset.dto';
+export type {
+  ComputeResultatFiscalDto,
+  DeclaredLineDto,
+} from '../../../backend/src/modules/resultat-fiscal/dto/compute-resultat-fiscal.dto';

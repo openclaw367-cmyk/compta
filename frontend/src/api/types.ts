@@ -742,3 +742,47 @@ export interface FinancialAnalysisResult {
   coutDeLaDette: CoutDeLaDette;
   ratios: Ratios;
 }
+
+/** A user-declared or computed réintégration/déduction line — see resultat-fiscal.ts on the backend. */
+export interface ResultatFiscalLigne {
+  code: string;
+  label: string;
+  montant: string;
+}
+
+/** A réintégration the ledger suggests but the caller must confirm — `suggested` never counts toward the total on its own, only `confirmed` does. */
+export interface ConfirmableLigne {
+  code: string;
+  label: string;
+  suggested: string;
+  confirmed: string;
+}
+
+/**
+ * Response shape for POST /resultat-fiscal/generate — détermination du
+ * résultat fiscal (2058-A/2058-B cadre III). Categorically different
+ * from every other liasse response type: this module guarantees its
+ * own ARITHMETIC (résultat fiscal = resultatComptable + Σréintégrations
+ * − Σdéductions, asserted server-side), never tax completeness — most
+ * réintégrations/déductions are supplied by the caller as tax judgment
+ * this app cannot derive. See resultat-fiscal.ts on the backend and
+ * CLAUDE.md "Détermination du résultat fiscal (2058-A/2058-B)".
+ */
+export interface ResultatFiscalResult {
+  /** = compte de résultat's own beneficeOuPerte, signed — négatif means déficit, never flipped. */
+  resultatComptable: string;
+  /** I7 — computed from compte 695 (HK), not declared. */
+  impotSurLesSocietes: ResultatFiscalLigne;
+  /** WJ (compte 6712), WG (compte 63514) — suggested from the ledger, confirmed by the caller. */
+  reintegrationsConfirmables: ConfirmableLigne[];
+  /** Every other réintégration, as declared (any 2058-A/2058-B code). */
+  reintegrationsDeclarees: ResultatFiscalLigne[];
+  /** WR — I7 + Σ confirmed réintégrations + Σ declared réintégrations. */
+  totalReintegrations: string;
+  /** Every déduction, as declared — includes 2058-B cadre III's WU when the caller declares it. */
+  deductionsDeclarees: ResultatFiscalLigne[];
+  /** XH — Σ declared déductions. */
+  totalDeductions: string;
+  /** XN/XO — resultatComptable + totalReintegrations − totalDeductions, signed. */
+  resultatFiscal: string;
+}

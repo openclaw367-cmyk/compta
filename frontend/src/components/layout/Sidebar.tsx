@@ -13,6 +13,7 @@ import {
   IconLedger,
   IconList,
   IconPercent,
+  IconScale,
   IconUpload,
   IconUsers,
 } from './icons';
@@ -38,6 +39,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/liasse', label: 'Liasse fiscale', Icon: IconDocument },
   { to: '/flux-tresorerie', label: 'Flux de trésorerie', Icon: IconFlow },
   { to: '/analyse-financiere', label: 'Analyse financière', Icon: IconGauge },
+  { to: '/resultat-fiscal', label: 'Résultat fiscal', Icon: IconScale },
 ];
 
 export function Sidebar() {

@@ -1649,8 +1649,60 @@ records only the facts that must never be re-derived from memory.
   200.00/`XA` 75.00 correctly produced `resultatFiscal "5680.00"`) and
   the multi-year fixture (`resultatComptable "-8800.00"` ties exactly,
   signed, unchanged with no adjustments declared).
-- **Not built**: any frontend/UI (explicitly deferred, backend-only
-  this pass).
+- **Frontend built (2026-08-16, a later pass): `ResultatFiscalPage`**,
+  mirroring the shell every other liasse-style screen uses (fiscal-year
+  `<select>`, the client-side drafts-block guard, "Générer") but with
+  its own requirements this module's uniqueness demands. **The honesty
+  banner is the single most prominent element on the page** — a
+  bordered, amber-toned card (not the green "reconciled" styling every
+  other module's success state uses, since this is explicitly not a
+  correctness claim) placed immediately above the worksheet, stating
+  plainly that the tableau reconciles arithmetically but cannot verify
+  tax completeness — the same wording as the load-bearing design fact
+  above. The three line kinds are visually distinct: a neutral
+  "Calculé" badge for `WA`/`WS`/`I7` (non-interactive, source caption
+  shown, never editable); an amber "À confirmer"/green "Confirmé"
+  badge pair for `WJ`/`WG`, with the ledger-found suggestion always
+  shown alongside an editable amount and a Confirmer/Modifier toggle —
+  while unconfirmed, a line reads "Pas encore inclus dans le total"
+  next to the input, since an unconfirmed suggestion contributes
+  `"0.00"` to the request exactly as the backend already does when the
+  confirmed field is omitted (the frontend sends `"0.00"` explicitly
+  rather than omitting the field, so "unconfirmed" is never
+  ambiguous with "caller didn't say"); and an editable declared-line
+  worksheet (curated `<select>` of common 2058-A/B codes plus "Autre…"
+  free text, editable label/montant, add/remove) for both
+  réintégrations and déductions, with a caption pointing `WI`/`WU` at
+  the 2058-B cadre III worksheet rather than a separate UI section.
+  2058-B's cadre I (déficits reportables) is a plain note, not a faked
+  empty table: *"non disponible dans cette version — ce cadre
+  nécessite le report du déficit d'un exercice sur l'autre... pas
+  encore implémenté."* **Every edit — a confirm toggle, a declared
+  line add/remove/edit — re-POSTs the full current state to
+  `/resultat-fiscal/generate` and displays the server's own response**;
+  there is no client-side reimplementation of the arithmetic
+  `assertResultatFiscalArithmetic()` already guarantees server-side,
+  so the displayed total can never drift from what the backend
+  verified. `resultatComptable`/`resultatFiscal` are rendered directly
+  from the (already-signed) API string — a déficit shows with a real
+  minus sign and its own "Déficit (XO)"/"Perte comptable (WS)" label,
+  never flipped to a positive "loss" figure. Read-only throughout: the
+  page never calls any ledger-write endpoint. **Verified live against
+  both companies, reproducing the exact backend-verified numbers**: FR
+  demo company showed `resultatComptable` = 5 405,00 €, then a
+  confirmed `WJ` override to 150,00 € plus declared `WD` 200,00 /
+  `XA` 75,00 produced `resultatFiscal` = 5 680,00 € live in the
+  browser; the multi-year fixture showed both `resultatComptable` and
+  `resultatFiscal` as −8 800,00 €, signed, with the "Perte comptable"/
+  "Déficit reportable en avant" labels rendering correctly. The
+  `x-company-id` override in `client.ts` used for the fixture check was
+  reverted immediately after (confirmed via `git diff` showing no
+  residual change). **One thing not visually confirmed**: exact pixel-
+  level layout/spacing and the screenshot tool's own capture width
+  didn't match the reported viewport during this session's check
+  (content itself, read via the accessibility tree, was correct at
+  every step) — a full visual pass in an ordinary browser window is
+  still worth a human glance.
 
 ## Known scope boundaries
 
@@ -1913,10 +1965,13 @@ A-1 §VIII uncross-checked).
    2033-B's own résultat fiscal section (this regime's 2058-A analog)
    remains deliberately deferred (judgment-heavy, no mechanical ledger
    source). **2058-A/2058-B for régime normal is now built, backend
-   only** (2026-08-16) — see "Détermination du résultat fiscal
-   (2058-A/2058-B)" above: the computed anchor (`WA`/`WS`, `I7`), the
+   AND frontend** (2026-08-16, frontend added in a later pass the same
+   day) — see "Détermination du résultat fiscal (2058-A/2058-B)"
+   above: the computed anchor (`WA`/`WS`, `I7`), the
    confirmable-suggestion lines (`WJ`/`WG`), and the generic declared
-   worksheet, verified live on both companies. 2058-B's cadre I
+   worksheet, verified live on both companies, now rendered by
+   `ResultatFiscalPage` with the required prominent honesty banner and
+   the three visually-distinct line kinds. 2058-B's cadre I
    (déficits reportables) remains blocked on a new persistence entity
    — not started. 2059-A's court-terme/long-terme tax qualification is
    the same kind of open, non-blocking item.
