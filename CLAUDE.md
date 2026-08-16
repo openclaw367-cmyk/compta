@@ -1241,19 +1241,43 @@ from the ledger, not modeled on any external document.
   (`cash-flow-statement.spec.ts`, "a same-year dotation aux
   dépréciations clients does not distort Δcréances") reproduces this
   exact scenario in isolation.
-- **BFR scope, deliberately narrow**: only BX (clients), the 5 stock
-  lines, and DX+DY (dettes fournisseurs/fiscales/sociales). BZ ("autres
-  créances") is excluded entirely — it commingles genuinely-operating
-  items (TVA déductible) with non-operating ones (462, créances sur
-  cessions) that `bilan-2050.ts`'s line mapping can't separate; folding
-  it into BFR would silently mix an investing-flow item into
-  exploitation.
+- **BFR scope**: BX (clients), the 5 stock lines, DX+DY (dettes
+  fournisseurs/fiscales/sociales), and now **445660** (TVA déductible sur
+  autres biens et services). BZ ("autres créances") as a WHOLE stays
+  excluded — 425/441/442/443/465 genuinely commingle inside it with no
+  per-account separation `bilan-2050.ts`'s line mapping can offer.
+  445660/445662 are different: they're already individually-named
+  constants there (`DEDUCTIBLE_AUTRES_ACCOUNT`/
+  `DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT`, reused from the VAT/CA3 module),
+  so they're carved out of BZ the same way 462 already is, not lumped
+  with the genuinely-opaque remainder. See the classification-gap bullet
+  below for why this matters and how it was found.
 - **Investing cash actually paid/received nets against Δ404/405 (DZ, a
-  clean dedicated bilan line) and Δ462** (NOT clean — 462 is one of
-  several accounts folded into BZ, so it's supplied to
-  `computeCashFlowStatement()` as a raw account balance, not read off
-  the bilan) — an asset bought or sold partly on credit doesn't move
-  cash until the receivable/payable is settled.
+  clean dedicated bilan line), Δ462, and now Δ445662** (TVA déductible
+  sur immobilisations — the last two NOT clean, both folded into BZ, so
+  both are supplied to `computeCashFlowStatement()` as raw account
+  balances, not read off the bilan) — an asset bought or sold partly on
+  credit doesn't move cash until the receivable/payable is settled, and
+  445662 is added to the acquisitions cost (HT → TTC) before netting
+  against ΔDZ (also TTC), rather than left HT — otherwise a
+  credit-financed acquisition with VAT leaves a phantom HT-vs-TTC gap
+  even when zero cash actually moved.
+- **A third real bug, found live on the FR demo company (2026-08-16),
+  after the reconciliation guard correctly refused to show an
+  unreconciled statement**: excluding ALL of BZ (the original scope
+  above) left a 500,00 gap, traced to four purchases' TVA déductible —
+  three "autres biens" purchases (200+150+60=410 on 445660) and one
+  immobilisation purchase (90 on 445662) — entirely invisible to every
+  flux section. Putting all 500 in exploitation would have reconciled
+  the total too, but would have misclassified the 90
+  immobilisations-VAT as operating instead of investing — **the
+  reconciliation invariant alone can only catch a wrong TOTAL, never a
+  wrong SECTION**, so the fix had to be reasoned through, not just
+  tuned until the number tied. Fixed by splitting 445660 into
+  exploitation and 445662 into investissement, per the two bullets
+  above. A dedicated oracle test (`cash-flow-statement.spec.ts`,
+  "445660/445662 (TVA déductible) split correctly between exploitation
+  and investissement") reproduces this exact scenario in isolation.
 - **`distributions` is always `"0.00"`** — no affectation-du-résultat
   mechanism exists anywhere in this app (à-nouveau carries the whole
   prior result into 120/129 with no distribution/réserve split), so
@@ -1306,26 +1330,40 @@ from the ledger, not modeled on any external document.
   `compte-resultat-2052-2053.ts` instead, sidestepping that guard
   entirely — never a reason to weaken the guard itself, which remains
   correct and load-bearing for the liasse module's own use.
-- **Verified two ways.** Three hand-computed oracle tests in
-  `cash-flow-statement.spec.ts` (a full three-section scenario, a
-  cession-settled-on-credit case proving `variationCreancesSurCessions`
-  correctly zeroes out uncollected cession proceeds, and the
-  brut-vs-net dépréciation case above) — all against clean, literal
-  `Bilan2050`/`CompteResultat2052_2053` objects, independent of any real
-  fixture data. Separately, live against "Société Test Multi-Année"'s
-  FY2026 (`x-company-id: cmsm0x5cc0000o5j8z8a3rr53`, `fiscalYearId:
-  cmsm0xdlq0004o5j8ja1yc84k`): `POST /cash-flow/generate` returned 200
-  with `résultat -8 800,00`, `CAF 5 000,00`, `flux d'exploitation
-  0,00`, `flux d'investissement -86 000,00` (the Entrepot C acquisition
-  and cession, see "Immobilisations / cession" above), `flux de
-  financement 0,00`, reconciling exactly:
-  `variationTresorerie -86 000,00 = tresorerieCloture 14 000,00 −
-  tresorerieOuverture 100 000,00`.
-- **Not built**: any frontend/UI (explicitly out of scope this pass),
-  and FY2025's own cash flow statement was not attempted — it has no
-  prior fiscal year to diff against in this fixture (the company's
-  first year), a genuinely different "no opening bilan at all" case
-  this pass didn't need to exercise.
+- **Verified two ways, on TWO companies.** Four hand-computed oracle
+  tests in `cash-flow-statement.spec.ts` (a full three-section scenario,
+  a cession-settled-on-credit case proving `variationCreancesSurCessions`
+  correctly zeroes out uncollected cession proceeds, the brut-vs-net
+  dépréciation case, and the 445660/445662 split case) — all against
+  clean, literal `Bilan2050`/`CompteResultat2052_2053` objects,
+  independent of any real fixture data. Separately, live against BOTH
+  "Société Test Multi-Année"'s FY2026 (`x-company-id:
+  cmsm0x5cc0000o5j8z8a3rr53`, `fiscalYearId: cmsm0xdlq0004o5j8ja1yc84k`)
+  — `résultat -8 800,00`, `CAF 5 000,00`, `flux d'exploitation 0,00`,
+  `flux d'investissement -86 000,00` (the Entrepot C acquisition and
+  cession, see "Immobilisations / cession" above), `flux de financement
+  0,00`, reconciling to `-86 000,00 = 14 000,00 − 100 000,00` — AND the
+  FR demo company's own FY2026 (`x-company-id:
+  cmrgmp9di0000o5p89u5ru7r8`, `fiscalYearId: cmrgmp9dr0002o5p8fhuk06x6`)
+  — `CAF 5 405,00`, `flux d'exploitation 2 355,00`, `flux
+  d'investissement 6 000,00`, `flux de financement 9 000,00`,
+  reconciling to `17 355,00 = 32 355,00 − 15 000,00`. Re-ran the
+  multi-year fixture AFTER the 445660/445662 fix to confirm its own
+  figures stayed byte-for-byte unchanged (it has no TVA-tagged purchases,
+  so both new lines are `0,00` there) — a real regression check, not an
+  assumption.
+- **Frontend built** (2026-08-16, same day) — `CashFlowPage` (route
+  `/flux-tresorerie`, nav item "Flux de trésorerie"), following the
+  `LiassePage`/`VatPage` conventions: fiscal-year picker with the same
+  draft-block guard, a reconciliation banner mirroring `BalanceBanner`'s
+  Actif=Passif styling, and the three flux sections as tables including
+  the 445660/445662 lines. Verified live in the browser against both the
+  multi-year fixture and the FR demo company, matching the backend
+  figures above exactly.
+- **Not attempted**: FY2025's own cash flow statement on the multi-year
+  fixture — it has no prior fiscal year to diff against (the company's
+  first year), a genuinely different "no opening bilan at all" case this
+  work didn't need to exercise.
 
 ## Known scope boundaries
 
@@ -1590,12 +1628,15 @@ A-1 §VIII uncross-checked).
    (judgment-heavy, no mechanical ledger source). 2059-A's
    court-terme/long-terme tax qualification is the same kind of open,
    non-blocking item.
-2. **Cash flow statement backend is now built** (2026-08-16) — see
-   "Tableau des flux de trésorerie (cash flow statement)" above:
-   `POST /cash-flow/generate`, méthode indirecte, verified both by
-   hand-computed oracles and live against the multi-year fixture's
-   FY2026, reconciling exactly to the real Δtrésorerie. No UI yet —
-   that's the natural next step for this feature specifically.
+2. **Cash flow statement — backend and frontend both built** (2026-08-16)
+   — see "Tableau des flux de trésorerie (cash flow statement)" above:
+   `POST /cash-flow/generate`, méthode indirecte, verified by
+   hand-computed oracles and live against both the multi-year fixture and
+   the FR demo company, reconciling exactly to the real Δtrésorerie on
+   both. Includes a real classification fix found live on the FR demo
+   company (445660/445662 carved out of BZ) after the reconciliation
+   guard correctly refused an unreconciled statement. `CashFlowPage`
+   (route `/flux-tresorerie`) is live and verified in the browser.
 3. **Financial analysis** — ratios, free cash flow, and a DCF as an
    assumptions-driven model (explicit inputs the user can see and change,
    not a black-box number).
