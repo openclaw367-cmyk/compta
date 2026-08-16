@@ -10,6 +10,7 @@ import type {
   DepreciationEntry,
   Ecriture,
   EcritureWriteResult,
+  FinancialAnalysisResult,
   FiscalYear,
   FixedAsset,
   ImportBatch,
@@ -181,6 +182,20 @@ export function useGenerateCashFlow() {
   return useMutation({
     mutationFn: (params: { fiscalYearId: string }) =>
       api.post<CashFlowStatement>('/cash-flow/generate', params),
+  });
+}
+
+/**
+ * Computes the retraitement analytique (SIG, BFR/FR/trésorerie, ratios) for
+ * a fiscal year — read-only, never writes to the ledger. See
+ * FinancialAnalysisService.generate on the backend: refuses (409) if any
+ * écriture in the fiscal year is still a draft, or if BFR/trésorerie nette
+ * fail to reconcile — a successful response here is already reconciled.
+ */
+export function useGenerateFinancialAnalysis() {
+  return useMutation({
+    mutationFn: (params: { fiscalYearId: string }) =>
+      api.post<FinancialAnalysisResult>('/financial-analysis/generate', params),
   });
 }
 

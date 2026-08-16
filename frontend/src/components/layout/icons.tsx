@@ -128,3 +128,13 @@ export function IconFlow(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function IconGauge(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3.5 15.5a6.5 6.5 0 1 1 13 0" />
+      <path d="M10 15.5 13 9" />
+      <path d="M10 15.5h.01" />
+    </svg>
+  );
+}

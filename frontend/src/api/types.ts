@@ -642,3 +642,103 @@ export interface CashFlowStatement {
   tresorerieOuverture: string;
   tresorerieCloture: string;
 }
+
+/** Soldes intermédiaires de gestion — see financial-analysis.ts's computeSigCascade on the backend. */
+export interface SigCascade {
+  margeCommerciale: string;
+  productionDeLExercice: string;
+  consommationsEnProvenanceDesTiers: string;
+  valeurAjoutee: string;
+  ebe: string;
+  resultatExploitation: string;
+  resultatFinancier: string;
+  resultatCourantAvantImpots: string;
+  resultatExceptionnel: string;
+  resultatNet: string;
+}
+
+/** Percentages as plain decimal strings ("40.00" = 40.00%) — null ("n/a") when the denominator (CA) is exactly zero. */
+export interface Margins {
+  chiffreDAffaires: string;
+  margeBrute: string | null;
+  margeEbe: string | null;
+  margeExploitation: string | null;
+  margeNette: string | null;
+}
+
+/** A snapshot at fiscal-year end, not a delta — see financial-analysis.ts's doc comment for the exploitation/hors-exploitation scope. */
+export interface BfrSnapshot {
+  bfrExploitation: string;
+  bfrHorsExploitation: string;
+  bfrTotal: string;
+}
+
+export interface FondsDeRoulement {
+  ressourcesStables: string;
+  emploisStables: string;
+  fondsDeRoulement: string;
+}
+
+/** parFrMoinsBfr = FR − BFR + provisionsSurActifCirculant, asserted equal to disponibilites — see financial-analysis.ts's doc comment for why the third term is needed. */
+export interface TresorerieNette {
+  parFrMoinsBfr: string;
+  provisionsSurActifCirculant: string;
+  disponibilites: string;
+}
+
+export interface FreeCashFlow {
+  fluxExploitation: string;
+  cashPaidForAcquisitions: string;
+  freeCashFlow: string;
+}
+
+/** bookEnterpriseValue is book-based (equity + net debt) — explicitly NOT a valuation. */
+export interface EndettementEtCapitaux {
+  dettesFinancieres: string;
+  tresorerieEtEquivalents: string;
+  endettementNet: string;
+  capitauxPropres: string;
+  bookEnterpriseValue: string;
+}
+
+/** taux is a percentage string, null ("n/a") when dettesFinancieres is exactly 0.00. */
+export interface CoutDeLaDette {
+  chargesDInteret: string;
+  dettesFinancieres: string;
+  taux: string | null;
+}
+
+/** Ratios are ratio/percentage/day-count strings, each null ("n/a") when its own denominator is exactly zero — never a divide-by-zero. */
+export interface Ratios {
+  liquiditeGenerale: string | null;
+  liquiditeReduite: string | null;
+  gearing: string | null;
+  autonomieFinanciere: string | null;
+  roe: string | null;
+  roa: string | null;
+  roce: string | null;
+  rentabiliteExploitation: string | null;
+  dsoClients: string | null;
+  dpoFournisseurs: string | null;
+  rotationStocks: string | null;
+}
+
+/**
+ * Response shape for POST /financial-analysis/generate — retraitement
+ * analytique. Fully deterministic, see financial-analysis.ts on the
+ * backend: BFR here is tied to the tableau de flux's own ΔBFR by
+ * construction, and trésorerie nette is asserted to reconcile — the
+ * backend itself refuses (409) if either tie-out fails, so a successful
+ * response here is already reconciled, not just computed.
+ */
+export interface FinancialAnalysisResult {
+  sig: SigCascade;
+  margins: Margins;
+  bfr: BfrSnapshot;
+  fondsDeRoulement: FondsDeRoulement;
+  tresorerieNette: TresorerieNette;
+  freeCashFlow: FreeCashFlow;
+  endettementEtCapitaux: EndettementEtCapitaux;
+  coutDeLaDette: CoutDeLaDette;
+  ratios: Ratios;
+}

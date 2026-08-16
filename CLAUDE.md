@@ -1514,8 +1514,32 @@ as its own inputs.
   hand-built oracle hadn't hit yet, same lesson as the cash-flow
   module's own 445660/445662 discovery), the FR demo company confirmed
   the fix doesn't disturb an already-correct case.
-- **Frontend**: not built as of this section's writing — see "Current
-  state & roadmap" below for status.
+- **Frontend built** (2026-08-16, same day) — `FinancialAnalysisPage`
+  (route `/analyse-financiere`, nav item "Analyse financière"),
+  following the `CashFlowPage`/`LiassePage` conventions: fiscal-year
+  picker with the same draft-block guard, sections for the SIG cascade,
+  margins, BFR/FR, a trésorerie-nette reconciliation banner (mirroring
+  `CashFlowPage`'s), free cash flow, endettement/capitaux/book EV, cost
+  of debt, and the four ratio groups. Two things built deliberately for
+  this module specifically, not carried over from the other pages:
+  **every row shows its derivation as a caption** (the exact bilan/CDR
+  line codes it sums — e.g. "Marge commerciale — Ventes de marchandises
+  (FC) − Achats de marchandises (FS) − Variation de stocks (FT)"), so
+  the SIG cascade reads as a visible chain, not a flat list of numbers;
+  and **negative/unusual figures are flagged honestly, never blanked**
+  — a negative `endettementNet` is labeled "position de trésorerie
+  nette" inline, a negative book EV gets its own "(négatif — voir
+  note)" label plus an explanatory banner, and a negative ROCE (which
+  happens when book EV, its own denominator, goes negative) gets the
+  same treatment. Verified live in the browser against BOTH companies:
+  the FR demo company (confirming the negative-value handling — book EV
+  −2 950,00, ROCE −183,22 %, endettement net −23 355,00, all rendered
+  with their notes, none hidden) and the multi-year fixture (confirming
+  the reconciled trésorerie banner shows 14 000,00 € with the
+  provisionsSurActifCirculant term (1 200,00) displayed as its own
+  line, and the `null` ("n/a") ratio guards render correctly where
+  denominators are genuinely zero — cost of debt, liquidité, DPO,
+  rotation des stocks all showed "n/a" there, not a blank or a crash).
 
 ## Known scope boundaries
 
@@ -1789,17 +1813,19 @@ A-1 §VIII uncross-checked).
    company (445660/445662 carved out of BZ) after the reconciliation
    guard correctly refused an unreconciled statement. `CashFlowPage`
    (route `/flux-tresorerie`) is live and verified in the browser.
-3. **Financial analysis backend is now built** (2026-08-16) — see
-   "Analyse financière — retraitement analytique" above:
+3. **Financial analysis — backend and frontend both built** (2026-08-16)
+   — see "Analyse financière — retraitement analytique" above:
    `POST /financial-analysis/generate`, the deterministic
    retraitement-analytique layer (SIG cascade, BFR/FR/trésorerie nette,
    FCF, endettement net, capitaux propres, book EV, cost of debt,
    ratios), verified by hand-computed oracles and live against both the
-   multi-year fixture and the FR demo company. A future **Valuation**
-   module (WACC, cost of equity, DCF, revenue/EBITDA multiples,
-   comparables, market-derived EV) is deferred and will consume this
-   module's deterministic outputs as its own inputs — not started.
-   No UI yet for financial-analysis specifically — natural next step.
+   multi-year fixture and the FR demo company. `FinancialAnalysisPage`
+   (route `/analyse-financiere`) is live and verified in the browser on
+   both companies, including the negative-value/net-cash edge cases. A
+   future **Valuation** module (WACC, cost of equity, DCF, revenue/
+   EBITDA multiples, comparables, market-derived EV) is deferred and
+   will consume this module's deterministic outputs as its own inputs
+   — not started.
 4. **AI chatbot** — last, after the above give it something real to sit
    on top of. Propose-don't-post: the LLM drafts, it never posts
    directly. It writes through the same validation layer the UI uses

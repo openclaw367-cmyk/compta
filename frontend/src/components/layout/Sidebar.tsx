@@ -8,6 +8,7 @@ import {
   IconDocument,
   IconDownload,
   IconFlow,
+  IconGauge,
   IconGrid,
   IconLedger,
   IconList,
@@ -36,6 +37,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/tva', label: 'TVA', Icon: IconPercent },
   { to: '/liasse', label: 'Liasse fiscale', Icon: IconDocument },
   { to: '/flux-tresorerie', label: 'Flux de trésorerie', Icon: IconFlow },
+  { to: '/analyse-financiere', label: 'Analyse financière', Icon: IconGauge },
 ];
 
 export function Sidebar() {
