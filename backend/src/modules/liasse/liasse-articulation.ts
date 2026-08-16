@@ -29,7 +29,7 @@ import { PROVISION_ACCOUNT_CLASS_PREFIXES } from './provision-categories';
  * that subtotal directly (only the grand Actif total, which also
  * includes non-immobilisation lines).
  */
-const IMMOBILISATION_BILAN_CODES = [
+export const IMMOBILISATION_BILAN_CODES = [
   'AB',
   'CX',
   'AF',

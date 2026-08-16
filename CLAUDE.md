@@ -1365,6 +1365,158 @@ from the ledger, not modeled on any external document.
   first year), a genuinely different "no opening bilan at all" case this
   work didn't need to exercise.
 
+## Analyse financière — retraitement analytique
+
+`src/modules/financial-analysis/` (as of 2026-08-16) computes the
+retraitement analytique — the analyst's/investor's economic
+re-presentation of the compliance bilan/compte de résultat/tableau de
+flux already built. `POST /financial-analysis/generate`. Fully
+deterministic by design: every figure is a ledger-derived sum or a
+ratio of two ledger-derived sums — no WACC, discount rate, revenue
+multiple, or market price anywhere. Assumption-driven valuation (DCF,
+comparables, market EV) is explicitly deferred to a future "Valuation"
+module that will CONSUME this module's deterministic outputs (EBE/
+EBITDA, FCF, endettement net, capitaux propres, book EV, cost of debt)
+as its own inputs.
+
+- **One shared fetch, guaranteeing consistency by construction.**
+  `CashFlowService.buildContext()` (refactored out of that module's own
+  `generate()`, which now just calls `buildContext()` then computes and
+  asserts) is reused directly by `FinancialAnalysisService` — the SAME
+  bilans, SAME raw 462/445660/445662 balances, feeding BOTH the tableau
+  de flux and the retraitement analytique. This is what makes the BFR
+  tie-out below a real guarantee, not two hand-synced formulas that
+  happen to agree.
+- **SIG cascade** (soldes intermédiaires de gestion): marge
+  commerciale → production de l'exercice → valeur ajoutée → EBE →
+  résultat d'exploitation → résultat courant avant impôts → résultat
+  exceptionnel → résultat net, each solde built purely from
+  `compte-resultat-2052-2053.ts`'s own CDR_RULES line codes.
+  `resultatExploitation` is independently reconstructed from the
+  cascade's own building blocks and asserted equal to the CDR's own
+  `resultatExploitation` (algebraically guaranteed by construction —
+  the cascade's codes partition exactly into
+  totalProduitsExploitation/totalChargesExploitation — but asserted
+  anyway so a future edit that drops or mistypes a code is caught
+  immediately).
+- **BFR exploitation uses the EXACT SAME accounts, EXACT SAME
+  gross-receivables convention, as cash-flow-statement.ts's own
+  embedded ΔBFR** (BX brut + stocks brut + 445660 − DX − DY) — a
+  snapshot here vs. a delta there, but `assertBfrExploitationTiesToCashFlow`
+  asserts Δ(this module's BFR exploitation snapshot) equals that
+  module's own variationCreancesClients+variationStocks+
+  variationTvaDeductibleAutres−variationDettesExploitation, a real
+  tie-out, same discipline as `assertVncTiesToLedger`.
+- **BFR hors exploitation** = créances hors exploitation (462+445662,
+  the same two raw accounts cash-flow-statement.ts already carves out
+  of BZ) minus dettes hors exploitation (DZ+EA). BZ's genuinely-opaque
+  remainder (425/441/442/443/465) stays excluded from BOTH BFR
+  buckets, same "flag, don't fake" discipline as cash-flow-statement.ts's
+  own BZ exclusion — as are DW/EB/CH/BV (avances/acomptes, charges/
+  produits constatés d'avance), so `bfrExploitation+bfrHorsExploitation`
+  is deliberately NOT the same thing as "actif circulant net − passif
+  circulant net."
+- **FR (fonds de roulement)** = ressources stables (capitaux propres —
+  INCLUDING DK, since provisions réglementées sit inside "Capitaux
+  propres" on the real CERFA 2051 form, matching `LiassePage.tsx`'s own
+  PASSIF_SECTIONS grouping — plus DP/DQ, plus DS/DT/DU/DV) minus
+  emplois stables (immobilisations nettes,
+  `IMMOBILISATION_BILAN_CODES`, now exported from
+  `liasse-articulation.ts` for this reuse). Carries forward the
+  pre-existing, already-flagged DU commingling (genuine long-term bank
+  debt mixed with 519/overdraft — see "Liasse fiscale / 2057" above) as
+  a known limitation, not a new one.
+- **Trésorerie nette = FR − BFR + provisionsSurActifCirculant — the
+  third term found live, not by inspection.** A first version (FR −
+  BFR alone) left a residual, non-reconciling 1 200,00 gap on the
+  multi-year fixture, matching to the centime the same dotation aux
+  dépréciations clients douteux (491000/6817) already surfaced once
+  this session by cash-flow-statement.ts's own brut-vs-net bug. Root
+  cause: a genuine BASIS MISMATCH, not a bug — BFR exploitation is
+  deliberately gross (to match cash-flow-statement.ts), but FR's
+  capitaux propres is net (résultat already absorbed the dépréciation
+  charge via the P&L). The textbook FR−BFR=Trésorerie identity only
+  holds when both sides share a basis; `provisionsSurActifCirculant`
+  (BX's own `.amortissements` field, i.e. 491/BY, plus the 5 stock
+  lines' own `.amortissements` fields, i.e. 391-397/BM-BU) is exactly
+  that gap, so adding it back corrects the basis mismatch at its
+  source rather than plugging the residual. **Putting all the
+  reconciliation weight on exploitation vs. hors-exploitation
+  classification would NOT have fixed this** — it's an orthogonal
+  gross-vs-net issue, only exposed once real data (a company with an
+  actual dépréciation contra) hit the identity. A strict
+  generalization, not a special case: `0,00` whenever no dépréciation
+  contra exists (confirmed live on the FR demo company, where the
+  formula reduces to plain FR − BFR, unchanged), and BFR itself is
+  completely untouched by the fix (re-verified live: `bfrExploitation`/
+  `bfrHorsExploitation`/`bfrTotal` identical before and after on both
+  companies).
+- **Free cash flow** = cash-flow-statement.ts's own
+  `fluxExploitation.total` minus `cashPaidForAcquisitions`, re-derived
+  from `FluxInvestissement`'s own public fields
+  (acquisitionsImmobilisations+variationTvaDeductibleImmobilisations−
+  variationDettesSurImmobilisations) rather than a second raw query —
+  mechanically guaranteed to match that module's own internal figure.
+- **Endettement net** = dettes financières (DS+DT+DU+DV) −
+  disponibilités (CF) − VMP (CD, net of CE) — VMP included as
+  quasi-cash, a documented analyst convention. **Capitaux propres**
+  (book equity) = the same "capitaux propres" bucket FR's ressources
+  stables uses (DA..DK) plus DI. **Book EV** = capitaux propres +
+  endettement net — book-based, explicitly NOT a valuation (no market
+  price, multiple, or discount rate anywhere in the figure). Can go
+  negative for a cash-rich company (confirmed live on the FR demo
+  company: book EV −2 950,00, since it holds far more cash than its
+  combined equity+debt — a legitimate, if unusual, state a future
+  Valuation module will need to handle deliberately, not a bug here).
+- **Cost of debt** = charges d'intérêts (GR) / dettes financières —
+  `null` ("n/a") when dettes financières is exactly `0.00`, never a
+  divide-by-zero. Money is discretized to the centime in this app, so
+  there's no meaningful "near-zero but not exactly zero" case to guard
+  separately.
+- **Ratios**: liquidité générale/réduite (actif circulant net, total −
+  emploisStables, over dettes court terme = DW+DX+DY+DZ+EA+EB),
+  gearing (endettement net/capitaux propres), autonomie financière
+  (capitaux propres/total bilan), ROE/ROA/ROCE (résultat net or
+  exploitation over capitaux propres/total bilan/book EV),
+  rentabilité d'exploitation (= margeExploitation, intentionally
+  cross-listed under both headings, a common French financial-analysis
+  taxonomy practice), DSO/DPO/rotation des stocks (day counts using
+  brut/TTC créances-dettes-stocks against HT chiffre d'affaires/achats
+  — a standard, documented simplification; a fully VAT-consistent
+  version would require assuming a blended VAT rate, exactly the kind
+  of assumption this module avoids by design). "Coût des achats"
+  (DPO/rotation-stocks denominator) = FS+FT+FU+FV+FW — every
+  ratio/percentage/day-count is computed via `Prisma.Decimal`'s own
+  arbitrary-precision `.dividedBy()`/`.times()` (through
+  `Money.toDecimal()`), never native JS float division — precision-safe
+  without being Money-typed, since a ratio genuinely isn't money.
+- **"Marge brute"**, the one genuinely ambiguous term in the build
+  instruction, resolved as marge commerciale ÷ chiffre d'affaires (not
+  ÷ ventes de marchandises alone) — consistent with the other three
+  margins, all sharing the same CA denominator so they're directly
+  comparable. A documented formula choice, not a hidden assumption.
+- **Verified two ways, on both companies, twice** (once before the
+  provisionsSurActifCirculant fix, once after). Six hand-computed
+  oracle tests in `financial-analysis.spec.ts` — a full happy-path
+  scenario across every section, a zero-denominator guard test (every
+  ratio/margin/cost-of-debt correctly null, never a blowup), a
+  BFR-mismatch-throws test, a trésorerie-mismatch-throws test, and two
+  tests added for the fix itself (one reproducing the exact live
+  1 200,00 gap as a literal oracle, one proving the zero-case on the
+  FR-demo-company shape) — all against clean, literal
+  `Bilan2050`/`CompteResultat2052_2053`/`CashFlowStatement` objects,
+  independent of any real fixture data. Separately, live against BOTH
+  "Société Test Multi-Année" (`x-company-id: cmsm0x5cc0000o5j8z8a3rr53`,
+  `fiscalYearId: cmsm0xdlq0004o5j8ja1yc84k`) and the FR demo company
+  (`x-company-id: cmrgmp9di0000o5p89u5ru7r8`, `fiscalYearId:
+  cmrgmp9dr0002o5p8fhuk06x6`) — the fixture is what actually caught the
+  provisionsSurActifCirculant gap (real data surfacing a pattern the
+  hand-built oracle hadn't hit yet, same lesson as the cash-flow
+  module's own 445660/445662 discovery), the FR demo company confirmed
+  the fix doesn't disturb an already-correct case.
+- **Frontend**: not built as of this section's writing — see "Current
+  state & roadmap" below for status.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
@@ -1637,9 +1789,17 @@ A-1 §VIII uncross-checked).
    company (445660/445662 carved out of BZ) after the reconciliation
    guard correctly refused an unreconciled statement. `CashFlowPage`
    (route `/flux-tresorerie`) is live and verified in the browser.
-3. **Financial analysis** — ratios, free cash flow, and a DCF as an
-   assumptions-driven model (explicit inputs the user can see and change,
-   not a black-box number).
+3. **Financial analysis backend is now built** (2026-08-16) — see
+   "Analyse financière — retraitement analytique" above:
+   `POST /financial-analysis/generate`, the deterministic
+   retraitement-analytique layer (SIG cascade, BFR/FR/trésorerie nette,
+   FCF, endettement net, capitaux propres, book EV, cost of debt,
+   ratios), verified by hand-computed oracles and live against both the
+   multi-year fixture and the FR demo company. A future **Valuation**
+   module (WACC, cost of equity, DCF, revenue/EBITDA multiples,
+   comparables, market-derived EV) is deferred and will consume this
+   module's deterministic outputs as its own inputs — not started.
+   No UI yet for financial-analysis specifically — natural next step.
 4. **AI chatbot** — last, after the above give it something real to sit
    on top of. Propose-don't-post: the LLM drafts, it never posts
    directly. It writes through the same validation layer the UI uses

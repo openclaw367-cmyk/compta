@@ -1,4 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { FiscalYear } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { Money } from '../../common/decimal';
@@ -7,8 +8,11 @@ import {
   TrialBalanceAccount,
   buildTrialBalance,
 } from '../liasse/trial-balance-engine';
-import { computeBilan2050 } from '../liasse/bilan-2050';
-import { computeCompteResultat2052_2053 } from '../liasse/compte-resultat-2052-2053';
+import { Bilan2050, computeBilan2050 } from '../liasse/bilan-2050';
+import {
+  CompteResultat2052_2053,
+  computeCompteResultat2052_2053,
+} from '../liasse/compte-resultat-2052-2053';
 import {
   CashFlowStatement,
   assertCashFlowReconciles,
@@ -19,6 +23,33 @@ import { ComputeCashFlowDto } from './dto/compute-cash-flow.dto';
 const CREANCES_SUR_CESSIONS_ACCOUNT_PREFIX = '462';
 const TVA_DEDUCTIBLE_AUTRES_ACCOUNT_PREFIX = '445660';
 const TVA_DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT_PREFIX = '445662';
+
+/**
+ * Everything computeCashFlowStatement() needs, plus the intermediate
+ * bilans/trial-balances themselves — exposed so other modules (e.g.
+ * FinancialAnalysisService) can build on the EXACT SAME fetch, never a
+ * second, independently-typed re-derivation that could silently drift.
+ * See financial-analysis.ts's BFR computation for why this matters: its
+ * BFR snapshot must agree with this module's own embedded ΔBFR to the
+ * centime, and sharing this context is what guarantees that by
+ * construction rather than by two hand-synced formulas.
+ */
+export interface CashFlowContext {
+  fiscalYear: FiscalYear;
+  closingBilan: Bilan2050;
+  closingCompteResultat: CompteResultat2052_2053;
+  closingBilanAccounts: TrialBalanceAccount[];
+  openingBilan: Bilan2050;
+  openingBilanAccounts: TrialBalanceAccount[];
+  openingCreancesSurCessions: Money;
+  closingCreancesSurCessions: Money;
+  openingTvaDeductibleAutres: Money;
+  closingTvaDeductibleAutres: Money;
+  openingTvaDeductibleImmobilisations: Money;
+  closingTvaDeductibleImmobilisations: Money;
+  acquisitionsImmobilisations: Money;
+  cessionsImmobilisations: Money;
+}
 
 /**
  * Tableau des flux de trésorerie, méthode indirecte — see
@@ -33,27 +64,22 @@ const TVA_DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT_PREFIX = '445662';
 export class CashFlowService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async generate(company: CompanyContext, dto: ComputeCashFlowDto): Promise<CashFlowStatement> {
+  /**
+   * The shared fetch/build step — see CashFlowContext's doc comment.
+   * Does NOT check the draft-count guard (the caller decides whether
+   * that matters for its own use case); generate() below applies it.
+   */
+  async buildContext(company: CompanyContext, fiscalYearId: string): Promise<CashFlowContext> {
     const companyRecord = await this.prisma.company.findFirst({ where: { id: company.companyId } });
     if (!companyRecord) {
       throw new NotFoundException(`Company ${company.companyId} not found`);
     }
 
     const fiscalYear = await this.prisma.fiscalYear.findFirst({
-      where: { id: dto.fiscalYearId, companyId: company.companyId },
+      where: { id: fiscalYearId, companyId: company.companyId },
     });
     if (!fiscalYear) {
-      throw new NotFoundException(`Fiscal year ${dto.fiscalYearId} not found`);
-    }
-
-    const draftCount = await this.prisma.ecriture.count({
-      where: { companyId: company.companyId, fiscalYearId: fiscalYear.id, validatedAt: null },
-    });
-    if (draftCount > 0) {
-      throw new ConflictException(
-        `Cannot generate the tableau des flux de trésorerie: ${draftCount} écriture(s) in this ` +
-          'fiscal year are still unvalidated (draft). Validate them first.',
-      );
+      throw new NotFoundException(`Fiscal year ${fiscalYearId} not found`);
     }
 
     const lignes = await this.prisma.ecritureLigne.findMany({
@@ -183,19 +209,42 @@ export class CashFlowService {
       Money.zero(),
     );
 
-    const statement = computeCashFlowStatement({
-      openingBilan,
+    return {
+      fiscalYear,
       closingBilan,
       closingCompteResultat,
-      acquisitionsImmobilisations,
-      cessionsImmobilisations,
+      closingBilanAccounts,
+      openingBilan,
+      openingBilanAccounts,
       openingCreancesSurCessions,
       closingCreancesSurCessions,
       openingTvaDeductibleAutres,
       closingTvaDeductibleAutres,
       openingTvaDeductibleImmobilisations,
       closingTvaDeductibleImmobilisations,
+      acquisitionsImmobilisations,
+      cessionsImmobilisations,
+    };
+  }
+
+  async generate(company: CompanyContext, dto: ComputeCashFlowDto): Promise<CashFlowStatement> {
+    const context = await this.buildContext(company, dto.fiscalYearId);
+
+    const draftCount = await this.prisma.ecriture.count({
+      where: {
+        companyId: company.companyId,
+        fiscalYearId: context.fiscalYear.id,
+        validatedAt: null,
+      },
     });
+    if (draftCount > 0) {
+      throw new ConflictException(
+        `Cannot generate the tableau des flux de trésorerie: ${draftCount} écriture(s) in this ` +
+          'fiscal year are still unvalidated (draft). Validate them first.',
+      );
+    }
+
+    const statement = computeCashFlowStatement(context);
     assertCashFlowReconciles(statement);
 
     return statement;
