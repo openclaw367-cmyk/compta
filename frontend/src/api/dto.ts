@@ -22,3 +22,4 @@ export type {
   ComputeResultatFiscalDto,
   DeclaredLineDto,
 } from '../../../backend/src/modules/resultat-fiscal/dto/compute-resultat-fiscal.dto';
+export type { SendChatMessageDto } from '../../../backend/src/modules/ai-chat/dto/send-chat-message.dto';

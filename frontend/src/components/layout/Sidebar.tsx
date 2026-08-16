@@ -5,6 +5,7 @@ import {
   IconBox,
   IconBuilding,
   IconCalendar,
+  IconChat,
   IconDocument,
   IconDownload,
   IconFlow,
@@ -40,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/flux-tresorerie', label: 'Flux de trésorerie', Icon: IconFlow },
   { to: '/analyse-financiere', label: 'Analyse financière', Icon: IconGauge },
   { to: '/resultat-fiscal', label: 'Résultat fiscal', Icon: IconScale },
+  { to: '/assistant', label: 'Assistant', Icon: IconChat },
 ];
 
 export function Sidebar() {

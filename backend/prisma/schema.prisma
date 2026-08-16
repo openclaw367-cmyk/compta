@@ -55,6 +55,18 @@ enum ImportStatus {
   FAILED
 }
 
+/// USER = what the person typed. ASSISTANT = the local model's reply,
+/// optionally carrying toolCalls it wants executed before it can finish
+/// answering. TOOL = a tool call's result, fed back to the model as the
+/// next turn. See CLAUDE.md "AI chatbot" — this is the exact shape
+/// replayed to the local model on every turn, not a separate transcript
+/// format.
+enum ChatMessageRole {
+  USER
+  ASSISTANT
+  TOOL
+}
+
 /// A tenant ("dossier"). The UI only ever shows one Company today, but the
 /// schema is multi-tenant from day one — every other model scopes to a
 /// companyId. See CLAUDE.md "Multi-tenant data model".
@@ -104,6 +116,8 @@ model Company {
   depreciationEntries DepreciationEntry[]
   vatRates        VatRate[]
   importBatches   ImportBatch[]
+  chatSessions    ChatSession[]
+  chatMessages    ChatMessage[]
 }
 
 /// Exercice comptable. Ecritures are validated (locked) relative to a
@@ -379,4 +393,54 @@ model ImportBatch {
   ecritures Ecriture[]
 
   createdAt DateTime @default(now())
+}
+
+/// A local-only chat conversation with the AI assistant — see CLAUDE.md
+/// "AI chatbot". Company-scoped like every domain table; nothing in this
+/// table or its ChatMessage children is ever sent anywhere but the local
+/// model this company's AiChatModule talks to (see LocalModelPort).
+model ChatSession {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  /// First ~60 chars of the opening user message — a label for the session
+  /// list. Never re-derived by an extra model call just to name a session.
+  title String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages ChatMessage[]
+
+  @@index([companyId])
+}
+
+/// One turn in a ChatSession's message list. This is deliberately the
+/// exact shape replayed to the local model on every turn (see
+/// chat-orchestrator.service.ts), not a separate transcript format.
+model ChatMessage {
+  id        String      @id @default(cuid())
+  companyId String
+  company   Company     @relation(fields: [companyId], references: [id])
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id])
+
+  role    ChatMessageRole
+  content String          @db.Text
+
+  /// Present only on an ASSISTANT message that requested one or more tool
+  /// calls before it could finish answering — [{ id, name, arguments }].
+  toolCalls Json?
+
+  /// Present only on a TOOL message: which tool produced this result, and
+  /// which tool-call id it answers — lets the trace render ("query_ca3 →
+  /// {...}") without re-parsing toolCalls off the preceding assistant row.
+  toolName   String?
+  toolCallId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([companyId])
 }

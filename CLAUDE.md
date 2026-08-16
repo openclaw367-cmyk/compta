@@ -1704,6 +1704,127 @@ records only the facts that must never be re-derived from memory.
   every step) — a full visual pass in an ordinary browser window is
   still worth a human glance.
 
+## AI chatbot (Phase 1 — reads only)
+
+`src/modules/ai-chat/` (as of 2026-08-16) implements Phase 1 of the AI
+chatbot: read-only natural-language queries over this app's own
+already-verified computed views, via a local (never external) model.
+Built against a design reviewed and approved by the user before any code
+was written. Full architecture, verification table, and — most
+importantly — the go/no-go finding for Phase 2 are in
+`specs/ai-chatbot-phase1-implementation-spec.md` §6; this section
+records only the facts that must never be re-derived from memory.
+
+- **`LocalModelPort`** (`local-model/local-model.port.ts`) is the
+  abstraction boundary — `complete()`/`isAvailable()`, a normalized
+  runtime-agnostic request/response shape. `OllamaLocalModelAdapter` is
+  the one implementation this pass ships (talks to a local Ollama
+  daemon's `/api/chat`, loopback-only by default). Swapping runtimes
+  later is a new adapter class + one DI-binding line change in
+  `LocalModelModule` — deliberately no runtime-selection factory for a
+  single implementation, that would be premature abstraction. No
+  implementation of this interface may call an external network API —
+  a hard constraint of the port, not a default.
+- **Target model class: 7-8B quantized, tool-calling-capable** — this
+  pass verified against real installed models (`qwen2.5:7b`,
+  `llama3.1:8b`, both Q4_K_M via Ollama) on the actual dev machine, not
+  assumed. `LOCAL_MODEL_NAME`/`LOCAL_MODEL_BASE_URL`/
+  `LOCAL_MODEL_TIMEOUT_MS` are env-configured (`.env.example`),
+  defaulting to `qwen2.5:7b` / `http://localhost:11434` / `120000`.
+- **The read tool registry (16 tools, `tools/read-tools.service.ts`) is
+  ALL of Phase 1's write surface: none, by construction.** Every tool is
+  a thin dispatch onto an existing, already-tested domain service
+  method — the enforced invariant is that no tool's `execute` contains
+  its own aggregation, classification, or money arithmetic (the two
+  narrow exceptions — a plain substring filter in `search_accounts`, a
+  plain equality filter in `search_ecritures` — are presentational, not
+  computational, and documented as the line not to cross). A new kind
+  of question needs a new/extended service method, reviewed and tested
+  independently, never inline tool-handler logic. There is no
+  `propose_ecriture` tool and no write-capable service imported beyond
+  `EntriesService.findAll`/`.findOne` (both read paths) — grep
+  `AiChatModule` for the proof, not a runtime permission check that
+  could have a bug.
+- **Chat history is local-only, company-scoped, zero telemetry** — new
+  `ChatSession`/`ChatMessage` Prisma models (migration
+  `20260816131710_add_chat_history`), same `companyId`-on-every-row
+  convention as `EcritureLigne`. A `ChatMessage` is deliberately the
+  exact shape replayed to the model on every turn, not a separate
+  transcript format. The local-first boundary applies to the STORED
+  conversation, not just the live request — a chat transcript about
+  this company's books is itself sensitive accounting data.
+- **A real bug found live, not by inspection, and fixed**: a local-model
+  timeout mid-conversation (not at the availability check, partway
+  through an already-running tool-calling turn) threw uncaught out of
+  `ChatOrchestratorService.runTurn()` and surfaced as a raw 500 — the
+  same class of bug the VAT module's guards were once fixed for
+  ("throw a NestJS exception, never a plain `Error`" — except here the
+  fix is a try/catch at the call site, since the throwing code is a
+  network client, not a domain guard). Fixed in
+  `AiChatService.sendMessage()`: degrades to the same clean, persisted
+  ASSISTANT-role message the "no model available" path already used.
+  Covered by a regression test reproducing the exact failure message
+  observed live.
+- **Verified two ways.** 36 new unit tests (thin-dispatch, the
+  tool-calling loop including its iteration cap, the Ollama
+  request/response translation, all three availability outcomes,
+  session persistence including both degradation paths) — 333 backend
+  tests passing overall. Live against the real installed Ollama and
+  BOTH companies: `query_vat_declaration`/`query_liasse`/
+  `query_cash_flow` raw tool results compared byte-for-byte against the
+  same endpoints called directly — every number that came back matched
+  exactly (see the spec's §5 table). `AssistantPage` (route
+  `/assistant`) verified live in the browser end to end on a freshly
+  typed message: user bubble, `🔧 tool_name(args)` trace, an expandable
+  block showing the real returned JSON, then the model's prose —
+  confirmed the trace shows genuinely correct data even in the same
+  session where the model's own PROSE fabricated a wrong year label
+  next to it (see below) — this is the live proof the trace UI is
+  load-bearing, not decorative.
+- **The honest go/no-go finding, since a future session must not
+  re-litigate this from a rosier memory**: reads are verified accurate
+  — every number matched. But `qwen2.5:7b` reliably resolves ids ONLY
+  when given them explicitly; left to resolve a `fiscalYearId` itself,
+  it guesses the human-readable year label instead of calling
+  `list_fiscal_years` first (observed live, twice, in two different
+  sessions, including once with the real id already sitting a few
+  messages earlier in the same conversation's own history and not
+  reused). The structural gate still caught every bad guess correctly
+  (a clean tool-result error, never a wrong answer reaching the user) —
+  but the model's own follow-up reasoning about WHY the lookup failed
+  was also wrong both times. Separately, its prose over a large tool
+  payload can drift onto the wrong section of the data or fabricate a
+  small unrelated detail (a wrong fiscal-year label) even when the
+  underlying figures quoted alongside it are correct. **Explicit Phase
+  2 implication**: a naive `propose_ecriture` that trusts the model to
+  chain id-resolution tool calls on its own would be built on exactly
+  the weakest-demonstrated behavior here — safety isn't in question
+  (a bad id still can't reach a persisted row), usability is. Two
+  non-exclusive mitigations recommended, in priority order: (1) have
+  the write flow resolve references FOR the model server-side (account
+  NUMBER/journal CODE/the-one-open-fiscal-year, the way the journal
+  grid's own UI already resolves them, never trusting the model to
+  chain lookups for an opaque id) before this codebase asks the model
+  to fill in the parts it's shown competence at (amounts, labels); (2)
+  cheaply benchmark the already-installed `llama3.1:8b` on the same
+  scenarios before concluding the model class itself needs revisiting.
+  Full detail, the exact transcripts, and the reasoning behind
+  preferring (1) first are in the spec's §6 — **read it before writing
+  `propose_ecriture`, this is a real decision for that session to make,
+  not a formality**.
+- **Known gaps, not attempted this pass**: no session delete/rename
+  endpoint (same "not asked for" discipline as `Journal`/`Account`/
+  `VatRate`/`FiscalYear` below); no token-budget/context-window
+  management for a much larger ledger or a long conversation; no
+  streaming (`complete()` is one non-streaming round trip — latency
+  observed live ranged from ~15s to over two minutes per turn on CPU,
+  a streaming variant would help perceived responsiveness but touches
+  the port's own interface shape, not a casual add-on later); the
+  frontend doesn't optimistically render the user's own message before
+  the mutation resolves (a polish item, not a correctness bug,
+  confirmed live and left alone per this pass's own "verify before
+  polish" scope).
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
@@ -1997,11 +2118,22 @@ A-1 §VIII uncross-checked).
    EBITDA multiples, comparables, market-derived EV) is deferred and
    will consume this module's deterministic outputs as its own inputs
    — not started.
-4. **AI chatbot** — last, after the above give it something real to sit
-   on top of. Propose-don't-post: the LLM drafts, it never posts
-   directly. It writes through the same validation layer the UI uses
-   (the DTOs/service methods, not a shortcut path), and a human confirms
-   every write before it lands — no exception for "obviously correct"
+4. **AI chatbot — Phase 1 (reads only) is now built** (2026-08-16) — see
+   "AI chatbot (Phase 1 — reads only)" above: `LocalModelPort` +
+   `OllamaLocalModelAdapter`, the tool-calling orchestration loop, a
+   16-tool read-only registry, local-only chat persistence, and
+   `AssistantPage`, all verified live against real installed local
+   models and both companies. **Phase 2 (proposed writes,
+   propose-don't-post) is NOT started** — the go/no-go report in
+   `specs/ai-chatbot-phase1-implementation-spec.md` §6 is the required
+   input to that decision, not a formality: reads are verified accurate,
+   but the tested model's unreliable id-resolution chaining means
+   Phase 2 needs its own explicit call on either resolving references
+   server-side for the model or benchmarking a stronger local model
+   first, before `propose_ecriture` gets written. When it is: the LLM
+   drafts, it never posts directly, and a human confirms every write
+   through the same validation layer the UI uses (the DTOs/service
+   methods, not a shortcut path) — no exception for "obviously correct"
    changes.
 
 Not on this numbered list but still open whenever it's picked back up:

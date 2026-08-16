@@ -139,6 +139,15 @@ export function IconGauge(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconChat(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3.5 5.5h13v8h-8L4 17v-3.5h-.5Z" />
+      <path d="M6.5 8.5h7M6.5 11h4.5" />
+    </svg>
+  );
+}
+
 export function IconScale(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base(props)}>

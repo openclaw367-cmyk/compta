@@ -32,6 +32,8 @@ import { ResultatFiscalModule } from './modules/resultat-fiscal/resultat-fiscal.
 import { ResultatFiscalController } from './modules/resultat-fiscal/resultat-fiscal.controller';
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { LedgerController } from './modules/ledger/ledger.controller';
+import { AiChatModule } from './modules/ai-chat/ai-chat.module';
+import { AiChatController } from './modules/ai-chat/ai-chat.controller';
 import { DevModule } from './modules/dev/dev.module';
 import { DevController } from './modules/dev/dev.controller';
 
@@ -60,6 +62,7 @@ const isProduction = process.env.NODE_ENV === 'production';
     FinancialAnalysisModule,
     ResultatFiscalModule,
     LedgerModule,
+    AiChatModule,
     ...(isProduction ? [] : [DevModule]),
   ],
 })
@@ -92,6 +95,7 @@ export class AppModule implements NestModule {
         FinancialAnalysisController,
         ResultatFiscalController,
         LedgerController,
+        AiChatController,
         ...(isProduction ? [] : [DevController]),
       );
   }

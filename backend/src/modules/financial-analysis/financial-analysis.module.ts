@@ -7,5 +7,6 @@ import { FinancialAnalysisService } from './financial-analysis.service';
   imports: [CashFlowModule],
   controllers: [FinancialAnalysisController],
   providers: [FinancialAnalysisService],
+  exports: [FinancialAnalysisService],
 })
 export class FinancialAnalysisModule {}

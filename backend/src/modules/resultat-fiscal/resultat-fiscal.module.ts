@@ -5,5 +5,6 @@ import { ResultatFiscalService } from './resultat-fiscal.service';
 @Module({
   controllers: [ResultatFiscalController],
   providers: [ResultatFiscalService],
+  exports: [ResultatFiscalService],
 })
 export class ResultatFiscalModule {}

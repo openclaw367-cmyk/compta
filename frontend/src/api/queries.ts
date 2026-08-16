@@ -6,6 +6,9 @@ import type {
   Ca3Declaration,
   CashFlowStatement,
   CessionResult,
+  ChatMessage,
+  ChatSession,
+  ChatSessionWithMessages,
   Company,
   DepreciationEntry,
   Ecriture,
@@ -17,6 +20,7 @@ import type {
   ImportPreviewResponse,
   Journal,
   LiasseAnyResult,
+  LocalModelAvailability,
   ResultatFiscalResult,
   TrialBalanceResponse,
   VatRate,
@@ -31,6 +35,7 @@ import type {
   CreateJournalDto,
   CreateTiersDto,
   CreateVatRateDto,
+  SendChatMessageDto,
   UpdateAccountDto,
   UpdateCompanyDto,
 } from './dto';
@@ -521,6 +526,66 @@ export function useDisposeFixedAsset() {
       void queryClient.invalidateQueries({ queryKey: ['fixed-asset-schedule', fixedAssetId] });
       void queryClient.invalidateQueries({ queryKey: ['fixed-assets'] });
       invalidateEcrituresAndLedger(queryClient);
+    },
+  });
+}
+
+/**
+ * AI chatbot (Phase 1) — see CLAUDE.md "AI chatbot". Polled on an interval
+ * (not just on mount) so the degraded-state banner in AssistantPage
+ * clears itself automatically once a local model comes up, without the
+ * user needing to reload.
+ */
+export function useLocalModelAvailability() {
+  return useQuery({
+    queryKey: ['ai-chat-availability'],
+    queryFn: () => api.get<LocalModelAvailability>('/ai-chat/availability'),
+    staleTime: 15 * 1000,
+    refetchInterval: 30 * 1000,
+  });
+}
+
+export function useChatSessions() {
+  return useQuery({
+    queryKey: ['ai-chat-sessions'],
+    queryFn: () => api.get<ChatSession[]>('/ai-chat/sessions'),
+  });
+}
+
+export function useCreateChatSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<ChatSession>('/ai-chat/sessions', {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ai-chat-sessions'] });
+    },
+  });
+}
+
+export function useChatSession(id: string | null) {
+  return useQuery({
+    queryKey: ['ai-chat-session', id],
+    queryFn: () => api.get<ChatSessionWithMessages>(`/ai-chat/sessions/${id}`),
+    enabled: id !== null,
+  });
+}
+
+/**
+ * Sends one message and runs the read-tool-calling loop — can take a
+ * while on real hardware (observed live: single-digit seconds to ~2
+ * minutes depending on the tool called and the model's own load state),
+ * never a quick round-trip like the rest of this app's mutations. The
+ * caller must show a clear "thinking" state, not assume this resolves
+ * quickly.
+ */
+export function useSendChatMessage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, dto }: { sessionId: string; dto: SendChatMessageDto }) =>
+      api.post<ChatMessage[]>(`/ai-chat/sessions/${sessionId}/messages`, dto),
+    onSuccess: (_data, { sessionId }) => {
+      void queryClient.invalidateQueries({ queryKey: ['ai-chat-session', sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-chat-sessions'] });
     },
   });
 }

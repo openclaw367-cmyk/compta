@@ -15,6 +15,7 @@ import { LiassePage } from './pages/LiassePage';
 import { CashFlowPage } from './pages/CashFlowPage';
 import { FinancialAnalysisPage } from './pages/FinancialAnalysisPage';
 import { ResultatFiscalPage } from './pages/ResultatFiscalPage';
+import { AssistantPage } from './pages/AssistantPage';
 
 export default function App() {
   return (
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="/flux-tresorerie" element={<CashFlowPage />} />
         <Route path="/analyse-financiere" element={<FinancialAnalysisPage />} />
         <Route path="/resultat-fiscal" element={<ResultatFiscalPage />} />
+        <Route path="/assistant" element={<AssistantPage />} />
       </Routes>
     </AppShell>
   );

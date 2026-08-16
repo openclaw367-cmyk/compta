@@ -786,3 +786,55 @@ export interface ResultatFiscalResult {
   /** XN/XO — resultatComptable + totalReintegrations − totalDeductions, signed. */
   resultatFiscal: string;
 }
+
+/**
+ * AI chatbot (Phase 1, read-only) — see CLAUDE.md "AI chatbot". A
+ * ChatMessage is the exact shape replayed to the local model on every
+ * turn (see the backend's chat-orchestrator.service.ts): USER is what the
+ * person typed, ASSISTANT is the model's reply (optionally carrying
+ * toolCalls it wants executed before it can finish answering), TOOL is a
+ * tool call's result fed back as the next turn. Rendering ASSISTANT's
+ * toolCalls and the following TOOL row's content IS the tool-call trace —
+ * the derivation-transparency requirement for this module.
+ */
+export type ChatMessageRole = 'USER' | 'ASSISTANT' | 'TOOL';
+
+export interface ChatToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface ChatMessage {
+  id: string;
+  sessionId: string;
+  role: ChatMessageRole;
+  content: string;
+  /** Only present on an ASSISTANT message that requested tool calls. */
+  toolCalls: ChatToolCall[] | null;
+  /** Only present on a TOOL message — which tool produced this result. */
+  toolName: string | null;
+  toolCallId: string | null;
+  createdAt: string;
+}
+
+export interface ChatSession {
+  id: string;
+  title: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatSessionWithMessages extends ChatSession {
+  messages: ChatMessage[];
+}
+
+/**
+ * GET /ai-chat/availability — whether a local model is reachable and
+ * loaded right now. The chat UI polls this to show a clean degraded
+ * state instead of letting a send attempt fail with a raw error.
+ */
+export interface LocalModelAvailability {
+  available: boolean;
+  detail: string;
+}
