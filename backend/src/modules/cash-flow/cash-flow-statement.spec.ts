@@ -63,6 +63,14 @@ const CLOSING_BILAN = bilan(
   ],
 );
 
+/** Every scenario not specifically exercising 445660/445662 supplies these as zero. */
+const NO_TVA_DEDUCTIBLE = {
+  openingTvaDeductibleAutres: Money.zero(),
+  closingTvaDeductibleAutres: Money.zero(),
+  openingTvaDeductibleImmobilisations: Money.zero(),
+  closingTvaDeductibleImmobilisations: Money.zero(),
+};
+
 function cdrLigne(code: string, montant: string): CompteResultatLigne {
   return { code, label: code, montant };
 }
@@ -100,6 +108,7 @@ describe('computeCashFlowStatement', () => {
       cessionsImmobilisations: Money.fromString('1000.00'),
       openingCreancesSurCessions: Money.zero(),
       closingCreancesSurCessions: Money.zero(),
+      ...NO_TVA_DEDUCTIBLE,
     });
 
     expect(statement.fluxExploitation).toMatchObject({
@@ -146,6 +155,7 @@ describe('computeCashFlowStatement', () => {
       cessionsImmobilisations: Money.fromString('1000.00'),
       openingCreancesSurCessions: Money.zero(),
       closingCreancesSurCessions: Money.fromString('1000.00'),
+      ...NO_TVA_DEDUCTIBLE,
     });
 
     // CAF = 400 + 600(VNC) − 1000(produit cession) = 0. ΔBFR = 0. Flux exploitation = 0.
@@ -185,6 +195,7 @@ describe('computeCashFlowStatement', () => {
       cessionsImmobilisations: Money.zero(),
       openingCreancesSurCessions: Money.zero(),
       closingCreancesSurCessions: Money.zero(),
+      ...NO_TVA_DEDUCTIBLE,
     });
 
     // CAF = 3800(résultat) + 1200(GC dotation) = 5000. Δcréances(brut) = 5000 − 0 = 5000.
@@ -195,6 +206,49 @@ describe('computeCashFlowStatement', () => {
       total: '0.00',
     });
     expect(statement.variationTresorerie).toBe('0.00');
+    expect(() => assertCashFlowReconciles(statement)).not.toThrow();
+  });
+
+  it('445660/445662 (TVA déductible) split correctly between exploitation and investissement', () => {
+    // Reproduces, in isolation, the exact live gap found on the FR demo company: a 500,00 reconciliation
+    // gap traced to four purchases' TVA déductible (three "autres biens" purchases, 200+150+60=410 on
+    // 445660; one immobilisation purchase, 90 on 445662), entirely invisible to the flux sections
+    // because BZ (which folds 445660/445662 in with genuinely-unrelated accounts) was excluded wholesale.
+    // See CLAUDE.md "Tableau des flux de trésorerie" — putting all 500 in exploitation would have
+    // reconciled too, but misclassified the 90 immobilisations-VAT as operating instead of investing;
+    // the reconciliation invariant alone can't catch a wrong-SECTION allocation, only a wrong total.
+    const statement = computeCashFlowStatement({
+      openingBilan: bilan([actifLigne('CF', '1000.00')], []),
+      closingBilan: bilan(
+        [{ code: 'CF', label: 'CF', brut: '590.00', amortissements: '0.00', net: '590.00' }],
+        [passifLigne('DZ', '540.00')],
+      ),
+      closingCompteResultat: { ...CLOSING_CDR, lignes: [], beneficeOuPerte: '0.00' },
+      // 450 HT acquisition, entirely credit-financed (DZ 540 TTC = 450 HT + 90 TVA déductible) — zero
+      // cash paid, so investissement must net to 0.00, not a phantom ±90 from comparing HT to TTC.
+      acquisitionsImmobilisations: Money.fromString('450.00'),
+      cessionsImmobilisations: Money.zero(),
+      openingCreancesSurCessions: Money.zero(),
+      closingCreancesSurCessions: Money.zero(),
+      openingTvaDeductibleAutres: Money.zero(),
+      closingTvaDeductibleAutres: Money.fromString('410.00'),
+      openingTvaDeductibleImmobilisations: Money.zero(),
+      closingTvaDeductibleImmobilisations: Money.fromString('90.00'),
+    });
+
+    // Exploitation: CAF(0) − Δ445660(410) = −410 — the 410 lands here, not investissement.
+    expect(statement.fluxExploitation).toMatchObject({
+      variationTvaDeductibleAutres: '410.00',
+      total: '-410.00',
+    });
+    // Investissement: cash payé = (450 + 90) − 540 = 0 — the 90 lands here (added to the HT cost,
+    // making it TTC to match DZ), not exploitation, and correctly nets to zero cash paid.
+    expect(statement.fluxInvestissement).toMatchObject({
+      variationTvaDeductibleImmobilisations: '90.00',
+      total: '0.00',
+    });
+    expect(statement.variationTresorerie).toBe('-410.00');
+    expect(statement.tresorerieCloture).toBe('590.00');
     expect(() => assertCashFlowReconciles(statement)).not.toThrow();
   });
 });

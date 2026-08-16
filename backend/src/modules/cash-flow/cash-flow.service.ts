@@ -17,6 +17,8 @@ import {
 import { ComputeCashFlowDto } from './dto/compute-cash-flow.dto';
 
 const CREANCES_SUR_CESSIONS_ACCOUNT_PREFIX = '462';
+const TVA_DEDUCTIBLE_AUTRES_ACCOUNT_PREFIX = '445660';
+const TVA_DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT_PREFIX = '445662';
 
 /**
  * Tableau des flux de trésorerie, méthode indirecte — see
@@ -140,6 +142,24 @@ export class CashFlowService {
       closingBilanAccounts,
       CREANCES_SUR_CESSIONS_ACCOUNT_PREFIX,
     );
+    // 445660/445662 carved out of BZ the same way 462 is above — see cash-flow-statement.ts's doc
+    // comment for why (they're individually addressable, unlike the genuinely-commingled rest of BZ).
+    const openingTvaDeductibleAutres = sumAccountBalance(
+      openingBilanAccounts,
+      TVA_DEDUCTIBLE_AUTRES_ACCOUNT_PREFIX,
+    );
+    const closingTvaDeductibleAutres = sumAccountBalance(
+      closingBilanAccounts,
+      TVA_DEDUCTIBLE_AUTRES_ACCOUNT_PREFIX,
+    );
+    const openingTvaDeductibleImmobilisations = sumAccountBalance(
+      openingBilanAccounts,
+      TVA_DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT_PREFIX,
+    );
+    const closingTvaDeductibleImmobilisations = sumAccountBalance(
+      closingBilanAccounts,
+      TVA_DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT_PREFIX,
+    );
 
     const assetsAcquiredThisYear = await this.prisma.fixedAsset.findMany({
       where: {
@@ -171,6 +191,10 @@ export class CashFlowService {
       cessionsImmobilisations,
       openingCreancesSurCessions,
       closingCreancesSurCessions,
+      openingTvaDeductibleAutres,
+      closingTvaDeductibleAutres,
+      openingTvaDeductibleImmobilisations,
+      closingTvaDeductibleImmobilisations,
     });
     assertCashFlowReconciles(statement);
 

@@ -15,13 +15,27 @@ import { CESSION_PRODUIT_CODES, CESSION_CHARGE_CODES } from '../liasse/liasse-ar
  * comment for why).
  *
  * Scope decisions, all deliberate:
- * - BFR movement only covers BX (clients), the 5 stock lines, and DX+DY
- *   (dettes fournisseurs/fiscales/sociales) — BZ ("autres créances") is
- *   excluded entirely because it commingles genuinely-operating items
- *   (TVA déductible) with non-operating ones (462, créances sur
- *   cessions) that bilan-2050.ts's line mapping can't separate; folding
- *   it into BFR would silently mix an investing-flow item into the
- *   exploitation section.
+ * - BFR movement covers BX (clients), the 5 stock lines, DX+DY (dettes
+ *   fournisseurs/fiscales/sociales), and now 445660 (TVA déductible sur
+ *   autres biens et services) — BZ ("autres créances") as a WHOLE stays
+ *   excluded, because 425/441/442/443/465 genuinely commingle inside it
+ *   with no per-account separation bilan-2050.ts's line mapping can
+ *   offer. 445660 and 445662 (TVA déductible sur immobilisations) are
+ *   different: `bilan-2050.ts` already names them as individual constants
+ *   (`DEDUCTIBLE_AUTRES_ACCOUNT`/`DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT`,
+ *   reused from the VAT/CA3 module), so they're carved out of BZ the same
+ *   way 462 already is — not lumped with the genuinely-opaque remainder.
+ *   445660 tracks operating purchases → exploitation, alongside BX/stocks.
+ *   445662 tracks immobilisation purchases → investissement, alongside
+ *   DZ/acquisitions (see below) — found live, not by inspection: a first
+ *   version excluded ALL of BZ including these two, leaving a 500,00 gap
+ *   on the FR demo company matching four purchases' TVA déductible to the
+ *   centime (three "autres biens" purchases, 200+150+60=410 on 445660;
+ *   one immobilisation purchase, 90 on 445662). Putting all 500 in
+ *   exploitation would have reconciled too — the reconciliation invariant
+ *   only proves the TOTAL is right, never that a movement landed in the
+ *   correct SECTION — but would have misclassified the 90
+ *   immobilisations-VAT as operating instead of investing.
  * - BX and the stock lines' BFR movement uses GROSS (brut) values, never
  *   BilanActifLigne.net — found live, not by inspection: a first version
  *   used .net and left a reconciliation gap of exactly 1200.00 on the
@@ -37,11 +51,15 @@ import { CESSION_PRODUIT_CODES, CESSION_CHARGE_CODES } from '../liasse/liasse-ar
  *   standard French tableau-de-financement convention for exactly this
  *   reason, not a workaround specific to this bug.
  * - Investing cash actually paid/received nets against Δ404/405 (DZ, a
- *   clean dedicated bilan line) and Δ462 (NOT clean — 462 is one of
- *   several accounts folded into BZ, so it must be supplied separately
- *   as a raw account balance, not read off the bilan) — an asset bought
- *   or sold partly on credit doesn't move cash until the receivable/
- *   payable is settled.
+ *   clean dedicated bilan line), Δ462, and now Δ445662 (the last two NOT
+ *   clean — both folded into BZ, so both are supplied separately as raw
+ *   account balances, not read off the bilan) — an asset bought or sold
+ *   partly on credit doesn't move cash until the receivable/payable is
+ *   settled, and 445662 is added to the acquisitions cost (making it TTC,
+ *   matching DZ's own TTC nature) rather than left HT — otherwise a
+ *   credit-financed acquisition with VAT leaves a phantom HT-vs-TTC gap
+ *   between acquisitionsImmobilisations (HT, from FixedAsset.acquisitionValue)
+ *   and ΔDZ (TTC, from the ledger) even when zero cash actually moved.
  * - `produitsCession`/`chargesCessionVNC` reuse CESSION_PRODUIT_CODES/
  *   CESSION_CHARGE_CODES (F1/G2/HD and G1/G3/HH) exactly as
  *   liasse-articulation.ts's 2059-A tie-out already does — including
@@ -96,6 +114,14 @@ export interface CashFlowStatementInput {
   openingCreancesSurCessions: Money;
   /** Same, at fiscal-year end. */
   closingCreancesSurCessions: Money;
+  /** Raw account 445660 ("TVA déductible sur autres biens et services") balance at fiscal-year start — carved out of BZ into exploitation, same reason 462 is carved out for investissement. */
+  openingTvaDeductibleAutres: Money;
+  /** Same, at fiscal-year end. */
+  closingTvaDeductibleAutres: Money;
+  /** Raw account 445662 ("TVA déductible sur immobilisations") balance at fiscal-year start — carved out of BZ into investissement, alongside DZ/acquisitions. */
+  openingTvaDeductibleImmobilisations: Money;
+  /** Same, at fiscal-year end. */
+  closingTvaDeductibleImmobilisations: Money;
 }
 
 export interface FluxExploitation {
@@ -107,12 +133,16 @@ export interface FluxExploitation {
   capaciteAutofinancement: string;
   variationCreancesClients: string;
   variationStocks: string;
+  /** Δ445660 — carved out of BZ, see module doc comment. */
+  variationTvaDeductibleAutres: string;
   variationDettesExploitation: string;
   total: string;
 }
 
 export interface FluxInvestissement {
   acquisitionsImmobilisations: string;
+  /** Δ445662 — carved out of BZ, added to acquisitions cost (HT → TTC) before netting against DZ, see module doc comment. */
+  variationTvaDeductibleImmobilisations: string;
   variationDettesSurImmobilisations: string;
   cessionsImmobilisations: string;
   variationCreancesSurCessions: string;
@@ -147,6 +177,10 @@ export function computeCashFlowStatement(input: CashFlowStatementInput): CashFlo
     cessionsImmobilisations,
     openingCreancesSurCessions,
     closingCreancesSurCessions,
+    openingTvaDeductibleAutres,
+    closingTvaDeductibleAutres,
+    openingTvaDeductibleImmobilisations,
+    closingTvaDeductibleImmobilisations,
   } = input;
 
   const montantByCode = new Map(closingCompteResultat.lignes.map((l) => [l.code, l.montant]));
@@ -183,20 +217,25 @@ export function computeCashFlowStatement(input: CashFlowStatementInput): CashFlo
   const variationDettesExploitation = montantPassif(closingBilan, DETTES_EXPLOITATION_CODES).minus(
     montantPassif(openingBilan, DETTES_EXPLOITATION_CODES),
   );
+  const variationTvaDeductibleAutres = closingTvaDeductibleAutres.minus(openingTvaDeductibleAutres);
 
   const totalExploitation = capaciteAutofinancement
     .minus(variationCreancesClients)
     .minus(variationStocks)
+    .minus(variationTvaDeductibleAutres)
     .plus(variationDettesExploitation);
 
   const variationDettesSurImmobilisations = montantPassif(closingBilan, [
     DETTES_IMMOBILISATIONS_CODE,
   ]).minus(montantPassif(openingBilan, [DETTES_IMMOBILISATIONS_CODE]));
   const variationCreancesSurCessions = closingCreancesSurCessions.minus(openingCreancesSurCessions);
-
-  const cashPaidForAcquisitions = acquisitionsImmobilisations.minus(
-    variationDettesSurImmobilisations,
+  const variationTvaDeductibleImmobilisations = closingTvaDeductibleImmobilisations.minus(
+    openingTvaDeductibleImmobilisations,
   );
+
+  const cashPaidForAcquisitions = acquisitionsImmobilisations
+    .plus(variationTvaDeductibleImmobilisations)
+    .minus(variationDettesSurImmobilisations);
   const cashReceivedFromCessions = cessionsImmobilisations.minus(variationCreancesSurCessions);
   const totalInvestissement = cashReceivedFromCessions.minus(cashPaidForAcquisitions);
 
@@ -224,11 +263,13 @@ export function computeCashFlowStatement(input: CashFlowStatementInput): CashFlo
       capaciteAutofinancement: capaciteAutofinancement.toApiString(),
       variationCreancesClients: variationCreancesClients.toApiString(),
       variationStocks: variationStocks.toApiString(),
+      variationTvaDeductibleAutres: variationTvaDeductibleAutres.toApiString(),
       variationDettesExploitation: variationDettesExploitation.toApiString(),
       total: totalExploitation.toApiString(),
     },
     fluxInvestissement: {
       acquisitionsImmobilisations: acquisitionsImmobilisations.toApiString(),
+      variationTvaDeductibleImmobilisations: variationTvaDeductibleImmobilisations.toApiString(),
       variationDettesSurImmobilisations: variationDettesSurImmobilisations.toApiString(),
       cessionsImmobilisations: cessionsImmobilisations.toApiString(),
       variationCreancesSurCessions: variationCreancesSurCessions.toApiString(),
