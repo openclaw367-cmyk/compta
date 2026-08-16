@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CompaniesModule } from '../companies/companies.module';
 import { AccountsModule } from '../accounts/accounts.module';
 import { JournalsModule } from '../journals/journals.module';
 import { FiscalYearsModule } from '../fiscal-years/fiscal-years.module';
@@ -12,6 +13,7 @@ import { DepreciationModule } from '../depreciation/depreciation.module';
 import { EntriesModule } from '../entries/entries.module';
 import { LocalModelModule } from './local-model/local-model.module';
 import { ReadToolsService } from './tools/read-tools.service';
+import { ChatContextService } from './chat-context.service';
 import { ChatOrchestratorService } from './chat-orchestrator.service';
 import { AiChatService } from './ai-chat.service';
 import { AiChatController } from './ai-chat.controller';
@@ -25,9 +27,14 @@ import { AiChatController } from './ai-chat.controller';
  * and no `propose_ecriture` entry in ReadToolsService's registry. Phase 2
  * adds exactly that — a new tool + a new confirmation-gate endpoint — on
  * top of this module, never a change to how Phase 1 itself behaves.
+ * `CompaniesModule` is imported for `ChatContextService`'s eager-context
+ * fetch (see that file), which calls `CompaniesService.findCurrent()`
+ * only — `updateCurrent()` exists on that class but nothing in this
+ * module ever calls it.
  */
 @Module({
   imports: [
+    CompaniesModule,
     AccountsModule,
     JournalsModule,
     FiscalYearsModule,
@@ -42,6 +49,6 @@ import { AiChatController } from './ai-chat.controller';
     LocalModelModule,
   ],
   controllers: [AiChatController],
-  providers: [ReadToolsService, ChatOrchestratorService, AiChatService],
+  providers: [ReadToolsService, ChatContextService, ChatOrchestratorService, AiChatService],
 })
 export class AiChatModule {}

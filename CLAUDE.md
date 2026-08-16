@@ -1812,6 +1812,36 @@ records only the facts that must never be re-derived from memory.
   preferring (1) first are in the spec's §6 — **read it before writing
   `propose_ecriture`, this is a real decision for that session to make,
   not a formality**.
+- **Both recommended follow-up experiments were run (2026-08-16, same
+  day, before any Phase 2 code) — see spec §6b, and DON'T re-litigate
+  this from memory of §6 alone, it's been partially superseded.**
+  (1) `llama3.1:8b` head-to-head vs. `qwen2.5:7b`, same prompts: same
+  id-guessing failure on BOTH models (a general 7-8B-class weakness,
+  not a `qwen`-specific quirk), and `llama3.1:8b` was strictly WORSE on
+  latency (timed out at 120s on the exact `query_liasse` call
+  `qwen2.5:7b` had completed). (2) **`ChatContextService`** (new,
+  `chat-context.service.ts`) eagerly resolves this company's fiscal
+  years and journals — real ids alongside their labels — into the
+  system prompt every turn (the same thin-dispatch discipline as every
+  tool: `CompaniesService.findCurrent()`/`FiscalYearsService.findAll()`/
+  `JournalsService.findAll()`, three already-tested calls, zero new
+  business logic). **This closed the id-guessing failure on BOTH
+  models, verified live**: the identical prompt that previously
+  produced a guessed `fiscalYearId: "2026"` now resolves the real id on
+  the first tool call, zero `list_fiscal_years` detour, on `qwen2.5:7b`
+  (68s) and `llama3.1:8b` (88s) alike. Accounts are deliberately still
+  excluded from eager injection (a real company can have hundreds,
+  unlike a handful of fiscal years/journals) — `search_accounts`
+  remains the resolution path there, untested this round since it was
+  never the demonstrated failure. **Scoped honestly: this fixes
+  id-resolution specifically and does NOT address the separate
+  prose-drift/fabrication weakness** (a model summarizing the wrong
+  section of a large payload, or inventing a detail) — that stays a
+  live risk the tool-trace UI exists to mitigate, and Phase 2's
+  eventual confirmation screen must show `propose_ecriture`'s own
+  structured fields, never trust the model's prose description of what
+  it proposed. `qwen2.5:7b` remains the better default of the two
+  tested models. 6 new unit tests, 339 backend tests passing.
 - **Known gaps, not attempted this pass**: no session delete/rename
   endpoint (same "not asked for" discipline as `Journal`/`Account`/
   `VatRate`/`FiscalYear` below); no token-budget/context-window
@@ -2123,16 +2153,22 @@ A-1 §VIII uncross-checked).
    `OllamaLocalModelAdapter`, the tool-calling orchestration loop, a
    16-tool read-only registry, local-only chat persistence, and
    `AssistantPage`, all verified live against real installed local
-   models and both companies. **Phase 2 (proposed writes,
-   propose-don't-post) is NOT started** — the go/no-go report in
-   `specs/ai-chatbot-phase1-implementation-spec.md` §6 is the required
-   input to that decision, not a formality: reads are verified accurate,
-   but the tested model's unreliable id-resolution chaining means
-   Phase 2 needs its own explicit call on either resolving references
-   server-side for the model or benchmarking a stronger local model
-   first, before `propose_ecriture` gets written. When it is: the LLM
-   drafts, it never posts directly, and a human confirms every write
-   through the same validation layer the UI uses (the DTOs/service
+   models and both companies. **Two follow-up experiments (same day,
+   still before Phase 2) closed the id-resolution half of the go/no-go
+   question** — see "AI chatbot (Phase 1 — reads only)" above and spec
+   §6b: `llama3.1:8b` showed the same id-guessing failure as `qwen2.5:7b`
+   (a model-class weakness, not `qwen`-specific) and was slower besides;
+   the new `ChatContextService` (eager server-side resolution of fiscal
+   years/journals into the system prompt) closed the guessing failure
+   on BOTH models, verified live. **Phase 2 (proposed writes,
+   propose-don't-post) is still NOT started** — id-resolution is no
+   longer the blocker, but the SEPARATE prose-drift/fabrication weakness
+   (§6b's own explicit scoping) is untouched by this fix and must be
+   designed around before `propose_ecriture` ships: its confirmation
+   screen must show the proposal's own structured fields, never trust
+   the model's prose description of what it proposed. When it is built:
+   the LLM drafts, it never posts directly, and a human confirms every
+   write through the same validation layer the UI uses (the DTOs/service
    methods, not a shortcut path) — no exception for "obviously correct"
    changes.
 

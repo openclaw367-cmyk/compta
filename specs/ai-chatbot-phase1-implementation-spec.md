@@ -9,10 +9,16 @@ orchestration loop, the full read-only tool registry, local-only chat
 persistence, and a chat UI showing tool-call traces. No write tool
 exists anywhere in this pass — see §3.
 
-**§6 below is the load-bearing section.** It is the actual input to the
-Phase 2 go/no-go decision — read it before building anything on top of
-this module, the same way `resultat-fiscal.ts`'s own doc comment insists
-its own "verified" claim be re-read before trusting it.
+**§6 and §6b below are the load-bearing sections.** They are the actual
+input to the Phase 2 go/no-go decision — read them before building
+anything on top of this module, the same way `resultat-fiscal.ts`'s own
+doc comment insists its own "verified" claim be re-read before trusting
+it. §6 records the original go/no-go finding; §6b records the two
+follow-up experiments (a `llama3.1:8b` head-to-head, and a server-side
+reference-resolution fix) that were run BEFORE any Phase 2 code, per
+explicit instruction — read §6b's own scoping carefully, since it closes
+one specific blocker (id resolution) and explicitly does not close
+another (prose drift/fabrication over large payloads).
 
 ## §1 — The local-inference abstraction
 
@@ -287,6 +293,110 @@ Phase 2 grows. **This is a real decision for the next session to make
 before writing `propose_ecriture`, not a formality to nod past** — the
 gate keeps Phase 2 safe either way; this choice is about whether it's
 also usable.
+
+## §6b — Follow-up: both cheap experiments run, both closed
+
+Both recommendations from §6 were tried before any Phase 2 code —
+**neither built `propose_ecriture`; this section is still input to that
+decision, not the decision itself.** `ChatContextService`
+(`backend/src/modules/ai-chat/chat-context.service.ts`) is the only
+production change from this pass.
+
+**Experiment (1) — `llama3.1:8b` head-to-head vs. `qwen2.5:7b`, same
+prompts, same tools, before any fix.**
+
+- **(a) id-guessing**: identical failure. Asked "quel est mon résultat
+  comptable pour l'exercice 2026 ?" with no prior context, `llama3.1:8b`
+  also called `query_resultat_fiscal` with `fiscalYearId: "2026"` (the
+  label, not a real id) instead of calling `list_fiscal_years` first —
+  the exact same mistake `qwen2.5:7b` made. Its own recovery reasoning
+  was marginally better (correctly told the user to call
+  `list_fiscal_years`, rather than `qwen2.5:7b`'s wrong conclusion that
+  the fiscal year "doesn't exist yet") — but it still didn't call that
+  tool itself, so the underlying failure is identical: **this is a
+  general 7-8B-class tool-calling weakness observed across two different
+  model families, not a `qwen`-specific quirk.**
+- **(b)/(c) prose drift and latency**: `llama3.1:8b` was strictly worse
+  on the one comparison that could be made. Asked the exact
+  `query_liasse` question that `qwen2.5:7b` had answered in ~90 seconds
+  (with correct raw data but drifted prose, see §6), `llama3.1:8b`
+  **timed out at the 120-second cap on the same call** — no answer, no
+  prose to evaluate for drift. This is the same, already-correctly-fixed
+  graceful-degradation path from §1, working exactly as designed — but
+  it means switching models would have made the demonstrated latency
+  problem worse, not better, on this hardware.
+- **Conclusion of experiment (1) alone**: no evidence that swapping to
+  `llama3.1:8b` would have helped either weakness, and real evidence it
+  would hurt latency. The model class was not the problem — see (2).
+
+**Experiment (2) — server-side reference resolution, implemented and
+tested against both models.**
+
+`ChatContextService.buildContext()` eagerly fetches this company's own
+record, all its fiscal years, and all its journals (three already-tested
+service calls — `CompaniesService.findCurrent()`,
+`FiscalYearsService.findAll()`, `JournalsService.findAll()` — the exact
+same thin-dispatch discipline as every tool in §2) and formats their
+REAL ids alongside their human labels directly into the system prompt,
+every turn. `ChatOrchestratorService.runTurn()` now fetches and prepends
+this block before every model call. The system prompt was updated to
+tell the model explicitly: use these ids directly, never invent one from
+a label, only call `list_fiscal_years`/`list_journals` if genuinely
+missing information. Deliberately does NOT eagerly inject the chart of
+accounts — a real company can have hundreds of accounts where it has a
+handful of fiscal years/journals, so `search_accounts` remains the
+resolution path for accounts (this wasn't the demonstrated failure
+anyway — the model never mis-resolved an account, only fiscal years).
+
+Covered by 6 new unit tests (`chat-context.service.spec.ts`, 5 tests —
+the thin-dispatch discipline, the real-id-not-just-label assertion, the
+closed/open fiscal year label, the empty-company case; plus one new
+`chat-orchestrator.service.spec.ts` test confirming the context is
+fetched and prepended every turn) — 339 backend tests passing overall.
+
+**Result: the exact id-guessing failure from §6 is gone, on BOTH
+models, verified live, not just unit-tested.** The identical prompt that
+previously produced a guessed `fiscalYearId: "2026"` on both models now
+produces a correctly-resolved `fiscalYearId: "cmrgmp9dr0002o5p8fhuk06x6"`
+on the very first tool call, zero guessing, zero `list_fiscal_years`
+detour, on both `qwen2.5:7b` (68s) and `llama3.1:8b` (88s) — re-run
+fresh, same session-less conditions as the original failing test. Both
+produced correct final answers (`5 405,00 €`, matching the verified
+figure from §5).
+
+**What this experiment does NOT claim to have fixed** — scoped
+honestly: this targets id-resolution specifically. It does not address
+(and wasn't expected to address) the separate prose-drift/fabrication
+weakness from §6 (a model still summarizing the wrong section of a large
+tool payload, or inventing a detail not present in the data) — that
+remains a live risk the tool-trace UI exists to mitigate, unrelated to
+whether an id was resolved correctly. It also doesn't change the
+underlying per-call latency for a genuinely large payload (a heavy
+`query_liasse` call is still a heavy call) — it only removes the EXTRA
+round trip(s) that guessing-then-retrying used to cost.
+
+**Updated go/no-go, superseding parts of §6**: `qwen2.5:7b` remains the
+better default of the two tested models (faster on every comparable
+call, and §6's own live evidence already showed it, not `llama3.1:8b`,
+successfully completing the heavier `query_liasse` call). The
+id-guessing weak point that would have undermined a naive `propose_ecriture`
+is now engineered away for both models, not just mitigated by hoping a
+bigger model happens to behave better. **This clears the specific
+blocker §6 raised for id resolution** — a future Phase 2 pass can build
+`propose_ecriture` on the assumption that `journalId`/`fiscalYearId` are
+already reliably resolved by this same context-injection mechanism
+(extend it, or have `propose_ecriture` read from the same resolved
+block), rather than trusting the model to chain lookups for those two
+reference kinds. The account-id equivalent of this question (does
+`search_accounts` chaining hold up as well) was NOT tested this pass —
+accounts were deliberately excluded from eager injection per the
+scoping decision above, and no live test targeted that specific chain
+this round. **Prose-drift/fabrication over large payloads remains
+unaddressed and is a separate, still-open risk for Phase 2 to design
+around** (e.g. a `propose_ecriture` confirmation screen must show the
+proposal's own structured fields, never trust the model's prose
+description of what it proposed — the same discipline the tool-trace UI
+already applies to reads).
 
 ## §7 — Known gaps, not attempted this pass
 

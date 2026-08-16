@@ -4,6 +4,7 @@ import { CompanyContext } from '../../common/tenant/company-context';
 import { LOCAL_MODEL_PORT, LocalModelPort } from './local-model/local-model.port';
 import { LocalChatMessage } from './local-model/local-model.types';
 import { ReadToolsService } from './tools/read-tools.service';
+import { ChatContextService } from './chat-context.service';
 
 /**
  * Hard cap on tool-call round-trips within one user turn. Exists because a
@@ -19,7 +20,9 @@ const MAX_TOOL_ITERATIONS = 6;
 
 const SYSTEM_PROMPT = `Tu es l'assistant comptable local de cette entreprise, intégré à un logiciel de comptabilité française/monégasque à double entrée.
 
-Tu n'as accès qu'à des outils de LECTURE : balance, grand livre, comptes, journaux, exercices, taux de TVA, déclaration de TVA, liasse fiscale, flux de trésorerie, analyse financière, résultat fiscal, immobilisations, écritures. Utilise TOUJOURS un outil pour obtenir un chiffre réel avant de répondre — ne calcule et n'invente jamais un montant toi-même. Si un outil te renvoie une erreur, corrige tes arguments (par exemple en appelant list_fiscal_years ou search_accounts pour trouver le bon id) plutôt que de deviner.
+Tu n'as accès qu'à des outils de LECTURE : balance, grand livre, comptes, journaux, exercices, taux de TVA, déclaration de TVA, liasse fiscale, flux de trésorerie, analyse financière, résultat fiscal, immobilisations, écritures. Utilise TOUJOURS un outil pour obtenir un chiffre réel avant de répondre — ne calcule et n'invente jamais un montant toi-même. Si un outil te renvoie une erreur, corrige tes arguments plutôt que de deviner.
+
+Les exercices et journaux existants, avec leurs identifiants réels, sont déjà listés ci-dessous — utilise ces identifiants directement dans tes appels d'outils. N'appelle list_fiscal_years/list_journals que si tu as besoin d'une information qui n'y figure pas déjà. N'invente JAMAIS un identifiant à partir d'un libellé humain (ex. l'année "2026" n'est PAS un fiscalYearId).
 
 Tu ne peux, à ce stade, RIEN écrire dans la comptabilité : aucun outil d'écriture n'existe dans cette version. Si on te demande de saisir, corriger ou valider une écriture, explique clairement que cette fonctionnalité n'est pas encore disponible et oriente vers l'écran de saisie manuelle.
 
@@ -47,6 +50,7 @@ export class ChatOrchestratorService {
   constructor(
     @Inject(LOCAL_MODEL_PORT) private readonly model: LocalModelPort,
     private readonly readTools: ReadToolsService,
+    private readonly chatContext: ChatContextService,
     private readonly config: ConfigService,
   ) {}
 
@@ -57,8 +61,12 @@ export class ChatOrchestratorService {
   ): Promise<OrchestratedMessage[]> {
     const modelName = this.config.get<string>('LOCAL_MODEL_NAME') ?? 'qwen2.5:7b';
     const tools = this.readTools.getAll().map((t) => t.spec);
+    // Eagerly resolved every turn (fiscal years/journals are small, bounded
+    // per company) so the model reads real ids instead of guessing them —
+    // see chat-context.service.ts's own doc comment for why this exists.
+    const context = await this.chatContext.buildContext(company);
     const messages: LocalChatMessage[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: `${SYSTEM_PROMPT}\n\n${context}` },
       ...history,
       { role: 'user', content: userContent },
     ];

@@ -28,9 +28,15 @@ function buildOrchestrator(modelResponses: LocalCompletionResult[]) {
       Promise.resolve({ ok: true, value: { balance: '100.00' } }),
     ),
   };
+  const chatContext = { buildContext: jest.fn(() => Promise.resolve('(contexte résolu)')) };
   const config = { get: jest.fn(() => 'qwen2.5:7b') } as unknown as ConfigService;
-  const orchestrator = new ChatOrchestratorService(model, readTools as never, config);
-  return { orchestrator, model, readTools };
+  const orchestrator = new ChatOrchestratorService(
+    model,
+    readTools as never,
+    chatContext as never,
+    config,
+  );
+  return { orchestrator, model, readTools, chatContext };
 }
 
 describe('ChatOrchestratorService', () => {
@@ -130,5 +136,17 @@ describe('ChatOrchestratorService', () => {
       { role: 'assistant', content: 'bonjour !' },
       { role: 'user', content: 'et maintenant ?' },
     ]);
+  });
+
+  it('fetches and appends the resolved reference context (fiscal years/journals with real ids) to the system message every turn', async () => {
+    const { orchestrator, model, chatContext } = buildOrchestrator([
+      { content: 'ok', toolCalls: [] },
+    ]);
+    await orchestrator.runTurn(company, [], 'une question');
+
+    expect(chatContext.buildContext).toHaveBeenCalledWith(company);
+    const sentMessages = model.complete.mock.calls[0][0].messages;
+    expect(sentMessages[0].role).toBe('system');
+    expect(sentMessages[0].content).toContain('(contexte résolu)');
   });
 });
