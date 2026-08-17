@@ -227,3 +227,93 @@ company** — every scenario the build instruction required:
 - **Ambiguity-handling not re-verified via the file path specifically**
   — see §3's own reasoning for why this was judged sufficient without a
   duplicate live run.
+
+## §5 — Speed benchmark: is a 3B model a viable fix for CPU latency? (2026-08-17)
+
+A live complaint — a simple one-invoice `propose_ecriture` turn taking up
+to ~4 minutes on `qwen2.5:7b`/CPU, with the trace showing
+`extract_invoice_facts` succeeding fast and the model's own tool-calling
+step being 100% of the wait — prompted this benchmark, run against the
+**exact same fixture** (`__fixtures__/test-invoice.pdf`) and the
+**exact same prompt** (explicit account numbers 606100/401000, journal
+id, fiscal year id supplied directly, isolating "map facts to a tool
+call" from "resolve references"), same FR demo company, one model
+swapped at a time via `LOCAL_MODEL_NAME` + a full backend restart
+(`ConfigService` reads it once at boot, not hot-reloadable).
+
+**Result: none of the three models tested reliably completes this task
+quickly. This is a genuine negative result, not spun.**
+
+| Model | Time | Called `propose_ecriture`? | Failure mode |
+|---|---|---|---|
+| `qwen2.5:7b` (original, extensively-verified prompt) | 120.1s (full timeout) | No | Never returned — hit `LOCAL_MODEL_TIMEOUT_MS` after burning 4 unneeded lookup calls in earlier runs; this run timed out outright |
+| `qwen2.5:3b` | 105.5s | No | Made 4 unnecessary tool calls (`search_accounts`×2, `list_journals`, `query_trial_balance`) despite every fact being supplied directly in the prompt, then returned an **empty response** (`content: "", toolCalls: null`) |
+| `llama3.2:3b` (original prompt) | 31.5s | No | Fast, but wrote a **prose description** of the écriture ("Débit : 606100 = -120,00 €...") instead of calling the tool — negative signed amounts, no structured `dto`, nothing `ProposalCard` could render. A silent non-write that reads as an answer |
+| `llama3.2:3b` (+ minimal tool-call nudge, see below) | 23.8s | No | Same failure, different shape: emitted a **fake pseudo-code call** (`Propose_ecriture(id_fiscalYear=...)`) as prose text rather than a real structured tool call |
+
+**Prompt-tightening was tried and made things worse, twice, before being
+fully reverted — record this so a future session doesn't re-attempt it
+naively.** Two "reduce generation for speed" edits to `SYSTEM_PROMPT`
+were tried live against `qwen2.5:7b` (previously reliable across
+extensive Phase 1/2 testing) and both broke it in NEW ways never seen
+before:
+  1. Adding a literal example confirmation phrase ("Proposition
+     envoyée.") as a brevity hint caused **both** `qwen2.5:7b` (82s) and
+     `llama3.2:3b` (28s, reproduced twice) to emit that exact phrase
+     without ever calling `propose_ecriture` — a false claim of a
+     completed action, worse than a timeout because nothing signals the
+     failure.
+  2. Replacing it with an explicit "RÈGLE ABSOLUE" anti-hallucination
+     rule (forbidding exactly that false-claim pattern) caused
+     `qwen2.5:7b` to return a **completely empty response** instead
+     (101s) — no false claim, but still not a valid call.
+  A third, narrower attempt — one sentence added to the existing
+  `propose_ecriture` paragraph ("n'écris jamais les comptes/montants
+  d'une proposition uniquement en texte sans appeler cet outil"),
+  tested only against `llama3.2:3b` since that was the model it aimed
+  to fix — is the "fake pseudo-code call" row above: still no real tool
+  call, just a different-shaped failure. **All three tightening
+  attempts were reverted.** `chat-orchestrator.service.ts`'s
+  `SYSTEM_PROMPT` is confirmed byte-identical to its Phase 2 committed
+  version (`git diff` empty) as of this benchmark's conclusion. The
+  lesson: naive brevity-oriented prompt edits are fragile on this model
+  class and can silently trade a slow-but-safe failure (timeout, caught
+  by the existing degradation path) for a fast-but-dangerous one (a
+  false completion claim, or fabricated pseudo-tool-call text) — any
+  future prompt change for this path needs live verification against
+  BOTH a false-claim regression test and an actual tool-call check,
+  not just a text-content assertion like the one this session
+  originally added and then had to remove
+  (`chat-orchestrator.service.spec.ts` — that added test was itself
+  reverted since it only checked prompt text, never proved a tool call
+  actually happened; it would not have caught either of the two
+  further failure modes found afterward).
+
+**What this means, per the go/no-go framing this benchmark was
+explicitly run to answer:** a fast local model does NOT currently do
+this task reliably. `llama3.2:3b` is fast enough (23–32s, comfortably
+under the 30s target) but fails at the structural requirement (a real
+tool call, not prose) on every prompt variant tried. `qwen2.5:3b` is
+neither fast nor reliable. `qwen2.5:7b` remains the only model with an
+extensively-verified correctness track record for this exact tool
+(Phase 2 §3), but is now confirmed to sometimes exceed the 120s timeout
+outright on this exact CPU-only hardware for this exact task, not just
+run close to it. **Per the user's own explicit framing: this is the
+evidence that the cloud-adapter tier is the next priority for the
+invoice→propose_ecriture path**, not further local prompt engineering
+or a smaller model swap — a 3B model class has now been shown twice
+(two different models, three prompt variants, one narrowly-targeted
+nudge) to fail the STRUCTURAL requirement (emitting a real tool call)
+regardless of speed, which is not a problem a bigger timeout, a faster
+machine, or more prompt tuning fixes.
+
+**Timeout was deliberately left unchanged (`LOCAL_MODEL_TIMEOUT_MS=120000`)**,
+per the explicit instruction to only raise it if a specific model needed
+"slightly more time but is otherwise usable" — no model tested met that
+bar (the ones that were fast were unreliable; the one that's reliable
+timed out outright on this run, not marginally).
+
+**Not built this pass, per explicit instruction**: the cloud-adapter
+tier itself (a second `LocalModelPort`... implementation, or a distinct
+`RemoteModelPort`, pointed at a hosted model for this specific path).
+This benchmark's job was only to decide whether it's needed — it is.

@@ -1964,6 +1964,38 @@ only what must never be re-derived from memory.
   not independently re-run via the file path (the underlying
   `propose_ecriture` code path is identical either way — see the spec's
   §3 for the full reasoning).
+- **CPU latency on `propose_ecriture` was benchmarked (2026-08-17) —
+  see `specs/ai-chatbot-phase2-implementation-spec.md` §5, and don't
+  re-attempt naive prompt-tightening for speed without reading it
+  first.** A live complaint (a single invoice taking up to ~4 minutes,
+  entirely in the model's own generation step, not extraction) prompted
+  a same-fixture, same-prompt, one-variable-at-a-time comparison of
+  `qwen2.5:7b` (the existing default) against `qwen2.5:3b` and
+  `llama3.2:3b`. **Result: none of the three reliably completes this
+  task quickly** — `qwen2.5:7b` is the only one with a real correctness
+  track record but this run hit the full 120s timeout outright;
+  `qwen2.5:3b` was both slow (105s) and wrong (empty response, after 4
+  unneeded lookup calls despite every fact being supplied directly);
+  `llama3.2:3b` was fast (24–32s, under the speed target) but on every
+  prompt variant tried — including a narrowly-targeted nudge — never
+  actually called `propose_ecriture`, instead writing a prose
+  description (once with impossible negative signed amounts) or a
+  fabricated pseudo-code call as plain text. **Three separate live
+  attempts at tightening `SYSTEM_PROMPT` for brevity/speed each broke
+  `qwen2.5:7b`'s previously-reliable tool-calling in a NEW way** (a
+  false "Proposition envoyée." success claim with no tool call at all;
+  then a completely empty response after the false-claim fix; a third,
+  narrower nudge tested only against `llama3.2:3b` produced the
+  fabricated-pseudo-call failure) — **all three were fully reverted**,
+  `chat-orchestrator.service.ts`'s `SYSTEM_PROMPT` is confirmed
+  byte-identical to its Phase 2 committed version. `LOCAL_MODEL_TIMEOUT_MS`
+  was deliberately left at `120000` — no tested model qualified for
+  "needs slightly more time but is otherwise usable." **This is the
+  evidence, per the standing instruction that prompted the benchmark,
+  that a cloud-tier model adapter for this specific path is now the
+  next priority** — not a smaller local model, not more prompt tuning,
+  not a longer timeout. Not built this pass; the benchmark's job was
+  only to decide whether it's needed.
 
 ## Known scope boundaries
 
@@ -2284,7 +2316,17 @@ A-1 §VIII uncross-checked).
    never model-triggered) with its own file-sourced prompt-injection
    test passing live alongside the original chat-text one. Known open
    item: multi-invoice chaining reliability (the gate holds, the UX
-   isn't fully solved yet).
+   isn't fully solved yet). **A live CPU-latency complaint on this exact
+   path (2026-08-16/17) was benchmarked** — see "Known gaps... CPU
+   latency on `propose_ecriture` was benchmarked" above and
+   `specs/ai-chatbot-phase2-implementation-spec.md` §5: neither a
+   smaller local model (`qwen2.5:3b`, `llama3.2:3b`) nor prompt
+   tightening on the existing default (`qwen2.5:7b`) reliably solves it
+   — the 3B models fail to actually call `propose_ecriture` regardless
+   of speed, and three separate prompt-tightening attempts each broke
+   the 7B model's previously-reliable behavior in a new way (all
+   reverted). **Next priority for this path is a cloud-tier model
+   adapter**, not further local-model iteration — not started.
 
 Not on this numbered list but still open whenever it's picked back up:
 widening either VAT computation — FR: remaining taux particuliers beyond
