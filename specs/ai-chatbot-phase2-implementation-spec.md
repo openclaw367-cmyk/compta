@@ -317,3 +317,54 @@ timed out outright on this run, not marginally).
 tier itself (a second `LocalModelPort`... implementation, or a distinct
 `RemoteModelPort`, pointed at a hosted model for this specific path).
 This benchmark's job was only to decide whether it's needed — it is.
+
+## §5b — Follow-up: does a coder-tuned 7B fix tool-call reliability? (2026-08-17)
+
+Hypothesis tested: a coder-tuned model (`qwen2.5-coder:7b`, pulled fresh,
+confirmed `tools` capability via `/api/show`) might emit well-formed
+structured tool calls more reliably than the general-purpose models
+above, since that's exactly where `qwen2.5:3b`/`llama3.2:3b` failed
+(prose, fabricated pseudo-code). Same harness, same fixture, same
+prompt as §5, `LOCAL_MODEL_TIMEOUT_MS` left at `120000`. **Run 3
+times, not once, specifically to test reliability, not a single lucky
+result.**
+
+| Run | Time | Called `propose_ecriture`? | What happened |
+|---|---|---|---|
+| 1 | 99.8s | No | Wrote `{"name": "propose_ecriture", "arguments": {...}}` as plain-text `content` (`toolCalls: null`) — well-formed JSON *shape*, but never the real Ollama tool-call channel. Amounts formatted `"120,00 €"` (would fail `CreateEcritureDto` validation even if real), `compteId` set to the account NUMBER, not a resolved id |
+| 2 | 29.1s | No | Same fake-JSON-in-text pattern. Worse: only ONE ligne present (débit 606100, no crédit line at all — unbalanced by omission), plus a literal placeholder string `"<taux_tva_id_20>"` for `vatRateId` |
+| 3 | 40.0s | No | Same pattern again, and the JSON itself is malformed/truncated (missing closing brace). Uses `compteAuxId` set to the company's own SIREN, and routes VAT to account `267000` (titres de participation — completely wrong account family) |
+
+**0/3 valid. The hypothesis is refuted, and this is a distinct new
+failure mode from every model tested in §5** — not prose (llama3.2:3b),
+not an empty response (qwen2.5:3b), but a fourth pattern: **the model
+writes something that LOOKS like a tool call (correct function name,
+plausible-looking JSON) but emits it as ordinary text content instead
+of using Ollama's actual structured tool-calling response field.**
+`toolCalls` is `null` on all three runs; `ChatOrchestratorService`
+correctly does not treat prose-that-looks-like-JSON as a tool
+invocation (see `runTurn()` — it only acts on `result.toolCalls`, never
+parses `result.content`), so the existing gate held: nothing was
+persisted as a real proposal, `ProposalCard` never rendered anything,
+and — same as every other run in this benchmark — zero écritures were
+created or at risk. Being coder-tuned did not help it use Ollama's tool
+API correctly; if anything the model's fluency at producing
+JSON-shaped TEXT may be part of why it defaults to writing the call out
+longhand instead of invoking the mechanism.
+
+**Consistency observation, since the user asked specifically for it**:
+all three runs failed the same way (fake-JSON-as-prose), so this is a
+consistent, reproducible failure mode, not a coin-flip between working
+and not — which also means it is NOT "1-in-3 usable," it's 0-in-3.
+Timing was inconsistent (99.8s / 29.1s / 40.0s) with no correctness
+payoff for the slowest run, reinforcing that latency variance on this
+hardware is real but is not the binding constraint here — correctness
+is.
+
+**Verdict, per the user's own decision framing**: still unreliable
+after testing a fourth model (two general 3B, one general 7B, one
+coder-tuned 7B) and five prompt variants across the two benchmark
+sessions. This is a second, independent data point for the cloud tier,
+not a reversal of §5's conclusion. `.env`'s `LOCAL_MODEL_NAME` was
+restored to the default `qwen2.5:7b` and the dev server restarted with
+it before this session ended.

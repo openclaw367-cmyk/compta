@@ -1996,6 +1996,26 @@ only what must never be re-derived from memory.
   next priority** — not a smaller local model, not more prompt tuning,
   not a longer timeout. Not built this pass; the benchmark's job was
   only to decide whether it's needed.
+- **Follow-up (same day): a coder-tuned 7B was tried too and also
+  failed, 0/3 runs — see spec §5b.** Hypothesis was that
+  `qwen2.5-coder:7b` might emit well-formed structured tool calls more
+  reliably than the general models above, since malformed tool calls
+  were exactly where they failed. Tested 3 times (reliability, not a
+  single lucky run) on the identical harness/fixture/prompt: **0/3
+  produced a real tool call.** All three runs (99.8s/29.1s/40.0s) wrote
+  a well-formed-LOOKING `{"name": "propose_ecriture", ...}` string as
+  plain `content` text instead of using Ollama's actual tool-calling
+  response field (`toolCalls: null` every time) — a fourth distinct
+  failure mode from the ones already catalogued in §5 (not prose, not
+  empty, but JSON-shaped text masquerading as a call), and the
+  arguments inside that text were themselves invalid whenever examined
+  (comma-formatted money strings, a placeholder `"<taux_tva_id_20>"`,
+  an unbalanced écriture missing its crédit line, a nonsense account
+  substitution). The existing gate held regardless — `runTurn()` only
+  acts on the real `toolCalls` field, never parses prose looking for a
+  call, so nothing was ever at risk of being proposed or persisted.
+  **Second independent data point for the cloud tier, not a
+  reversal.**
 
 ## Known scope boundaries
 
@@ -2325,8 +2345,13 @@ A-1 §VIII uncross-checked).
    — the 3B models fail to actually call `propose_ecriture` regardless
    of speed, and three separate prompt-tightening attempts each broke
    the 7B model's previously-reliable behavior in a new way (all
-   reverted). **Next priority for this path is a cloud-tier model
-   adapter**, not further local-model iteration — not started.
+   reverted). **A coder-tuned 7B (`qwen2.5-coder:7b`) was tried as a
+   follow-up and also failed, 0/3 runs** — see spec §5b: a fourth,
+   distinct failure mode (a well-formed-looking tool call written as
+   plain text instead of a real structured call), confirming this
+   isn't a single-model quirk. **Next priority for this path is a
+   cloud-tier model adapter**, not further local-model iteration — not
+   started.
 
 Not on this numbered list but still open whenever it's picked back up:
 widening either VAT computation — FR: remaining taux particuliers beyond
