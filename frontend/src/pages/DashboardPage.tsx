@@ -12,6 +12,7 @@ import {
   formatMoneyFr,
   formatPercent,
   isNegativeMoney,
+  isZeroMoney,
   moneyRatio,
   subtractMoneyStrings,
 } from '../lib/money';
@@ -386,9 +387,11 @@ function RecentBankEntriesSection({ entries }: { entries: DashboardRecentEntry[]
                   <td className="py-2 pr-3 whitespace-nowrap tabular-nums text-ink-muted">
                     {formatDateFr(entry.ecritureDate)}
                   </td>
-                  <td className="py-2 pr-3 text-ink">
+                  <td className="max-w-0 w-full py-2 pr-3 text-ink">
                     <div className="flex items-center gap-1.5">
-                      <span>{entry.libelle}</span>
+                      <span className="truncate" title={entry.libelle}>
+                        {entry.libelle}
+                      </span>
                       {!entry.isValidated && (
                         <span className="shrink-0 rounded-full bg-warning-soft px-1.5 py-0.5 text-[10px] font-medium text-warning">
                           Brouillon
@@ -464,7 +467,11 @@ function ComptesCourantsSection({ lines }: { lines: DashboardAssocieBalance[] })
                     {formatMoneyFr(line.balance)}
                   </div>
                   <div className="text-[10.5px] text-ink-faint">
-                    {negative ? 'dû par la société' : "dû par l'associé"}
+                    {isZeroMoney(line.balance)
+                      ? 'solde nul'
+                      : negative
+                        ? 'dû par la société'
+                        : "dû par l'associé"}
                   </div>
                 </div>
               </div>
