@@ -849,6 +849,17 @@ export interface CloudCredentialSummary {
 export interface ChatSession {
   id: string;
   title: string | null;
+  /**
+   * Non-null while a bounded cloud-proposal thread is open on this session
+   * — see CLAUDE.md "AI chatbot cloud tier" / "server-side thread
+   * enforcement". Drives whether the composer shows "☁️ Continuer avec
+   * [Provider]" + "🔒 Revenir au local" (thread open) or "☁️ Proposer avec
+   * [Provider]" (no thread, gated on an attached file) — see
+   * AssistantPage.tsx.
+   */
+  cloudProposalThreadId: string | null;
+  /** Which provider `cloudProposalThreadId` is bound to. Null iff it is. */
+  cloudProposalProvider: CloudProvider | null;
   createdAt: string;
   updatedAt: string;
 }

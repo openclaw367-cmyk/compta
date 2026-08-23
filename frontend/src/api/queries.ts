@@ -605,12 +605,32 @@ export function useSendChatMessage() {
       }
       const formData = new FormData();
       formData.append('content', dto.content);
+      if (dto.cloudProvider) {
+        formData.append('cloudProvider', dto.cloudProvider);
+      }
       for (const file of files) {
         formData.append('files', file);
       }
       return api.postForm<ChatMessage[]>(`/ai-chat/sessions/${sessionId}/messages`, formData);
     },
     onSuccess: (_data, { sessionId }) => {
+      void queryClient.invalidateQueries({ queryKey: ['ai-chat-session', sessionId] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-chat-sessions'] });
+    },
+  });
+}
+
+/**
+ * The explicit "Revenir au local" action (see CLAUDE.md "AI chatbot cloud
+ * tier") — closes any open cloud-proposal thread on a session. Safe to
+ * call even when none is open.
+ */
+export function useCloseCloudThread() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) =>
+      api.post<ChatSession>(`/ai-chat/sessions/${sessionId}/cloud-thread/close`, {}),
+    onSuccess: (_data, sessionId) => {
       void queryClient.invalidateQueries({ queryKey: ['ai-chat-session', sessionId] });
       void queryClient.invalidateQueries({ queryKey: ['ai-chat-sessions'] });
     },

@@ -55,7 +55,10 @@ export class AiChatController {
       'written to disk, scoped strictly to this request — see invoice-extraction.service.ts) ' +
       'are parsed DETERMINISTICALLY before the model turn starts; the parsed facts are injected ' +
       'as an automatic extract_invoice_facts trace, visible the same way any other tool result ' +
-      "is. Returns every message the turn produced in order, so the caller doesn't need a refetch.",
+      "is. Returns every message the turn produced in order, so the caller doesn't need a refetch. " +
+      "Passing cloudProvider is the explicit '☁️ Proposer avec [Provider]' action (see CLAUDE.md " +
+      '"AI chatbot cloud tier") — server-side enforced via cloud-thread-gate.ts, not honored just ' +
+      'because the field was set.',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -67,6 +70,11 @@ export class AiChatController {
           type: 'array',
           items: { type: 'string', format: 'binary' },
           description: 'Optional invoice PDF/Excel attachments.',
+        },
+        cloudProvider: {
+          type: 'string',
+          enum: ['CLAUDE', 'DEEPSEEK'],
+          description: 'Omit for the default local send.',
         },
       },
       required: ['content'],
@@ -80,6 +88,18 @@ export class AiChatController {
     @Body() dto: SendChatMessageDto,
     @UploadedFiles() files?: Express.Multer.File[],
   ) {
-    return this.aiChatService.sendMessage(company, id, dto.content, files ?? []);
+    return this.aiChatService.sendMessage(company, id, dto.content, files ?? [], dto.cloudProvider);
+  }
+
+  @ApiOperation({
+    summary: 'Explicit "Revenir au local" — closes any open cloud-proposal thread on this session.',
+    description:
+      'Safe to call even when no thread is open. See CLAUDE.md "AI chatbot cloud tier" — the ' +
+      'other way a thread closes is automatically, the next time a plain local message is sent ' +
+      'in this session.',
+  })
+  @Post('sessions/:id/cloud-thread/close')
+  closeCloudThread(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
+    return this.aiChatService.closeCloudThread(company, id);
   }
 }

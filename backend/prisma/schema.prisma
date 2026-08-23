@@ -424,7 +424,10 @@ model ImportBatch {
 /// A local-only chat conversation with the AI assistant — see CLAUDE.md
 /// "AI chatbot". Company-scoped like every domain table; nothing in this
 /// table or its ChatMessage children is ever sent anywhere but the local
-/// model this company's AiChatModule talks to (see LocalModelPort).
+/// model this company's AiChatModule talks to (see LocalModelPort), UNLESS
+/// a cloud proposal thread is explicitly open (see the two fields below and
+/// CLAUDE.md "AI chatbot cloud tier" — "server-side thread/granularity
+/// enforcement").
 model ChatSession {
   id        String  @id @default(cuid())
   companyId String
@@ -433,6 +436,27 @@ model ChatSession {
   /// First ~60 chars of the opening user message — a label for the session
   /// list. Never re-derived by an extra model call just to name a session.
   title String?
+
+  /// Non-null while a bounded cloud-proposal thread is open on this
+  /// session — the server-side half of "granularity: per-invocation,
+  /// bounded to one proposal thread" (see cloud-thread-gate.ts and
+  /// CLAUDE.md "AI chatbot cloud tier"). Opened only by a turn that
+  /// supplies `cloudProvider` AND attaches a file to propose from; cleared
+  /// the instant the thread reverts to local — an explicit "Revenir au
+  /// local" action, or the next LOCAL-engine message sent in this session
+  /// (AiChatService.sendMessage()'s local branch always clears it, whether
+  /// or not one was open). A random id, not a foreign key to anything —
+  /// it exists purely to gate "is cloud still legitimately open here",
+  /// never referenced elsewhere.
+  cloudProposalThreadId String?
+
+  /// Which provider `cloudProposalThreadId` is bound to. Null whenever
+  /// cloudProposalThreadId is null; the two are always set/cleared
+  /// together, never independently. A thread may only continue for the
+  /// SAME provider it was opened with — see decideCloudThread()'s own doc
+  /// comment for why switching provider mid-thread is refused rather than
+  /// silently reassigned.
+  cloudProposalProvider CloudModelProvider?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

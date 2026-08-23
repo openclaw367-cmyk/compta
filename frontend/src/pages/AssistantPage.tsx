@@ -5,6 +5,8 @@ import {
   useAccounts,
   useChatSession,
   useChatSessions,
+  useCloseCloudThread,
+  useCloudCredentials,
   useCreateChatSession,
   useCreateEcriture,
   useFiscalYears,
@@ -23,6 +25,8 @@ import type {
 import { ApiError } from '../api/client';
 import { formatMoneyFr, isZeroMoney, normalizeMoneyInput, sanitizeAmountBuffer } from '../lib/money';
 
+const PROVIDER_LABELS: Record<CloudProvider, string> = { CLAUDE: 'Claude', DEEPSEEK: 'DeepSeek' };
+
 export function AssistantPage() {
   const availability = useLocalModelAvailability();
   const sessionsQuery = useChatSessions();
@@ -30,6 +34,8 @@ export function AssistantPage() {
   const sessionQuery = useChatSession(sessionId);
   const createSession = useCreateChatSession();
   const sendMessage = useSendChatMessage();
+  const closeCloudThread = useCloseCloudThread();
+  const cloudCredentials = useCloudCredentials();
   const [draft, setDraft] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +43,15 @@ export function AssistantPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const sessions = sessionsQuery.data ?? [];
+  const configuredProviders = (cloudCredentials.data ?? []).map((c) => c.provider);
+  // Which cloud thread (if any) is open on the CURRENT session — see
+  // CLAUDE.md "AI chatbot cloud tier" / "server-side thread enforcement".
+  // Drives whether the composer offers "☁️ Continuer avec [Provider]" +
+  // "🔒 Revenir au local" (thread open) or "☁️ Proposer avec [Provider]"
+  // per configured provider (no thread, gated on an attached file below) —
+  // a UX mirror of the server-side gate in cloud-thread-gate.ts, not the
+  // enforcement itself.
+  const openThreadProvider = sessionQuery.data?.cloudProposalProvider ?? null;
 
   useEffect(() => {
     if (!sessionId && sessionsQuery.data && sessionsQuery.data.length > 0) {
@@ -57,10 +72,18 @@ export function AssistantPage() {
     setSessionId(session.id);
   }
 
-  async function handleSend(e: FormEvent) {
-    e.preventDefault();
+  /**
+   * Shared by both the default "Envoyer" submit (no cloudProvider — always
+   * local) and every "☁️ Proposer/Continuer avec [Provider]" button
+   * (cloudProvider set). The UI-side gating below (disabling a cloud
+   * button with no file attached and no open thread) is a courtesy, not
+   * the actual boundary — see cloud-thread-gate.ts on the backend for the
+   * real, server-enforced version of the same rule.
+   */
+  async function doSend(cloudProvider?: CloudProvider) {
     const content = draft.trim();
-    if (!content || isBusy || isUnavailable) return;
+    if (!content || isBusy) return;
+    if (!cloudProvider && isUnavailable) return;
     setError(null);
     setDraft('');
     const files = attachedFiles;
@@ -72,10 +95,15 @@ export function AssistantPage() {
         sid = session.id;
         setSessionId(sid);
       }
-      await sendMessage.mutateAsync({ sessionId: sid, dto: { content }, files });
+      await sendMessage.mutateAsync({ sessionId: sid, dto: { content, cloudProvider }, files });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "L'envoi a échoué.");
+      setError(err instanceof ApiError ? err.details.join(' ') : "L'envoi a échoué.");
     }
+  }
+
+  function handleSend(e: FormEvent) {
+    e.preventDefault();
+    void doSend();
   }
 
   return (
@@ -191,14 +219,64 @@ export function AssistantPage() {
           </div>
         )}
 
-        <div className="flex items-center gap-1.5 border-t border-border px-4 pt-3">
-          <EngineBadge engine="LOCAL" cloudProvider={null} />
-          <span className="text-[11.5px] text-ink-faint">
-            — ce message sera traité localement. Vos données comptables ne quittent pas cet
-            ordinateur.
-          </span>
+        <div className="flex flex-col gap-2 border-t border-border px-4 pt-3">
+          <div className="flex items-center gap-1.5">
+            <EngineBadge engine="LOCAL" cloudProvider={null} />
+            <span className="text-[11.5px] text-ink-faint">
+              — « Envoyer » traite toujours ce message localement. Vos données comptables ne
+              quittent cet ordinateur que si vous cliquez explicitement sur une action ☁️
+              ci-dessous.
+            </span>
+          </div>
+
+          {openThreadProvider ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-md bg-warning-soft px-2.5 py-1.5 text-[11.5px] text-warning">
+              <EngineBadge engine="CLOUD" cloudProvider={openThreadProvider} />
+              <span>
+                Fil de proposition cloud ouvert avec {PROVIDER_LABELS[openThreadProvider]} — reste
+                actif tant que vous continuez dessus.
+              </span>
+              <button
+                type="button"
+                onClick={() => sessionId && void closeCloudThread.mutateAsync(sessionId)}
+                disabled={closeCloudThread.isPending}
+                className="ml-auto shrink-0 rounded-md border border-warning px-2.5 py-1 font-medium text-warning hover:bg-warning-soft disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                🔒 Revenir au local
+              </button>
+              <button
+                type="button"
+                onClick={() => void doSend(openThreadProvider)}
+                disabled={isBusy || !draft.trim()}
+                className="shrink-0 rounded-md border border-warning bg-surface px-2.5 py-1 font-medium text-warning hover:bg-warning-soft disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                ☁️ Continuer avec {PROVIDER_LABELS[openThreadProvider]}
+              </button>
+            </div>
+          ) : (
+            configuredProviders.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                {configuredProviders.map((provider) => (
+                  <button
+                    key={provider}
+                    type="button"
+                    onClick={() => void doSend(provider)}
+                    disabled={isBusy || !draft.trim() || attachedFiles.length === 0}
+                    title={
+                      attachedFiles.length === 0
+                        ? 'Joignez une facture pour proposer une écriture via ce fournisseur.'
+                        : `Envoie cette facture et ce message à ${PROVIDER_LABELS[provider]}, en dehors de cet ordinateur.`
+                    }
+                    className="rounded-md border border-warning px-2.5 py-1 text-[11.5px] font-medium text-warning hover:bg-warning-soft disabled:cursor-not-allowed disabled:border-border disabled:text-ink-faint"
+                  >
+                    ☁️ Proposer avec {PROVIDER_LABELS[provider]}
+                  </button>
+                ))}
+              </div>
+            )
+          )}
         </div>
-        <form onSubmit={(e) => void handleSend(e)} className="flex gap-2 p-4 pt-3">
+        <form onSubmit={handleSend} className="flex gap-2 p-4 pt-3">
           <input
             ref={fileInputRef}
             type="file"
@@ -214,7 +292,7 @@ export function AssistantPage() {
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isUnavailable || isBusy}
+            disabled={isBusy}
             title="Joindre une ou plusieurs factures (PDF/Excel)"
             className="rounded-md border border-border bg-surface px-3 py-2.5 text-[13px] text-ink-muted hover:bg-bg disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -224,10 +302,10 @@ export function AssistantPage() {
             type="text"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            disabled={isUnavailable || isBusy}
+            disabled={isBusy}
             placeholder={
               isUnavailable
-                ? 'Assistant indisponible — lancez un modèle local pour continuer.'
+                ? "Modèle local indisponible — utilisez une action ☁️ ci-dessus, ou lancez-le pour l'envoi local."
                 : attachedFiles.length > 0
                   ? 'Ex. « Traite la facture ci-jointe »…'
                   : 'Posez une question sur vos comptes…'

@@ -6,6 +6,7 @@ import { ChatModelMessage } from './chat-model/chat-model.types';
 import { ReadToolsService } from './tools/read-tools.service';
 import { ProposeToolsService } from './tools/propose-tools.service';
 import { ChatContextService } from './chat-context.service';
+import { ChatTool } from './tools/chat-tool';
 
 /**
  * Hard cap on tool-call round-trips within one user turn. Exists because a
@@ -39,6 +40,41 @@ export interface OrchestratedMessage {
   toolCallId?: string;
 }
 
+type ToolOutcome = { ok: true; value: unknown } | { ok: false; error: string };
+
+/**
+ * What `runTurn` needs from a tool registry — satisfied by both the pair
+ * of registries it defaults to (ReadToolsService + ProposeToolsService,
+ * merged in `executeTool` below) and by `CloudProposeToolsService` (see
+ * CLAUDE.md "AI chatbot cloud tier"), which already exposes exactly this
+ * shape. Declared here rather than imported from either concrete class so
+ * this file doesn't need to depend on `CloudProposeToolsService` just to
+ * name its type.
+ */
+export interface ChatToolRegistry {
+  getAll(): ChatTool[];
+  execute(
+    company: CompanyContext,
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<ToolOutcome>;
+}
+
+/**
+ * Overrides `runTurn`'s default local model/model-name/tool-registry for
+ * one turn — the mechanism `AiChatService.sendMessage()`'s cloud branch
+ * uses to route through a company's own Claude/DeepSeek adapter and the
+ * narrow `CloudProposeToolsService` registry instead, without duplicating
+ * the tool-calling loop below. Nothing about the loop itself changes
+ * depending on which side answers — same discipline as `ChatModelPort`
+ * itself (see that file's own doc comment).
+ */
+export interface CloudTurnOverride {
+  model: ChatModelPort;
+  modelName: string;
+  tools: ChatToolRegistry;
+}
+
 /**
  * The tool-calling loop: send the conversation + tool specs to the local
  * model, execute whatever tools it asks for, feed results back, repeat
@@ -63,12 +99,22 @@ export class ChatOrchestratorService {
     history: ChatModelMessage[],
     userContent: string,
     filePrelude: OrchestratedMessage[] = [],
+    cloudOverride?: CloudTurnOverride,
   ): Promise<OrchestratedMessage[]> {
-    const modelName = this.config.get<string>('LOCAL_MODEL_NAME') ?? 'qwen2.5:7b';
+    const modelPort = cloudOverride?.model ?? this.model;
+    const modelName =
+      cloudOverride?.modelName ?? this.config.get<string>('LOCAL_MODEL_NAME') ?? 'qwen2.5:7b';
     // The full set the model may call this turn: every read tool plus the
-    // one propose-only write-adjacent tool. Phase 1's own read registry is
-    // untouched by this — see read-tools.service.ts's doc comment.
-    const tools = [...this.readTools.getAll(), ...this.proposeTools.getAll()].map((t) => t.spec);
+    // one propose-only write-adjacent tool — UNLESS a cloud override
+    // supplies its own narrow registry (see CloudTurnOverride's own doc
+    // comment), in which case that registry's tools are the ONLY ones
+    // offered. Phase 1's own read registry is untouched by either path —
+    // see read-tools.service.ts's doc comment.
+    const tools = (
+      cloudOverride
+        ? cloudOverride.tools.getAll()
+        : [...this.readTools.getAll(), ...this.proposeTools.getAll()]
+    ).map((t) => t.spec);
     // Eagerly resolved every turn (fiscal years/journals are small, bounded
     // per company) so the model reads real ids instead of guessing them —
     // see chat-context.service.ts's own doc comment for why this exists.
@@ -88,7 +134,7 @@ export class ChatOrchestratorService {
     const produced: OrchestratedMessage[] = [...filePrelude];
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const result = await this.model.complete({ model: modelName, messages, tools });
+      const result = await modelPort.complete({ model: modelName, messages, tools });
 
       if (result.toolCalls.length === 0) {
         produced.push({ role: 'assistant', content: result.content });
@@ -99,7 +145,12 @@ export class ChatOrchestratorService {
       produced.push({ role: 'assistant', content: result.content, toolCalls: result.toolCalls });
 
       for (const call of result.toolCalls) {
-        const outcome = await this.executeTool(company, call.name, call.arguments);
+        const outcome = await this.executeTool(
+          company,
+          call.name,
+          call.arguments,
+          cloudOverride?.tools,
+        );
         const resultContent = JSON.stringify(outcome.ok ? outcome.value : { error: outcome.error });
         messages.push({
           role: 'tool',
@@ -127,16 +178,24 @@ export class ChatOrchestratorService {
   }
 
   /**
-   * Routes a tool call to whichever registry owns that name — exactly two
-   * registries exist (read-only, propose-only), so a simple lookup is
-   * clearer than a plugin abstraction neither this codebase's own
-   * conventions nor the current tool count call for.
+   * Routes a tool call to whichever registry owns that name. With a cloud
+   * override's narrow registry supplied, that registry is the ONLY place
+   * looked up — a cloud turn can never fall through to the full local
+   * read-tools registry even if the model asks for a tool by a name that
+   * happens to collide. Without one, exactly two registries exist
+   * (read-only, propose-only), so a simple lookup is clearer than a plugin
+   * abstraction neither this codebase's own conventions nor the current
+   * tool count call for.
    */
   private executeTool(
     company: CompanyContext,
     name: string,
     args: Record<string, unknown>,
+    toolRegistry?: ChatToolRegistry,
   ): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
+    if (toolRegistry) {
+      return toolRegistry.execute(company, name, args);
+    }
     if (this.readTools.getAll().some((t) => t.spec.name === name)) {
       return this.readTools.execute(company, name, args);
     }

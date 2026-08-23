@@ -11,6 +11,7 @@ import { FinancialAnalysisModule } from '../financial-analysis/financial-analysi
 import { ResultatFiscalModule } from '../resultat-fiscal/resultat-fiscal.module';
 import { DepreciationModule } from '../depreciation/depreciation.module';
 import { EntriesModule } from '../entries/entries.module';
+import { CloudCredentialsModule } from '../cloud-credentials/cloud-credentials.module';
 import { ChatModelModule } from './chat-model/chat-model.module';
 import { ReadToolsService } from './tools/read-tools.service';
 import { ProposeToolsService } from './tools/propose-tools.service';
@@ -35,15 +36,22 @@ import { AiChatController } from './ai-chat.controller';
  * this module: a confirmed proposal reaches the ledger only through the
  * frontend's ORDINARY `POST /entries` call — this module has no code
  * path to that write at all, gated or otherwise.
- * `CloudProposeToolsService` (see CLAUDE.md "AI chatbot cloud tier") is
- * a THIRD registry, for the not-yet-wired-in cloud path — it inherits
- * this same non-persisting guarantee by construction, since it only
- * reuses `ProposeToolsService`'s own `propose_ecriture` `ChatTool` object
- * plus two of `ReadToolsService`'s tools (`search_accounts`,
- * `list_vat_rates`), never the other 14. Registered here as a normal DI
- * provider; not yet injected into `ChatOrchestratorService` — that
- * wiring, and the server-side enforcement of when a turn is allowed to
- * use it, is a later, separate build step.
+ * `CloudProposeToolsService` (see CLAUDE.md "AI chatbot cloud tier") is a
+ * THIRD registry, for the cloud path — it inherits this same
+ * non-persisting guarantee by construction, since it only reuses
+ * `ProposeToolsService`'s own `propose_ecriture` `ChatTool` object plus
+ * two of `ReadToolsService`'s tools (`search_accounts`, `list_vat_rates`),
+ * never the other 14. `AiChatService` injects it directly (not through
+ * `ChatOrchestratorService`'s constructor — that class stays
+ * registry-agnostic via `CloudTurnOverride`, see
+ * chat-orchestrator.service.ts) for its cloud branch, `sendCloudMessage()`.
+ * The server-side gate on WHEN a turn is allowed to use it (credential
+ * existence + thread/file context) lives in `cloud-thread-gate.ts`, not
+ * here.
+ * `CloudCredentialsModule` is imported for that same cloud branch —
+ * `CloudCredentialsService.getDecryptedKey()` is the one call in this
+ * whole module that ever touches a real plaintext API key, and only for
+ * the duration of constructing that turn's cloud adapter.
  * `CompaniesModule` is imported for `ChatContextService`'s eager-context
  * fetch (see that file), which calls `CompaniesService.findCurrent()`
  * only — `updateCurrent()` exists on that class but nothing in this
@@ -63,6 +71,7 @@ import { AiChatController } from './ai-chat.controller';
     ResultatFiscalModule,
     DepreciationModule,
     EntriesModule,
+    CloudCredentialsModule,
     ChatModelModule,
   ],
   controllers: [AiChatController],
