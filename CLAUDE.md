@@ -2017,7 +2017,7 @@ only what must never be re-derived from memory.
   **Second independent data point for the cloud tier, not a
   reversal.**
 
-## AI chatbot cloud tier (design approved, build in progress)
+## AI chatbot cloud tier (build order complete, real-key verification pending)
 
 Four local models, five prompt variants (see the two entries directly
 above) all failed to reliably produce a valid `propose_ecriture` call —
@@ -2201,18 +2201,113 @@ before touching this again, this section is deliberately compressed.
   behind); and the composer's/historical messages' 🔒 Local badges
   rendering correctly from real persisted data. 428 backend tests pass
   unmodified; frontend `tsc`/`eslint`/`vite build` all clean.
-- **Build order**: rename (done) → `CloudModelCredential` + key
-  handling (done) → Claude adapter (done) → DeepSeek adapter (done) →
-  narrow cloud tool registry (done) → consent flow + always-visible
-  indicator (done) → server-side thread/granularity enforcement. Not
-  shippable until the residency facts above are verified (done — see
-  the spec's citations), both cloud adapters are verified against their
-  real APIs with real keys (not yet done for either), and the
-  server-side enforcement step itself lands — today `EngineBadge`
-  always shows 🔒 Local because no code path can produce a CLOUD
-  message yet; the composer's "☁️ Proposer avec [Provider]" per-
-  invocation action from the original design also isn't built yet,
-  since it depends on that same wiring.
+- **Server-side thread/granularity enforcement is built** (2026-08-23,
+  same day as the consent flow) — the final agreed build-order step, and
+  the one that actually makes a cloud turn REACHABLE. Three new pieces:
+  - **`ChatSession.cloudProposalThreadId`/`cloudProposalProvider`** (new
+    fields, migration `20260823110526_add_chat_session_cloud_thread`) —
+    non-null while a bounded cloud-proposal thread is open, always
+    set/cleared together.
+  - **`cloud-thread-gate.ts`'s `decideCloudThread()`** (pure function,
+    its own spec file) is the actual server-side boundary — called by
+    `AiChatService.sendCloudMessage()` BEFORE any message is persisted or
+    thread state mutated. Two independent rules: a NEW thread may only
+    open when THIS turn attaches a file (`hasAttachedFiles`); an
+    already-open thread may continue with no new file but ONLY for the
+    SAME provider it was opened with (a provider switch is refused,
+    naming the open provider, rather than silently reassigned).
+    Credential existence is checked separately, first, via
+    `CloudCredentialsService.getDecryptedKey()` (already throws
+    `NotFoundException`) — so a request that was always going to fail
+    never has a side effect either way.
+  - **`ChatOrchestratorService.runTurn()` gained an optional
+    `CloudTurnOverride`** (`{ model, modelName, tools }`) rather than a
+    second copy of the tool-calling loop — with one supplied, `runTurn`
+    uses that model port/model name/tool registry instead of the local
+    defaults, and `executeTool()` routes to ONLY that registry (never
+    falls through to the local read+propose registries even on a name
+    collision). `AiChatService` gained a genuinely separate
+    `sendCloudMessage()` method (not a branch inside `sendLocalMessage()`)
+    that constructs the right adapter via the new
+    `chat-model/cloud-model-registry.ts` (`createCloudModelAdapter()` +
+    `CLOUD_MODEL_NAMES`, the one place that switches on
+    `CloudModelProvider` to pick `claude-opus-5` / `deepseek-v4-pro`) and
+    passes `CloudProposeToolsService` as the override's registry — never
+    the full local ones. `SendChatMessageDto.cloudProvider` (optional)
+    is the wire-level trigger: presence IS the explicit "☁️ Proposer
+    avec [Provider]" action, absence always means local — enforced by
+    dispatch in `sendMessage()`, not a shared branchy body.
+  - **Auto-revert, both halves working exactly as designed**:
+    `sendLocalMessage()`'s own session-update call unconditionally clears
+    `cloudProposalThreadId`/`cloudProposalProvider` — a plain local send
+    IS the "user sends anything unrelated" signal, so no separate
+    polling/expiry mechanism was needed. The explicit half is
+    `AiChatService.closeCloudThread()` / `POST
+    /ai-chat/sessions/:id/cloud-thread/close` (the "Revenir au local"
+    action), safe to call even when no thread is open.
+  - **Frontend**: `AssistantPage.tsx`'s composer reads
+    `useCloudCredentials()` + the current session's own
+    `cloudProposalProvider` to decide what to show — no thread open →
+    one "☁️ Proposer avec [Provider]" button per configured provider,
+    disabled until a file is attached; thread open → ONLY that
+    provider's "☁️ Continuer avec [Provider]" (no new file required) plus
+    "🔒 Revenir au local", never a different provider's button (the UI
+    structurally can't even attempt the cross-provider case the backend
+    also refuses — defense in depth, not redundant). The default
+    "Envoyer" submit is untouched — always local, never gated on
+    anything cloud-related. Text input/attach are now only disabled by
+    `isBusy`, not by local-model unavailability, specifically so a cloud
+    action stays usable even when the local model is down — the whole
+    point of this cloud tier. `useCloseCloudThread()` follows this file's
+    existing mutation+invalidate convention.
+  - **Verified two ways.** New unit tests: `cloud-thread-gate.spec.ts`
+    (all four rule combinations in isolation), `chat-orchestrator.service.spec.ts`
+    (`cloudOverride` routes to the override model/registry, never the
+    local ones), `ai-chat.service.spec.ts` (credential-missing rejection
+    with zero side effects, no-file rejection, opening a thread, continuing
+    one, provider-switch rejection, auto-revert-on-local-send, explicit
+    close, and a cloud-model-failure degrading cleanly without touching
+    thread state) — 445 backend tests passing overall. **Live end to end
+    against the real dev backend/DB AND, for the first time, the real
+    Anthropic API** (a test/invalid key, since no real one was available —
+    this still closes half of the two cloud adapters' previously-disclosed
+    "not verified live" gap): a real `POST .../messages` with
+    `cloudProvider: "CLAUDE"` and an attached invoice correctly opened a
+    thread, ran `extract_invoice_facts` inside the cloud turn, called
+    `ClaudeCloudModelAdapter` which reached `api.anthropic.com` for real
+    and got back a genuine `AuthenticationError` — `describeError()`'s
+    "clé API invalide ou révoquée" branch confirmed live, not just
+    mocked — degrading cleanly to a persisted `ChatEngine.CLOUD` message
+    naming "Revenir au local", with the composer's ☁️ Claude badges and
+    the "Fil de proposition cloud ouvert" banner rendering correctly.
+    **All four state transitions separately confirmed live afterward**:
+    (1) continuing the open thread with no new file kept the exact same
+    `cloudProposalThreadId`; (2) switching provider mid-thread (with a
+    real DeepSeek credential configured too, so the credential check
+    couldn't mask the thread check) got the exact `decideCloudThread()`
+    400 message, with the thread and message count provably untouched;
+    (3) clicking "Revenir au local" cleared both fields server-side and
+    removed the banner from the DOM; (4) — the privacy-critical one — a
+    file was attached and a thread reopened, then a plain "Envoyer" click
+    with no file was traced end to end: the network request carried no
+    `cloudProvider`, the persisted `USER` row was tagged `engine: LOCAL`
+    from the moment it was written (proof the request itself never
+    routed to cloud, not just that the reply came back local), the
+    session's thread fields went to `null` once that local turn finished,
+    and the composer's badge visibly flipped from ☁️ Claude to 🔒 Local
+    in the live DOM with the open-thread buttons gone. Test credentials
+    (Claude and DeepSeek) were revoked afterward, not left configured.
+- **Build order — complete.** rename (done) → `CloudModelCredential` +
+  key handling (done) → Claude adapter (done) → DeepSeek adapter (done)
+  → narrow cloud tool registry (done) → consent flow + always-visible
+  indicator (done) → server-side thread/granularity enforcement (done).
+  **Still open before this is genuinely shippable**: both cloud adapters
+  verified against their real APIs with a REAL (valid, paid) key — this
+  pass only proved the request/response wiring is correct end to end
+  using an invalid key, which confirms the auth-failure path but not yet
+  a successful `propose_ecriture` round trip through either provider.
+  That's the natural next check whenever a real API key is available,
+  not further build work.
 
 ## Known scope boundaries
 
@@ -2546,9 +2641,21 @@ A-1 §VIII uncross-checked).
    follow-up and also failed, 0/3 runs** — see spec §5b: a fourth,
    distinct failure mode (a well-formed-looking tool call written as
    plain text instead of a real structured call), confirming this
-   isn't a single-model quirk. **Next priority for this path is a
-   cloud-tier model adapter**, not further local-model iteration — not
-   started.
+   isn't a single-model quirk. **The cloud-tier model adapter this
+   pointed to is now built, full build order complete** (2026-08-23) —
+   see "AI chatbot cloud tier" above: `ChatModelPort` rename,
+   `CloudModelCredential` + key handling, the Claude and DeepSeek
+   adapters, the narrow cloud tool registry, the consent flow +
+   always-visible indicator, and server-side thread/granularity
+   enforcement (`cloud-thread-gate.ts`, `CloudTurnOverride`) are all done
+   and verified — including, live, a real request reaching
+   `api.anthropic.com` and a correctly-handled auth failure, plus all
+   four thread-transition rules (continue/switch-refused/revert/
+   auto-revert-on-local-send) confirmed live end to end. Only remaining
+   gap: neither adapter has been exercised with a REAL (valid) provider
+   key yet, so a successful `propose_ecriture` round trip through Claude
+   or DeepSeek is still unconfirmed — not further build work, just needs
+   a key.
 
 Not on this numbered list but still open whenever it's picked back up:
 widening either VAT computation — FR: remaining taux particuliers beyond
