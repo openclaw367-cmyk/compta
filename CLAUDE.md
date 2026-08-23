@@ -2136,15 +2136,35 @@ before touching this again, this section is deliberately compressed.
   writing the code. **Not verified live against the real API** — same
   disclosed gap as the Claude adapter, no key available in the build
   environment.
+- **The narrow cloud tool registry is built** (2026-08-23, commit
+  `13ca465`) — `CloudProposeToolsService`
+  (`src/modules/ai-chat/tools/cloud-propose-tools.service.ts`),
+  registered as a normal DI provider in `AiChatModule`. Composition and
+  filtering only, no new business logic: it reuses the exact same
+  already-tested `ChatTool` objects `ReadToolsService` and
+  `ProposeToolsService` built, filtered to a short explicit allowlist
+  (`search_accounts`, `list_vat_rates`) plus `propose_ecriture` —
+  minimization BY CONSTRUCTION, since growing `ReadToolsService`'s own
+  16-tool registry later can never silently widen what a cloud turn
+  sees (this class filters by name against its own constant, not by
+  excluding a blocklist). The constructor throws, naming the gap, if
+  `ReadToolsService` ever stops exposing an allowlisted tool (e.g. a
+  future rename). **Not yet injected into `ChatOrchestratorService`** —
+  that wiring, and the server-side enforcement of when a turn is
+  allowed to use this registry instead of the full one, is the next
+  build step, not this one. 7 new tests (including an out-of-allowlist
+  call like `query_liasse` failing cleanly rather than reaching
+  `ReadToolsService`), plus a live boot of the full app confirming the
+  module graph resolves with the new provider.
 - **Build order**: rename (done) → `CloudModelCredential` + key
   handling (done) → Claude adapter (done) → DeepSeek adapter (done) →
-  narrow cloud tool registry → consent flow + always-visible indicator
-  (composer/message/`ProposalCard`, three places) → server-side
-  thread/granularity enforcement. Not shippable until the consent flow
-  and indicator are demonstrated working, the residency facts above
-  are verified (done — see the spec's citations), and both cloud
-  adapters are verified against their real APIs with real keys (not
-  yet done for either).
+  narrow cloud tool registry (done) → consent flow + always-visible
+  indicator (composer/message/`ProposalCard`, three places) →
+  server-side thread/granularity enforcement. Not shippable until the
+  consent flow and indicator are demonstrated working, the residency
+  facts above are verified (done — see the spec's citations), and both
+  cloud adapters are verified against their real APIs with real keys
+  (not yet done for either).
 
 ## Known scope boundaries
 
