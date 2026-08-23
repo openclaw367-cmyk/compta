@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CompanyContext } from '../../common/tenant/company-context';
-import { LOCAL_MODEL_PORT, LocalModelPort } from './local-model/local-model.port';
-import { LocalChatMessage } from './local-model/local-model.types';
+import { CHAT_MODEL_PORT, ChatModelPort } from './chat-model/chat-model.port';
+import { ChatModelMessage } from './chat-model/chat-model.types';
 import { ReadToolsService } from './tools/read-tools.service';
 import { ProposeToolsService } from './tools/propose-tools.service';
 import { ChatContextService } from './chat-context.service';
@@ -51,7 +51,7 @@ export interface OrchestratedMessage {
 @Injectable()
 export class ChatOrchestratorService {
   constructor(
-    @Inject(LOCAL_MODEL_PORT) private readonly model: LocalModelPort,
+    @Inject(CHAT_MODEL_PORT) private readonly model: ChatModelPort,
     private readonly readTools: ReadToolsService,
     private readonly proposeTools: ProposeToolsService,
     private readonly chatContext: ChatContextService,
@@ -60,7 +60,7 @@ export class ChatOrchestratorService {
 
   async runTurn(
     company: CompanyContext,
-    history: LocalChatMessage[],
+    history: ChatModelMessage[],
     userContent: string,
     filePrelude: OrchestratedMessage[] = [],
   ): Promise<OrchestratedMessage[]> {
@@ -79,11 +79,11 @@ export class ChatOrchestratorService {
     // model sees "here's what I attached" → "here's what was found in it"
     // in the natural order, and is ALSO returned as the start of `produced`
     // below so the caller persists it as part of this turn's trace.
-    const messages: LocalChatMessage[] = [
+    const messages: ChatModelMessage[] = [
       { role: 'system', content: `${SYSTEM_PROMPT}\n\n${context}` },
       ...history,
       { role: 'user', content: userContent },
-      ...filePrelude.map(toLocalChatMessageFromOrchestrated),
+      ...filePrelude.map(toChatModelMessageFromOrchestrated),
     ];
     const produced: OrchestratedMessage[] = [...filePrelude];
 
@@ -150,7 +150,7 @@ export class ChatOrchestratorService {
   }
 }
 
-function toLocalChatMessageFromOrchestrated(message: OrchestratedMessage): LocalChatMessage {
+function toChatModelMessageFromOrchestrated(message: OrchestratedMessage): ChatModelMessage {
   return {
     role: message.role,
     content: message.content,

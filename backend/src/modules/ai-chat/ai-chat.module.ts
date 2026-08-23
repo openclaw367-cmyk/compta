@@ -11,7 +11,7 @@ import { FinancialAnalysisModule } from '../financial-analysis/financial-analysi
 import { ResultatFiscalModule } from '../resultat-fiscal/resultat-fiscal.module';
 import { DepreciationModule } from '../depreciation/depreciation.module';
 import { EntriesModule } from '../entries/entries.module';
-import { LocalModelModule } from './local-model/local-model.module';
+import { ChatModelModule } from './chat-model/chat-model.module';
 import { ReadToolsService } from './tools/read-tools.service';
 import { ProposeToolsService } from './tools/propose-tools.service';
 import { ChatContextService } from './chat-context.service';
@@ -53,7 +53,7 @@ import { AiChatController } from './ai-chat.controller';
     ResultatFiscalModule,
     DepreciationModule,
     EntriesModule,
-    LocalModelModule,
+    ChatModelModule,
   ],
   controllers: [AiChatController],
   providers: [

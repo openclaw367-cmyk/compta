@@ -1,5 +1,5 @@
 import { CompanyContext } from '../../../common/tenant/company-context';
-import { LocalToolSpec } from '../local-model/local-model.types';
+import { ChatModelToolSpec } from '../chat-model/chat-model.types';
 
 /**
  * A tool the chatbot may call. `execute` is a THIN DISPATCH onto an
@@ -18,7 +18,7 @@ import { LocalToolSpec } from '../local-model/local-model.types';
  * endpoint (e.g. "Fiscal year xyz not found"), because it IS that error.
  */
 export interface ChatTool {
-  spec: LocalToolSpec;
+  spec: ChatModelToolSpec;
   execute: (company: CompanyContext, args: Record<string, unknown>) => Promise<unknown>;
 }
 

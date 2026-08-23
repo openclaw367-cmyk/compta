@@ -3,8 +3,8 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ChatMessage, ChatMessageRole, ChatSession, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
-import { LOCAL_MODEL_PORT, LocalModelPort } from './local-model/local-model.port';
-import { LocalChatMessage, LocalModelAvailability } from './local-model/local-model.types';
+import { CHAT_MODEL_PORT, ChatModelPort } from './chat-model/chat-model.port';
+import { ChatModelMessage, ChatModelAvailability } from './chat-model/chat-model.types';
 import { ChatOrchestratorService, OrchestratedMessage } from './chat-orchestrator.service';
 import { InvoiceExtractionService } from './invoice-extraction.service';
 
@@ -12,9 +12,11 @@ const TITLE_MAX_LENGTH = 60;
 
 /**
  * Session/message persistence, plus the availability check the chat UI
- * degrades on. All local-only: nothing here (or in ChatOrchestratorService,
- * or any tool) ever calls an external network API — see CLAUDE.md
- * "AI chatbot" and LocalModelPort's own doc comment.
+ * degrades on. Local by default: this class is injected `CHAT_MODEL_PORT`
+ * without knowing whether that resolves to the local Ollama adapter or a
+ * cloud adapter — see CLAUDE.md "AI chatbot cloud tier" for exactly which
+ * call sites are allowed to bind a cloud adapter and why the default
+ * binding (chat-model.module.ts) never does.
  */
 @Injectable()
 export class AiChatService {
@@ -22,10 +24,10 @@ export class AiChatService {
     private readonly prisma: PrismaService,
     private readonly orchestrator: ChatOrchestratorService,
     private readonly invoiceExtraction: InvoiceExtractionService,
-    @Inject(LOCAL_MODEL_PORT) private readonly model: LocalModelPort,
+    @Inject(CHAT_MODEL_PORT) private readonly model: ChatModelPort,
   ) {}
 
-  availability(): Promise<LocalModelAvailability> {
+  availability(): Promise<ChatModelAvailability> {
     return this.model.isAvailable();
   }
 
@@ -94,7 +96,7 @@ export class AiChatService {
       });
       createdRows.push(row);
     } else {
-      const history: LocalChatMessage[] = session.messages.map(toLocalChatMessage);
+      const history: ChatModelMessage[] = session.messages.map(toChatModelMessage);
       const filePrelude = await this.extractFilePrelude(files);
       // A local model can fail mid-turn (timeout, the daemon dropping
       // connection) on real hardware — observed live during Phase 1
@@ -192,7 +194,7 @@ export class AiChatService {
   }
 }
 
-function toLocalChatMessage(row: ChatMessage): LocalChatMessage {
+function toChatModelMessage(row: ChatMessage): ChatModelMessage {
   return {
     role:
       row.role === ChatMessageRole.USER

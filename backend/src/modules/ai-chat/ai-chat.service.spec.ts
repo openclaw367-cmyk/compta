@@ -3,7 +3,7 @@ import { ChatMessageRole } from '@prisma/client';
 import { AiChatService } from './ai-chat.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
-import { LocalModelPort } from './local-model/local-model.port';
+import { ChatModelPort } from './chat-model/chat-model.port';
 import { ChatOrchestratorService } from './chat-orchestrator.service';
 import { InvoiceExtractionService } from './invoice-extraction.service';
 
@@ -40,7 +40,7 @@ function makeOrchestrator() {
 
 function makeModel(available = true, detail = 'ok') {
   const isAvailable = jest.fn().mockResolvedValue({ available, detail });
-  const model = { complete: jest.fn(), isAvailable } as unknown as LocalModelPort;
+  const model = { complete: jest.fn(), isAvailable } as unknown as ChatModelPort;
   return { model, isAvailable };
 }
 

@@ -22,7 +22,7 @@ describe('OllamaLocalModelAdapter', () => {
     jest.restoreAllMocks();
   });
 
-  it('translates a tool-call response into the normalized LocalCompletionResult shape', async () => {
+  it('translates a tool-call response into the normalized ChatModelCompletionResult shape', async () => {
     const fetchMock = jest.fn().mockResolvedValue(
       jsonResponse({
         message: {

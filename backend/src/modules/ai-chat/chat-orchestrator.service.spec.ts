@@ -1,21 +1,24 @@
 import { ConfigService } from '@nestjs/config';
 import { ChatOrchestratorService } from './chat-orchestrator.service';
 import { CompanyContext } from '../../common/tenant/company-context';
-import { LocalCompletionRequest, LocalCompletionResult } from './local-model/local-model.types';
+import {
+  ChatModelCompletionRequest,
+  ChatModelCompletionResult,
+} from './chat-model/chat-model.types';
 
 const company: CompanyContext = { companyId: 'company-1' };
 
 type ToolOutcome = { ok: true; value: unknown } | { ok: false; error: string };
 
-function buildOrchestrator(modelResponses: LocalCompletionResult[]) {
+function buildOrchestrator(modelResponses: ChatModelCompletionResult[]) {
   let call = 0;
-  // Deliberately NOT typed as jest.Mocked<LocalModelPort> — that trips
+  // Deliberately NOT typed as jest.Mocked<ChatModelPort> — that trips
   // @typescript-eslint/unbound-method on every `expect(model.complete)...`
   // below, since the interface declares `complete` as a regular method.
   // A plain object literal with jest.fn() properties sidesteps that
   // without weakening what's actually asserted.
   const model = {
-    complete: jest.fn((request: LocalCompletionRequest) => {
+    complete: jest.fn((request: ChatModelCompletionRequest) => {
       void request;
       return Promise.resolve(modelResponses[Math.min(call++, modelResponses.length - 1)]);
     }),
@@ -110,7 +113,7 @@ describe('ChatOrchestratorService', () => {
   });
 
   it('stops after the iteration cap and returns an honest fallback rather than looping forever', async () => {
-    const alwaysCallsTool: LocalCompletionResult = {
+    const alwaysCallsTool: ChatModelCompletionResult = {
       content: '',
       toolCalls: [
         { id: 'call-x', name: 'query_trial_balance', arguments: { fiscalYearId: 'fy-1' } },

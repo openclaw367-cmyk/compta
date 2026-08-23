@@ -1,13 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { LocalModelPort } from './local-model.port';
+import { ChatModelPort } from './chat-model.port';
 import {
-  LocalChatMessage,
-  LocalCompletionRequest,
-  LocalCompletionResult,
-  LocalModelAvailability,
-  LocalToolCall,
-} from './local-model.types';
+  ChatModelMessage,
+  ChatModelCompletionRequest,
+  ChatModelCompletionResult,
+  ChatModelAvailability,
+  ChatModelToolCall,
+} from './chat-model.types';
 
 interface OllamaToolCall {
   id?: string;
@@ -23,12 +23,15 @@ interface OllamaTagsResponse {
 }
 
 /**
- * ONE implementation of LocalModelPort, talking to a local Ollama daemon's
+ * ONE implementation of ChatModelPort, talking to a local Ollama daemon's
  * /api/chat over loopback HTTP. Nothing outside this file knows Ollama's
- * request/response shapes — see local-model.port.ts for why that matters.
+ * request/response shapes — see chat-model.port.ts for why that matters.
+ * This adapter never calls an external network API — "local" is a hard
+ * constraint of THIS class specifically, not of the port it implements
+ * (see chat-model.port.ts's own doc comment).
  */
 @Injectable()
-export class OllamaLocalModelAdapter implements LocalModelPort {
+export class OllamaLocalModelAdapter implements ChatModelPort {
   private readonly logger = new Logger(OllamaLocalModelAdapter.name);
   private readonly baseUrl: string;
   private readonly modelName: string;
@@ -42,7 +45,7 @@ export class OllamaLocalModelAdapter implements LocalModelPort {
     this.timeoutMs = Number(config.get<string>('LOCAL_MODEL_TIMEOUT_MS') ?? '120000');
   }
 
-  async complete(request: LocalCompletionRequest): Promise<LocalCompletionResult> {
+  async complete(request: ChatModelCompletionRequest): Promise<ChatModelCompletionResult> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
@@ -64,7 +67,7 @@ export class OllamaLocalModelAdapter implements LocalModelPort {
       const body = (await response.json()) as OllamaChatResponse;
       return {
         content: body.message.content ?? '',
-        toolCalls: (body.message.tool_calls ?? []).map(toLocalToolCall),
+        toolCalls: (body.message.tool_calls ?? []).map(toChatModelToolCall),
       };
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
@@ -78,7 +81,7 @@ export class OllamaLocalModelAdapter implements LocalModelPort {
     }
   }
 
-  async isAvailable(): Promise<LocalModelAvailability> {
+  async isAvailable(): Promise<ChatModelAvailability> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     try {
@@ -115,7 +118,7 @@ export class OllamaLocalModelAdapter implements LocalModelPort {
   }
 }
 
-function toOllamaMessage(message: LocalChatMessage): Record<string, unknown> {
+function toOllamaMessage(message: ChatModelMessage): Record<string, unknown> {
   return {
     role: message.role,
     content: message.content,
@@ -129,7 +132,7 @@ function toOllamaMessage(message: LocalChatMessage): Record<string, unknown> {
   };
 }
 
-function toOllamaTool(spec: LocalCompletionRequest['tools'][number]): Record<string, unknown> {
+function toOllamaTool(spec: ChatModelCompletionRequest['tools'][number]): Record<string, unknown> {
   return {
     type: 'function',
     function: { name: spec.name, description: spec.description, parameters: spec.parameters },
@@ -138,7 +141,7 @@ function toOllamaTool(spec: LocalCompletionRequest['tools'][number]): Record<str
 
 let fallbackCallCounter = 0;
 
-function toLocalToolCall(call: OllamaToolCall): LocalToolCall {
+function toChatModelToolCall(call: OllamaToolCall): ChatModelToolCall {
   return {
     // Not every tool-calling model emits an id — synthesize a stable one
     // so downstream code (trace persistence, tool-result matching) never
