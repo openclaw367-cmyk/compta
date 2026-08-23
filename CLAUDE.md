@@ -2107,15 +2107,44 @@ before touching this again, this section is deliberately compressed.
   the installed SDK source before writing the code. **Not verified
   live against the real API** — no key was available in the build
   environment; that check is deferred to when one is on hand.
+- **`DeepSeekCloudModelAdapter` is built** (2026-08-23, commit `3d77e46`)
+  — `src/modules/ai-chat/chat-model/deepseek-cloud-model.adapter.ts`,
+  implementing `ChatModelPort` via the official `openai` package
+  pointed at `api.deepseek.com` — DeepSeek's own current docs confirm
+  their API is deliberately OpenAI-Chat-Completions-compatible and
+  recommend the OpenAI SDK for it specifically; this is NOT the
+  "OpenAI-compatible shim for Claude" case the claude-api reference
+  warns against, since DeepSeek genuinely is an OpenAI-compatible
+  provider. **A live fact-check this pass found DeepSeek's model
+  lineup had moved on from what the earlier residency-verification
+  pass recorded**: `deepseek-chat`/`deepseek-reasoner` are deprecated
+  (retiring 2026-07-24), replaced by `deepseek-v4-pro`/
+  `deepseek-v4-flash` (1M context, 384K max output) — re-check
+  `api-docs.deepseek.com` before hardcoding a model id anywhere this
+  touches, the residency facts in
+  `specs/ai-chatbot-cloud-tier-implementation-spec.md` were about
+  storage/training-data, not model naming, and don't cover this.
+  Same design discipline as the Claude adapter (host-pinned, per-call
+  construction with a company's own decrypted key, never DI-bound).
+  Two DeepSeek-specific behaviors handled explicitly: OpenAI-shaped
+  tool results are standalone `{role: "tool", tool_call_id, content}`
+  messages needing no batching (unlike Claude's Messages API, which
+  needs consecutive tool results merged into one turn); malformed
+  tool-call-argument JSON throws a named error instead of crashing.
+  14 new tests, all passing on the first run; every `openai` SDK type
+  used was confirmed directly against the installed source before
+  writing the code. **Not verified live against the real API** — same
+  disclosed gap as the Claude adapter, no key available in the build
+  environment.
 - **Build order**: rename (done) → `CloudModelCredential` + key
-  handling (done) → Claude adapter (done) → DeepSeek adapter → narrow
-  cloud tool registry → consent flow + always-visible indicator
+  handling (done) → Claude adapter (done) → DeepSeek adapter (done) →
+  narrow cloud tool registry → consent flow + always-visible indicator
   (composer/message/`ProposalCard`, three places) → server-side
   thread/granularity enforcement. Not shippable until the consent flow
   and indicator are demonstrated working, the residency facts above
-  are verified (done — see the spec's citations), and the Claude
-  adapter is verified against the real API with a real key (not yet
-  done).
+  are verified (done — see the spec's citations), and both cloud
+  adapters are verified against their real APIs with real keys (not
+  yet done for either).
 
 ## Known scope boundaries
 
