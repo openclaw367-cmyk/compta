@@ -2370,6 +2370,166 @@ before touching this again, this section is deliberately compressed.
   — not required for correctness or safety, worth doing before this
   ships broadly to keep BYO-key spend predictable and legible.
 
+## Dashboard
+
+`src/modules/dashboard/` (as of 2026-08-24) is the app's landing
+screen — `GET /dashboard/summary`, and now the default route (`/`;
+the journal entry grid moved to `/ecritures`). A pure presentation
+layer over already-verified computations, built to the same discipline
+as the AI chatbot's read tools: every figure is a thin read of an
+existing, independently-tested service's own output, never a new
+aggregation. `DashboardService.getSummary()` composes
+`CompaniesService`, `FiscalYearsService`, `LiasseService`,
+`FinancialAnalysisService`, and `LedgerService` — no Prisma access of
+its own beyond what those services already expose.
+
+- **Data-model decision made before building, not silently assumed**:
+  comptes courants d'associés (455) was a single flat account with no
+  per-associé breakdown — the tiers/auxiliary mechanism
+  (`isAuxiliary`-bearing sub-accounts, `EcritureLigne.compteAuxId`) was
+  hard-restricted to exactly 401/411
+  (`isAuxiliaryBearingCollectif()`/`isAuxiliaryBearingAccount()`).
+  Reported to the user, who chose to widen it now rather than ship a
+  flat-total tile. Both the backend predicate
+  (`accounts.service.ts`) and its frontend mirror
+  (`frontend/src/lib/accounts.ts`) now accept `455` alongside `401`/
+  `411` — mechanical, matching the existing pattern exactly (same
+  `nextTiersNumber()` suffix logic, same `TiersPage.tsx`/
+  `EcritureEditor.tsx` UI, zero page-specific code since both already
+  drove entirely off the shared predicate). **Only affects NEW
+  auxiliary sub-accounts created going forward** — historical
+  écritures already posted to the flat `455000` collectif stay
+  unattributed to any specific associé unless re-tagged by hand; the
+  dashboard's own tile surfaces that flat balance as its own explicit
+  "Non ventilé" row rather than hiding it or guessing whose it is.
+- **Exact figure sources, so this mapping is never re-derived from
+  memory**:
+  - Trésorerie: `Bilan2050.actif`, line `CF` (Disponibilités).
+  - Chiffre d'affaires (headline + the CA-over-time chart, per fiscal
+    year): `FinancialAnalysisResult.margins.chiffreDAffaires`.
+  - À payer: `Bilan2050.passif`, line `DX` (Dettes fournisseurs et
+    comptes rattachés).
+  - Encours client: `Tableau2057.cadreA`, line `BX` —
+    **`montantBrut`, deliberately the GROSS 2057 figure, not the
+    bilan's net-of-dépréciation `BX.net`** — this tile is "how much is
+    outstanding," not a valuation.
+  - Revenus / dépenses: `CompteResultat2052_2053.totalProduits` /
+    `.totalCharges` (every produit/charge, not exploitation-only).
+  - Résultat net (Revenus-vs-dépenses card's own "Solde"):
+    `SigCascade.resultatNet` — reused directly rather than the
+    dashboard subtracting revenus − dépenses itself, even though the
+    two are algebraically identical, so there is never a possible
+    drift between the dashboard's number and the compliance figure.
+  - EBE / marge: `SigCascade.ebe` / `Margins.margeEbe` — the app's own
+    differentiator figure (see "Analyse financière" above), the one
+    thing a compliance-only tool never surfaces.
+  - Comptes courants d'associés: `LedgerService.trialBalance()`,
+    lines whose `accountNumber` starts with `455` — no new query, the
+    exact same primitive the grand livre already uses.
+  - Mouvements de trésorerie récents: a NEW method,
+    `LedgerService.recentEntriesForClass()` (pcgClass 5, most recent
+    N by date) — added because no existing method exposed this
+    cleanly (`trialBalance()` only returns per-account TOTALS,
+    `EntriesService.findAll()` has no class filter). Exactly the "new
+    reviewed service method, not dashboard-only logic" escape hatch
+    this pass's own build instruction named explicitly. No new
+    controller/endpoint — called in-process by `DashboardService`,
+    the same way `CashFlowService.buildContext()` is already called
+    directly by `FinancialAnalysisService`.
+- **`{ available: false, reason }` instead of a raw error response**
+  when the current fiscal year can't be computed (drafts present, no
+  fiscal year at all, régime réel simplifié) — a discriminated union
+  (`DashboardSummaryAvailable | DashboardSummaryUnavailable`), same
+  shape convention as `LiasseResult | LiasseSimplifieResult`. This is
+  the FIRST screen the app shows on every load, so a guard exception
+  from the underlying `generate()` calls (e.g. the drafts-block
+  `ConflictException` every other report page already throws) must
+  degrade to one honest banner rather than break the landing page —
+  `reason` is always the real underlying message, never paraphrased.
+  Régime réel simplifié gets its own explicit, distinct reason
+  (pointing at Liasse fiscale) rather than being silently handed a
+  réel-normal computation — the 2033-series has no CF/DX/BX-equivalent
+  line codes this pass's mapping could reuse; this is a stated scope
+  boundary (RÉEL_NORMAL only for now), not a bug.
+- **A real, live-found gap in the CASH FLOW module, not a dashboard
+  bug — logged here, not fixed this pass.** Testing the new 455
+  auxiliary capability end to end (creating a tiers, posting a real
+  "avance en compte courant" écriture debiting 512000/crediting the
+  new 455 sub-account) broke `FinancialAnalysisService.generate()`
+  outright — `CashFlowService.buildContext()`'s own reconciliation
+  assertion failed, because `cash-flow-statement.ts`'s three flux
+  sections (see "Tableau des flux de trésorerie" above) have NO scope
+  entry for account 455 anywhere: not BFR exploitation, not BFR hors
+  exploitation, not financing. A comptes-courants-d'associés movement
+  is economically closest to financing cash flow (akin to
+  DS/DT/DU/DV, dettes financières) but was never classified there —
+  before this pass, this never surfaced because the demo company had
+  zero 455 activity to expose it. Verified live: posting the test
+  écriture broke the dashboard with exactly this reconciliation
+  message; reversing and validating the reversal (both écritures,
+  since a validated entry can only be corrected via a real
+  contre-passation) restored it to the exact original figures,
+  confirming the gap is real and confirming nothing else broke.
+  **Not fixed this pass** — deciding where 455 belongs in the flux
+  scope is a real, judgment-heavy classification decision for
+  `cash-flow-statement.ts` (same category of decision as every other
+  scope call already logged in that module's own CLAUDE.md section),
+  not a dashboard-layer fix. Any company that starts using per-associé
+  455 sub-accounts will hit this the moment `FinancialAnalysisService`/
+  `CashFlowService` is asked to compute a fiscal year containing that
+  activity — flagged here so a future session doesn't have to
+  rediscover it live again.
+- **Hand-rolled SVG-free bar charts (plain styled `<div>`s with
+  pixel heights), no charting library added** — matches this app's
+  existing "no dependency for a handful of glyphs" discipline (the
+  sidebar's own hand-rolled icon set). Bar heights use
+  `money.ts`'s new `moneyRatio(value, max)` — the one deliberate
+  exception to "no `Number()` on a money string" in that file: the
+  division itself stays BigInt-exact (scaled to basis points) all the
+  way through, and only the final, already-safe ratio in `[0, 1]`
+  crosses into a JS `number`, at the boundary where it stops being
+  money and starts being a dimensionless UI proportion — never
+  formatted as an amount, never fed back into money arithmetic. Also
+  added: `compareMoneyStrings()` (BigInt-safe ordering, for
+  max-finding) and `isNegativeMoney()`/`formatPercent()`/
+  `formatRatio()` — the latter three were previously duplicated
+  page-local functions in `FinancialAnalysisPage.tsx`, extracted here
+  once a second file (`DashboardPage.tsx`) needed them too, same "just
+  types cross the frontend/backend boundary, not runtime code, so
+  don't duplicate runtime code *within* the frontend either"
+  discipline as `lib/accounts.ts`.
+- **Verified two ways.** `dashboard.service.spec.ts` (9 tests: régime
+  réel simplifié refusal, no-fiscal-year refusal, picks the OPEN
+  fiscal year over merely the most recent one, degrades cleanly on a
+  drafts-block exception, maps every headline figure from the
+  underlying mocked results with no re-derivation, builds CA history
+  oldest-to-newest while honestly omitting a year that fails to
+  compute rather than faking zero, never double-calls
+  `financialAnalysis.generate()` for the current year, splits
+  comptes-courants rows into named-associé vs. flat-unattributed
+  correctly, and calls the new `LedgerService` method with the right
+  arguments) plus a new `describe('recentEntriesForClass')` block in
+  `ledger.service.spec.ts` — 456 backend tests passing overall. Live
+  against the FR demo company: the full happy path confirmed correct
+  real figures end to end (trésorerie 32 355,00 €, CA 7 500,00 €, à
+  payer 2 580,00 €, encours client 6 050,00 €, EBE 5 305,00 € /
+  70,73 % — matching `GET /dashboard/summary` byte-for-byte against
+  what rendered in the browser); the drafts-block degrade path
+  confirmed live (posting a draft écriture correctly showed the exact
+  banner, with the "Consulter les écritures →" link); the new 455
+  auxiliary capability confirmed live end to end through the REAL UI
+  (Tiers page → "+ Nouveau tiers" under the newly-appearing `455000`
+  card → a real `455001` sub-account) — which is also what surfaced
+  the cash-flow gap above, itself a valuable live-verification result,
+  not a failure of this pass. No page-level horizontal overflow
+  (`document.body.scrollWidth` confirmed equal to `window.innerWidth`
+  at 1536px). Test fixtures (the `455001` "Jean Dupont" tiers) were
+  left in place — there's no delete/deactivate endpoint for `Account`
+  (see "Known scope boundaries" below), same standing limitation every
+  other test-tiers in this demo company already lives with; the
+  écriture itself was reversed and the reversal validated, restoring
+  the exact original figures.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
@@ -2727,6 +2887,19 @@ A-1 §VIII uncross-checked).
    `cache_control` prompt-caching on either adapter) worth closing
    before this ships broadly, given the BYO-key cost model — see "AI
    chatbot cloud tier" above.
+5. **Dashboard — built and now the default landing screen** (2026-08-24)
+   — see "Dashboard" above: a pure presentation layer over
+   `LiasseService`/`FinancialAnalysisService`/`LedgerService`, zero new
+   business logic, `/` now routes here (the journal grid moved to
+   `/ecritures`). Includes a small, deliberate data-model widening —
+   comptes courants d'associés (455) is now an auxiliary-bearing
+   collectif, same as 401/411 — decided with the user before building
+   the per-associé tile, not assumed. Verified live end to end,
+   including the new 455 capability through the real Tiers UI, which
+   in turn surfaced a real, NOT-yet-fixed gap in the cash-flow module
+   (comptes courants d'associés movements aren't classified into any
+   of the three flux sections — see "Dashboard" above for the full
+   finding and why it's logged rather than patched this pass).
 
 Not on this numbered list but still open whenever it's picked back up:
 widening either VAT computation — FR: remaining taux particuliers beyond
