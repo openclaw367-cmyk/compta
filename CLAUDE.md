@@ -2017,6 +2017,68 @@ only what must never be re-derived from memory.
   **Second independent data point for the cloud tier, not a
   reversal.**
 
+## AI chatbot cloud tier (design approved, build in progress)
+
+Four local models, five prompt variants (see the two entries directly
+above) all failed to reliably produce a valid `propose_ecriture` call —
+the write path specifically, not the read side. Full design (approved
+by the user 2026-08-23, one round of adjustments), the exact consent
+copy, the credential threat model, and every residency/DPA fact **with
+citations to each provider's own current primary-source policy pages**
+are in `specs/ai-chatbot-cloud-tier-implementation-spec.md` — read that
+before touching this again, this section is deliberately compressed.
+
+- **Reads stay local, always** — Phase 1's 16-tool `ReadToolsService`
+  and the `/assistant` Q&A flow are untouched by this design; no cloud
+  path is added there. Cloud is scoped to `propose_ecriture` only.
+- **`ChatModelPort`** (renamed from `LocalModelPort`, commit `79b8306`
+  — pure mechanical rename, 377 tests pass unmodified, zero behavior
+  change) is the one interface both `OllamaLocalModelAdapter` (default,
+  unchanged binding) and the planned cloud adapters implement. A cloud
+  adapter is injected at a SEPARATE, explicitly-gated call site, never
+  the default DI binding — see `chat-model.port.ts`'s own doc comment
+  for exactly which constraint moved from the port to the local adapter
+  specifically.
+- **Granularity is per-invocation, not a global toggle**: the default
+  send is always local; a distinct "☁️ Proposer avec [Provider]" action
+  appears only once cloud is configured, opens a bounded
+  cloud-proposal thread, and auto-reverts to 🔒 local on
+  confirm/discard/anything unrelated — enforced server-side (only
+  honored with a stored credential AND an active file/thread context),
+  not just by the frontend hiding a button.
+- **A narrow, separate cloud tool registry** — `propose_ecriture` plus
+  only `search_accounts`/`list_vat_rates` — never the full
+  `ReadToolsService`, so no cloud turn can reach a financial report.
+- **The residency verification surfaced one fact beyond the original
+  scope, worth remembering**: DeepSeek's own Terms of Use (§4.3) allow
+  using submitted Inputs/Outputs to improve its services, with no
+  API-specific opt-out documented — unlike Anthropic, whose Commercial
+  Terms explicitly state "Anthropic may not train models on Customer
+  Content from Services." DeepSeek's consent dialog therefore discloses
+  BOTH China-only storage (no GDPR adequacy decision) AND potential
+  training use — a stronger disclosure than Claude's, not a templated
+  copy of it.
+- **OpenAI-compatible adapter is deliberately deferred** — a
+  user-supplied endpoint can't carry a stated residency/DPA guarantee.
+  Ship Claude + DeepSeek first, the two providers whose terms could
+  actually be verified and cited.
+- **Credential threat model, stated honestly, not implied stronger than
+  it is**: server-side AES-256-GCM, key held outside the database
+  (`.env`, gitignored). Defends against a leaked DB backup or
+  DB-only compromise. Does NOT defend against full machine access or a
+  compromised backend process — accepted as "your own machine, your own
+  key" for this app's local-first, single-tenant-in-practice deployment
+  today; would need revisiting (real KMS, per-tenant keys) if this ever
+  runs multi-tenant on shared infrastructure.
+- **Build order**: rename (done) → `CloudModelCredential` + key
+  handling → Claude adapter → DeepSeek adapter → narrow cloud tool
+  registry → consent flow + always-visible indicator (composer/message/
+  `ProposalCard`, three places) → server-side thread/granularity
+  enforcement. Not shippable until the consent flow and indicator are
+  demonstrated working and the residency facts above are verified —
+  the verification is done (see the spec's citations); the flow/
+  indicator are not yet built.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
