@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import {
   useAccounts,
   useChatSession,
@@ -11,7 +12,14 @@ import {
   useLocalModelAvailability,
   useSendChatMessage,
 } from '../api/queries';
-import type { ChatMessage, ChatToolCall, ProposedEcriture, ProposedEcritureLigne } from '../api/types';
+import type {
+  ChatEngine,
+  ChatMessage,
+  ChatToolCall,
+  CloudProvider,
+  ProposedEcriture,
+  ProposedEcritureLigne,
+} from '../api/types';
 import { ApiError } from '../api/client';
 import { formatMoneyFr, isZeroMoney, normalizeMoneyInput, sanitizeAmountBuffer } from '../lib/money';
 
@@ -108,13 +116,23 @@ export function AssistantPage() {
 
       <div className="flex min-h-0 flex-1 flex-col">
         <header className="border-b border-border px-6 py-4">
-          <h1 className="text-[20px] font-semibold tracking-tight text-ink">Assistant</h1>
-          <p className="mt-0.5 text-[13px] text-ink-muted">
-            Répond en lisant vos données comptables via un modèle exécuté localement, et peut
-            proposer une écriture (y compris à partir d'une facture PDF/Excel jointe) — mais ne
-            l'enregistre jamais lui-même : toute proposition doit être relue et confirmée par
-            vous avant d'exister dans la comptabilité.
-          </p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-[20px] font-semibold tracking-tight text-ink">Assistant</h1>
+              <p className="mt-0.5 text-[13px] text-ink-muted">
+                Répond en lisant vos données comptables via un modèle exécuté localement, et peut
+                proposer une écriture (y compris à partir d'une facture PDF/Excel jointe) — mais
+                ne l'enregistre jamais lui-même : toute proposition doit être relue et confirmée
+                par vous avant d'exister dans la comptabilité.
+              </p>
+            </div>
+            <Link
+              to="/assistant/parametres"
+              className="shrink-0 rounded-md border border-border px-3 py-1.5 text-[12.5px] text-ink-muted hover:bg-bg hover:text-ink"
+            >
+              ⚙️ Fournisseurs cloud
+            </Link>
+          </div>
         </header>
 
         {isUnavailable && availability.data && (
@@ -173,7 +191,14 @@ export function AssistantPage() {
           </div>
         )}
 
-        <form onSubmit={(e) => void handleSend(e)} className="flex gap-2 border-t border-border p-4">
+        <div className="flex items-center gap-1.5 border-t border-border px-4 pt-3">
+          <EngineBadge engine="LOCAL" cloudProvider={null} />
+          <span className="text-[11.5px] text-ink-faint">
+            — ce message sera traité localement. Vos données comptables ne quittent pas cet
+            ordinateur.
+          </span>
+        </div>
+        <form onSubmit={(e) => void handleSend(e)} className="flex gap-2 p-4 pt-3">
           <input
             ref={fileInputRef}
             type="file"
@@ -235,7 +260,13 @@ function MessageRow({ message }: { message: ChatMessage }) {
 
   if (message.role === 'TOOL') {
     if (message.toolName === 'propose_ecriture') {
-      return <ToolCallProposalRow content={message.content} />;
+      return (
+        <ToolCallProposalRow
+          content={message.content}
+          engine={message.engine}
+          cloudProvider={message.cloudProvider}
+        />
+      );
     }
     return <ToolResultTrace toolName={message.toolName} content={message.content} />;
   }
@@ -243,6 +274,7 @@ function MessageRow({ message }: { message: ChatMessage }) {
   // ASSISTANT — may carry prose content, tool calls it requested, or both.
   return (
     <div className="flex flex-col gap-1.5">
+      <EngineBadge engine={message.engine} cloudProvider={message.cloudProvider} />
       {message.toolCalls && message.toolCalls.length > 0 && (
         <div className="flex flex-col gap-1">
           {message.toolCalls.map((call) => (
@@ -256,6 +288,36 @@ function MessageRow({ message }: { message: ChatMessage }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The always-visible local/cloud indicator — see CLAUDE.md "AI chatbot
+ * cloud tier". Every ASSISTANT/TOOL message carries a real, persisted
+ * `engine` (see the ChatEngine doc comment in api/types.ts); today that's
+ * always LOCAL, since no cloud engine is wired into the orchestrator yet
+ * — this renders honestly rather than decoratively: it shows exactly what
+ * `message.engine` says, nothing implied or guessed.
+ */
+function EngineBadge({
+  engine,
+  cloudProvider,
+}: {
+  engine: ChatEngine;
+  cloudProvider: CloudProvider | null;
+}) {
+  if (engine === 'CLOUD' && cloudProvider) {
+    const label = cloudProvider === 'CLAUDE' ? 'Claude' : 'DeepSeek';
+    return (
+      <span className="inline-flex w-fit items-center gap-1 rounded-full bg-warning-soft px-2 py-0.5 text-[10.5px] font-medium text-warning">
+        ☁️ {label}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex w-fit items-center gap-1 rounded-full bg-positive-soft px-2 py-0.5 text-[10.5px] font-medium text-positive">
+      🔒 Local
+    </span>
   );
 }
 
@@ -294,7 +356,15 @@ function ToolResultTrace({ toolName, content }: { toolName: string | null; conte
  * bad account id). Falls back to the generic trace for the error case,
  * since there's nothing to confirm.
  */
-function ToolCallProposalRow({ content }: { content: string }) {
+function ToolCallProposalRow({
+  content,
+  engine,
+  cloudProvider,
+}: {
+  content: string;
+  engine: ChatEngine;
+  cloudProvider: CloudProvider | null;
+}) {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
@@ -310,7 +380,13 @@ function ToolCallProposalRow({ content }: { content: string }) {
   ) {
     return <ToolResultTrace toolName="propose_ecriture" content={content} />;
   }
-  return <ProposalCard proposal={parsed as ProposedEcriture} />;
+  return (
+    <ProposalCard
+      proposal={parsed as ProposedEcriture}
+      engine={engine}
+      cloudProvider={cloudProvider}
+    />
+  );
 }
 
 interface EditableLigne extends ProposedEcritureLigne {
@@ -335,7 +411,15 @@ function commitMoney(raw: string): string {
  * (useCreateEcriture — the exact hook the manual journal grid uses). This
  * component has no other way to reach the ledger.
  */
-function ProposalCard({ proposal }: { proposal: ProposedEcriture }) {
+function ProposalCard({
+  proposal,
+  engine,
+  cloudProvider,
+}: {
+  proposal: ProposedEcriture;
+  engine: ChatEngine;
+  cloudProvider: CloudProvider | null;
+}) {
   const journals = useJournals();
   const fiscalYears = useFiscalYears();
   const accounts = useAccounts();
@@ -387,10 +471,25 @@ function ProposalCard({ proposal }: { proposal: ProposedEcriture }) {
     );
   }
 
+  const isCloud = engine === 'CLOUD';
+
   return (
-    <div className="max-w-[85%] rounded-lg border border-accent bg-surface p-4">
-      <div className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-accent">
-        Proposition d'écriture — non enregistrée, à relire avant de confirmer
+    <div
+      className={[
+        'max-w-[85%] rounded-lg border bg-surface p-4',
+        isCloud ? 'border-warning' : 'border-accent',
+      ].join(' ')}
+    >
+      <div className="mb-3 flex items-center gap-2">
+        <span
+          className={[
+            'text-[11px] font-semibold uppercase tracking-wide',
+            isCloud ? 'text-warning' : 'text-accent',
+          ].join(' ')}
+        >
+          Proposition d'écriture — non enregistrée, à relire avant de confirmer
+        </span>
+        <EngineBadge engine={engine} cloudProvider={cloudProvider} />
       </div>
 
       {proposal.assumptions.length > 0 && (

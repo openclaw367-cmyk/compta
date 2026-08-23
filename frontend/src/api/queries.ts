@@ -9,6 +9,8 @@ import type {
   ChatMessage,
   ChatSession,
   ChatSessionWithMessages,
+  CloudCredentialSummary,
+  CloudProvider,
   Company,
   DepreciationEntry,
   Ecriture,
@@ -36,6 +38,7 @@ import type {
   CreateTiersDto,
   CreateVatRateDto,
   SendChatMessageDto,
+  SetCloudCredentialDto,
   UpdateAccountDto,
   UpdateCompanyDto,
 } from './dto';
@@ -610,6 +613,40 @@ export function useSendChatMessage() {
     onSuccess: (_data, { sessionId }) => {
       void queryClient.invalidateQueries({ queryKey: ['ai-chat-session', sessionId] });
       void queryClient.invalidateQueries({ queryKey: ['ai-chat-sessions'] });
+    },
+  });
+}
+
+/**
+ * AI chatbot cloud tier (see CLAUDE.md "AI chatbot cloud tier") — every
+ * response here is a masked summary, never the real key; the backend has
+ * no endpoint that returns plaintext at all.
+ */
+export function useCloudCredentials() {
+  return useQuery({
+    queryKey: ['ai-chat-cloud-credentials'],
+    queryFn: () => api.get<CloudCredentialSummary[]>('/ai-chat/cloud-credentials'),
+  });
+}
+
+export function useSetCloudCredential() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: SetCloudCredentialDto) =>
+      api.post<CloudCredentialSummary>('/ai-chat/cloud-credentials', dto),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ai-chat-cloud-credentials'] });
+    },
+  });
+}
+
+export function useRevokeCloudCredential() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: CloudProvider) =>
+      api.delete<void>(`/ai-chat/cloud-credentials/${provider}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ai-chat-cloud-credentials'] });
     },
   });
 }

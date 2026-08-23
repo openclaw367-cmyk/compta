@@ -23,3 +23,4 @@ export type {
   DeclaredLineDto,
 } from '../../../backend/src/modules/resultat-fiscal/dto/compute-resultat-fiscal.dto';
 export type { SendChatMessageDto } from '../../../backend/src/modules/ai-chat/dto/send-chat-message.dto';
+export type { SetCloudCredentialDto } from '../../../backend/src/modules/cloud-credentials/dto/set-cloud-credential.dto';

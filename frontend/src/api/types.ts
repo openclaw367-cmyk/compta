@@ -799,6 +799,18 @@ export interface ResultatFiscalResult {
  */
 export type ChatMessageRole = 'USER' | 'ASSISTANT' | 'TOOL';
 
+/**
+ * Which port produced a message — see CLAUDE.md "AI chatbot cloud tier".
+ * Every existing message, and every write path today, is LOCAL; CLOUD is
+ * not yet reachable (no cloud engine is wired into the orchestrator yet).
+ * This field exists now so the always-visible per-message indicator has
+ * real, persisted state to render — see AssistantPage.tsx's EngineBadge.
+ */
+export type ChatEngine = 'LOCAL' | 'CLOUD';
+
+/** The two cloud providers with verified, cited residency/DPA terms — see specs/ai-chatbot-cloud-tier-implementation-spec.md. An OpenAI-compatible custom-endpoint option is deliberately deferred. */
+export type CloudProvider = 'CLAUDE' | 'DEEPSEEK';
+
 export interface ChatToolCall {
   id: string;
   name: string;
@@ -815,7 +827,23 @@ export interface ChatMessage {
   /** Only present on a TOOL message — which tool produced this result. */
   toolName: string | null;
   toolCallId: string | null;
+  /** Always LOCAL today — see the ChatEngine doc comment above. */
+  engine: ChatEngine;
+  /** Set only when engine is CLOUD. Null on every message today. */
+  cloudProvider: CloudProvider | null;
   createdAt: string;
+}
+
+/**
+ * Response shape for GET /ai-chat/cloud-credentials — never the real key,
+ * only a masked hint (e.g. "sk-...ab12"). See CloudCredentialsService on
+ * the backend: getDecryptedKey() (the one method that returns plaintext)
+ * is not exposed by any controller at all.
+ */
+export interface CloudCredentialSummary {
+  provider: CloudProvider;
+  maskedKey: string;
+  updatedAt: string;
 }
 
 export interface ChatSession {

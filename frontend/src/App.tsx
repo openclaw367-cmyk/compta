@@ -16,6 +16,7 @@ import { CashFlowPage } from './pages/CashFlowPage';
 import { FinancialAnalysisPage } from './pages/FinancialAnalysisPage';
 import { ResultatFiscalPage } from './pages/ResultatFiscalPage';
 import { AssistantPage } from './pages/AssistantPage';
+import { AssistantSettingsPage } from './pages/AssistantSettingsPage';
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="/analyse-financiere" element={<FinancialAnalysisPage />} />
         <Route path="/resultat-fiscal" element={<ResultatFiscalPage />} />
         <Route path="/assistant" element={<AssistantPage />} />
+        <Route path="/assistant/parametres" element={<AssistantSettingsPage />} />
       </Routes>
     </AppShell>
   );

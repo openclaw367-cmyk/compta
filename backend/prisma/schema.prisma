@@ -79,6 +79,19 @@ enum CloudModelProvider {
   DEEPSEEK
 }
 
+/// Which port actually produced an ASSISTANT/TOOL message — see CLAUDE.md
+/// "AI chatbot cloud tier". LOCAL is the only value any code path sets
+/// today (no cloud engine is wired into ChatOrchestratorService yet); the
+/// field exists now so the always-visible per-message indicator has real,
+/// persisted state to render the moment a cloud turn becomes possible,
+/// rather than being retrofitted later. Never inferred from
+/// `cloudProvider` being non-null — always set explicitly, together, by
+/// whichever code path persists the message.
+enum ChatEngine {
+  LOCAL
+  CLOUD
+}
+
 /// A tenant ("dossier"). The UI only ever shows one Company today, but the
 /// schema is multi-tenant from day one — every other model scopes to a
 /// companyId. See CLAUDE.md "Multi-tenant data model".
@@ -451,6 +464,19 @@ model ChatMessage {
   /// {...}") without re-parsing toolCalls off the preceding assistant row.
   toolName   String?
   toolCallId String?
+
+  /// Which port produced this message — see the ChatEngine enum's own doc
+  /// comment. Defaults to LOCAL because every existing row, and every
+  /// write path today, is local; CLOUD is not yet reachable.
+  engine ChatEngine @default(LOCAL)
+
+  /// Set only when engine is CLOUD — which provider. Null on every LOCAL
+  /// row. `engine` itself is set on every row including USER (defaults to
+  /// LOCAL, since it's a required column) even though a user's own typed
+  /// message wasn't "produced by" any port — the frontend's per-message
+  /// badge simply never renders one for the USER role, regardless of the
+  /// stored value.
+  cloudProvider CloudModelProvider?
 
   createdAt DateTime @default(now())
 

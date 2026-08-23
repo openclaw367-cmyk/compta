@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { ChatMessage, ChatMessageRole, ChatSession, Prisma } from '@prisma/client';
+import { ChatEngine, ChatMessage, ChatMessageRole, ChatSession, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { CHAT_MODEL_PORT, ChatModelPort } from './chat-model/chat-model.port';
@@ -77,7 +77,13 @@ export class AiChatService {
     const isFirstMessage = session.messages.length === 0;
 
     const userRow = await this.prisma.chatMessage.create({
-      data: { companyId: company.companyId, sessionId, role: ChatMessageRole.USER, content },
+      data: {
+        companyId: company.companyId,
+        sessionId,
+        role: ChatMessageRole.USER,
+        content,
+        engine: ChatEngine.LOCAL,
+      },
     });
     const createdRows: ChatMessage[] = [userRow];
 
@@ -92,6 +98,7 @@ export class AiChatService {
             "Aucun modèle local n'est disponible en ce moment : " +
             `${availability.detail} Aucune donnée comptable n'a quitté cette machine — le ` +
             'message est enregistré, réessayez une fois le modèle local lancé.',
+          engine: ChatEngine.LOCAL,
         },
       });
       createdRows.push(row);
@@ -135,6 +142,11 @@ export class AiChatService {
               : undefined,
             toolName: message.toolName,
             toolCallId: message.toolCallId,
+            // Every message produced in this loop is local today — there is
+            // no cloud call path yet (see CLAUDE.md "AI chatbot cloud
+            // tier"). This is where a future cloud-routed turn would set
+            // ChatEngine.CLOUD + cloudProvider instead.
+            engine: ChatEngine.LOCAL,
           },
         });
         createdRows.push(row);
