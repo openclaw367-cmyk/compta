@@ -2070,13 +2070,27 @@ before touching this again, this section is deliberately compressed.
   key" for this app's local-first, single-tenant-in-practice deployment
   today; would need revisiting (real KMS, per-tenant keys) if this ever
   runs multi-tenant on shared infrastructure.
+- **`CloudModelCredential` + key handling are built** (2026-08-23,
+  commit `d0ae5dc`) — `CredentialEncryptionService`
+  (`src/common/crypto/`, AES-256-GCM, the threat model above verbatim
+  in its own doc comment, key read LAZILY so a local-only install still
+  boots with nothing configured) and `CloudCredentialsService`/
+  `CloudCredentialsController` (`POST`/`GET`/`DELETE
+  /ai-chat/cloud-credentials`) — every response is a masked summary
+  only (`sk-...ab12`), never the real key; `getDecryptedKey()` returns
+  plaintext but is not exposed by the controller at all, reserved for
+  the Claude/DeepSeek adapters to call directly. 18 new tests, verified
+  live against the FR demo company (set/list/upsert-replace/revoke/
+  404/400) plus a direct `psql` check confirming the stored value is
+  real ciphertext.
 - **Build order**: rename (done) → `CloudModelCredential` + key
-  handling → Claude adapter → DeepSeek adapter → narrow cloud tool
-  registry → consent flow + always-visible indicator (composer/message/
-  `ProposalCard`, three places) → server-side thread/granularity
-  enforcement. Not shippable until the consent flow and indicator are
-  demonstrated working and the residency facts above are verified —
-  the verification is done (see the spec's citations); the flow/
+  handling (done) → Claude adapter → DeepSeek adapter → narrow cloud
+  tool registry → consent flow + always-visible indicator (composer/
+  message/`ProposalCard`, three places) → server-side thread/
+  granularity enforcement. Not shippable until the consent flow and
+  indicator are demonstrated working and the residency facts above are
+  verified — the verification is done (see the spec's citations); the
+  flow/
   indicator are not yet built.
 
 ## Known scope boundaries
