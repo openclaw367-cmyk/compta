@@ -2,6 +2,30 @@ import type { ApiErrorBody } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
 
+/**
+ * The app-wide selected company (see context/AppContext.tsx) — a module-
+ * level variable rather than a parameter threaded through every one of
+ * this file's ~60 call sites in queries.ts. `AppProvider` calls
+ * `setCurrentCompanyId()` once whenever the selection changes (and resets
+ * the TanStack Query cache in the same beat, so every hook refetches
+ * scoped to the new tenant); every request from then on carries the
+ * right `x-company-id` automatically, with zero per-hook changes. `null`
+ * (before the picker has resolved on first load) omits the header
+ * entirely, which is exactly the backend's own pre-existing
+ * single-company fallback (`CompanyContextMiddleware`) — never a broken
+ * state, just the same behavior this app already had before a picker
+ * existed.
+ */
+let currentCompanyId: string | null = null;
+
+export function setCurrentCompanyId(companyId: string | null): void {
+  currentCompanyId = companyId;
+}
+
+function companyHeaders(): Record<string, string> {
+  return currentCompanyId ? { 'x-company-id': currentCompanyId } : {};
+}
+
 /** Thrown for any non-2xx response; carries the backend's own error message(s). */
 export class ApiError extends Error {
   readonly statusCode: number;
@@ -26,6 +50,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: {
       ...(init?.body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
       Accept: 'application/json',
+      ...companyHeaders(),
       ...init?.headers,
     },
   });
@@ -57,7 +82,9 @@ export interface DownloadableFile {
  * that header isn't in the browser's default CORS-safelisted set.
  */
 async function requestFile(path: string): Promise<DownloadableFile> {
-  const response = await fetch(`${API_BASE_URL}${path}`, { headers: { Accept: 'text/plain' } });
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: { Accept: 'text/plain', ...companyHeaders() },
+  });
 
   if (!response.ok) {
     const body: unknown = await response.json();

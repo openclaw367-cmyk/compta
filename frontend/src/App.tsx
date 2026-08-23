@@ -1,5 +1,6 @@
 import { Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';
+import { AppProvider } from './context/AppProvider';
 import { DashboardPage } from './pages/DashboardPage';
 import { JournalEntriesPage } from './pages/JournalEntriesPage';
 import { FiscalYearsPage } from './pages/FiscalYearsPage';
@@ -21,27 +22,29 @@ import { AssistantSettingsPage } from './pages/AssistantSettingsPage';
 
 export default function App() {
   return (
-    <AppShell>
-      <Routes>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/ecritures" element={<JournalEntriesPage />} />
-        <Route path="/exercices" element={<FiscalYearsPage />} />
-        <Route path="/tiers" element={<TiersPage />} />
-        <Route path="/comptes" element={<AccountsJournalsPage />} />
-        <Route path="/societe" element={<CompanyProfilePage />} />
-        <Route path="/grand-livre" element={<GrandLivrePage />} />
-        <Route path="/import" element={<ImportExcelPage />} />
-        <Route path="/fec" element={<FecExportPage />} />
-        <Route path="/immobilisations" element={<ImmobilisationsPage />} />
-        <Route path="/immobilisations/:id" element={<FixedAssetDetailPage />} />
-        <Route path="/tva" element={<VatPage />} />
-        <Route path="/liasse" element={<LiassePage />} />
-        <Route path="/flux-tresorerie" element={<CashFlowPage />} />
-        <Route path="/analyse-financiere" element={<FinancialAnalysisPage />} />
-        <Route path="/resultat-fiscal" element={<ResultatFiscalPage />} />
-        <Route path="/assistant" element={<AssistantPage />} />
-        <Route path="/assistant/parametres" element={<AssistantSettingsPage />} />
-      </Routes>
-    </AppShell>
+    <AppProvider>
+      <AppShell>
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/ecritures" element={<JournalEntriesPage />} />
+          <Route path="/exercices" element={<FiscalYearsPage />} />
+          <Route path="/tiers" element={<TiersPage />} />
+          <Route path="/comptes" element={<AccountsJournalsPage />} />
+          <Route path="/societe" element={<CompanyProfilePage />} />
+          <Route path="/grand-livre" element={<GrandLivrePage />} />
+          <Route path="/import" element={<ImportExcelPage />} />
+          <Route path="/fec" element={<FecExportPage />} />
+          <Route path="/immobilisations" element={<ImmobilisationsPage />} />
+          <Route path="/immobilisations/:id" element={<FixedAssetDetailPage />} />
+          <Route path="/tva" element={<VatPage />} />
+          <Route path="/liasse" element={<LiassePage />} />
+          <Route path="/flux-tresorerie" element={<CashFlowPage />} />
+          <Route path="/analyse-financiere" element={<FinancialAnalysisPage />} />
+          <Route path="/resultat-fiscal" element={<ResultatFiscalPage />} />
+          <Route path="/assistant" element={<AssistantPage />} />
+          <Route path="/assistant/parametres" element={<AssistantSettingsPage />} />
+        </Routes>
+      </AppShell>
+    </AppProvider>
   );
 }

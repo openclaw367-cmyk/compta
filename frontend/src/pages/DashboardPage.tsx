@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useCompany, useDashboardSummary } from '../api/queries';
+import { useAppContext } from '../context/appContextStore';
 import type {
   DashboardAssocieBalance,
   DashboardCaHistoryPoint,
@@ -29,8 +30,9 @@ import {
  * other page already uses for display).
  */
 export function DashboardPage() {
+  const { fiscalYearId } = useAppContext();
   const companyQuery = useCompany();
-  const summaryQuery = useDashboardSummary();
+  const summaryQuery = useDashboardSummary(fiscalYearId);
 
   if (summaryQuery.isLoading) {
     return (

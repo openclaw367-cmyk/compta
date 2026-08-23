@@ -1,27 +1,25 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
-import { useEcritures, useFiscalYears, useGenerateCashFlow } from '../api/queries';
+import { useMemo, useState } from 'react';
+import { useEcritures, useGenerateCashFlow } from '../api/queries';
 import type { CashFlowStatement, FluxExploitation, FluxFinancement, FluxInvestissement } from '../api/types';
 import { ApiError } from '../api/client';
+import { useAppContext } from '../context/appContextStore';
 import { formatMoneyFr, isZeroMoney, subtractMoneyStrings } from '../lib/money';
 
-const NO_FISCAL_YEARS: never[] = [];
 const NO_ECRITURES: never[] = [];
 
 export function CashFlowPage() {
-  const fiscalYearsQuery = useFiscalYears();
+  const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
   const ecrituresQuery = useEcritures();
   const generateCashFlow = useGenerateCashFlow();
 
-  const fiscalYears = fiscalYearsQuery.data ?? NO_FISCAL_YEARS;
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
 
-  const [fiscalYearId, setFiscalYearId] = useState<string | null>(null);
   const [error, setError] = useState<string[] | null>(null);
-
-  useEffect(() => {
-    if (!fiscalYearId && fiscalYears.length > 0) setFiscalYearId(fiscalYears[0].id);
-  }, [fiscalYearId, fiscalYears]);
+  // The currently-generated statement is only shown while it still matches
+  // the app-wide fiscal-year selection — switching the topbar selector
+  // must never leave a PREVIOUS year's figures on screen implying they're
+  // current. See handleGenerate().
+  const [generatedForFiscalYearId, setGeneratedForFiscalYearId] = useState<string | null>(null);
 
   const draftsInYear = useMemo(
     () => ecritures.filter((e) => e.fiscalYearId === fiscalYearId && e.validatedAt === null),
@@ -36,13 +34,15 @@ export function CashFlowPage() {
     setError(null);
     try {
       await generateCashFlow.mutateAsync({ fiscalYearId });
+      setGeneratedForFiscalYearId(fiscalYearId);
     } catch (err) {
       setError(err instanceof ApiError ? err.details : ['Le calcul a échoué.']);
     }
   }
 
-  const isLoading = fiscalYearsQuery.isLoading || ecrituresQuery.isLoading;
-  const statement = generateCashFlow.data ?? null;
+  const isLoading = fiscalYearsLoading || ecrituresQuery.isLoading;
+  const statement =
+    generatedForFiscalYearId === fiscalYearId ? (generateCashFlow.data ?? null) : null;
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-8 py-8">
@@ -66,23 +66,14 @@ export function CashFlowPage() {
         </div>
       ) : (
         <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
-          <div className="flex flex-wrap items-end gap-4">
-            <Field label="Exercice">
-              <select
-                value={fiscalYearId ?? ''}
-                onChange={(e) => {
-                  setFiscalYearId(e.target.value);
-                  setError(null);
-                }}
-                className="rounded-md border border-border bg-surface px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent"
-              >
-                {fiscalYears.map((fy) => (
-                  <option key={fy.id} value={fy.id}>
-                    {fy.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
+          <div className="flex flex-wrap items-center gap-4">
+            <p className="text-[13px] text-ink-muted">
+              Exercice sélectionné :{' '}
+              <span className="font-medium text-ink">
+                {fiscalYears.find((fy) => fy.id === fiscalYearId)?.label ?? '—'}
+              </span>{' '}
+              <span className="text-ink-faint">(changez-le en haut de l'écran)</span>
+            </p>
             <button
               type="button"
               disabled={!canGenerate}
@@ -342,16 +333,5 @@ function FluxFinancementSection({ flux }: { flux: FluxFinancement }) {
         </table>
       </div>
     </section>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-        {label}
-      </span>
-      {children}
-    </label>
   );
 }

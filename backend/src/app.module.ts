@@ -77,16 +77,21 @@ const isProduction = process.env.NODE_ENV === 'production';
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
     // Applied to an explicit controller allowlist rather than a wildcard
-    // ('*'). Two reasons: (1) company creation itself (POST /companies)
-    // must run before a tenant exists, so it still needs a path-level
-    // exclude even with an allowlist; (2) Swagger's docs UI (mounted in
-    // main.ts via SwaggerModule.setup, not as a Nest controller) is a raw
-    // Express route outside this list, so it never needs a company header
-    // and needs no exclude rule at all. See CLAUDE.md "Multi-tenant data
-    // model".
+    // ('*'). Two reasons: (1) company creation and listing (POST/GET
+    // /companies) must run before a tenant is selected, so they still need
+    // path-level excludes even with an allowlist — the company PICKER
+    // calls GET /companies to discover what to send as x-company-id in
+    // the first place, so it can't itself require that header; (2)
+    // Swagger's docs UI (mounted in main.ts via SwaggerModule.setup, not
+    // as a Nest controller) is a raw Express route outside this list, so
+    // it never needs a company header and needs no exclude rule at all.
+    // See CLAUDE.md "Multi-tenant data model".
     consumer
       .apply(CompanyContextMiddleware)
-      .exclude({ path: 'companies', method: RequestMethod.POST })
+      .exclude(
+        { path: 'companies', method: RequestMethod.POST },
+        { path: 'companies', method: RequestMethod.GET },
+      )
       .forRoutes(
         CompaniesController,
         AccountsController,

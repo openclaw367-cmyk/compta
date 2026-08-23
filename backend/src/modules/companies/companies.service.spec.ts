@@ -9,6 +9,7 @@ function makePrismaMock() {
   return {
     company: {
       findUnique: jest.fn().mockResolvedValue({ id: 'company-1', name: 'Société Démo SARL' }),
+      findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn((args: { where: { id: string }; data: unknown }) => ({
         id: args.where.id,
         ...(args.data as object),
@@ -41,5 +42,15 @@ describe('CompaniesService', () => {
       NotFoundException,
     );
     expect(prisma.company.update).not.toHaveBeenCalled();
+  });
+
+  it('lists every company, not scoped to one tenant — this is what a company picker chooses from', async () => {
+    prisma.company.findMany.mockResolvedValueOnce([
+      { id: 'company-1', name: 'Société Démo SARL' },
+      { id: 'company-2', name: 'Société Test Multi-Année' },
+    ]);
+    const result = await service.findAll();
+    expect(prisma.company.findMany).toHaveBeenCalledWith({ orderBy: { createdAt: 'asc' } });
+    expect(result).toHaveLength(2);
   });
 });

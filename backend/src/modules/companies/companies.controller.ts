@@ -21,6 +21,15 @@ export class CompaniesController {
   }
 
   @ApiOperation({
+    summary:
+      'List every tenant (dossier) — not tenant-scoped, this is what a company picker chooses from.',
+  })
+  @Get()
+  findAll() {
+    return this.companiesService.findAll();
+  }
+
+  @ApiOperation({
     summary: 'The company the frontend should auto-select today (single-company UX).',
   })
   @ApiHeader({

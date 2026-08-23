@@ -93,7 +93,19 @@ export class DashboardService {
     private readonly ledger: LedgerService,
   ) {}
 
-  async getSummary(company: CompanyContext): Promise<DashboardSummary> {
+  /**
+   * `requestedFiscalYearId` lets the caller pin a specific fiscal year
+   * (the app-wide fiscal-year selector — see CLAUDE.md "Navigation") —
+   * purely which year gets passed to the SAME `generate()` calls below,
+   * never a new computation. Falls back to the existing "open, else most
+   * recent" heuristic when omitted, or when the requested id doesn't
+   * belong to this company (a stale selection from a just-switched
+   * company, not an error worth surfacing).
+   */
+  async getSummary(
+    company: CompanyContext,
+    requestedFiscalYearId?: string,
+  ): Promise<DashboardSummary> {
     const companyRecord = await this.companies.findCurrent(company);
     if (companyRecord.regime !== Regime.REEL_NORMAL) {
       return {
@@ -110,7 +122,10 @@ export class DashboardService {
       return { available: false, reason: 'Aucun exercice créé pour ce dossier.' };
     }
     // findAll() orders startDate desc — years[0] is the most recent.
-    const current = years.find((y) => y.closedAt === null) ?? years[0];
+    const requested = requestedFiscalYearId
+      ? years.find((y) => y.id === requestedFiscalYearId)
+      : undefined;
+    const current = requested ?? years.find((y) => y.closedAt === null) ?? years[0];
 
     let liasseResult: Awaited<ReturnType<LiasseService['generate']>>;
     let analysis: Awaited<ReturnType<FinancialAnalysisService['generate']>>;

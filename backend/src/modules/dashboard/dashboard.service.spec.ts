@@ -191,6 +191,56 @@ describe('DashboardService', () => {
     expect(liasseGenerate).toHaveBeenCalledWith(company, { fiscalYearId: 'fy-2026' });
   });
 
+  it('honors an explicitly requested fiscal year (the app-wide selector) over the open/most-recent heuristic', async () => {
+    const {
+      service,
+      findCurrent,
+      findAll,
+      liasseGenerate,
+      financialAnalysisGenerate,
+      trialBalance,
+      recentEntriesForClass,
+    } = buildService();
+    findCurrent.mockResolvedValue({ regime: Regime.REEL_NORMAL });
+    findAll.mockResolvedValue([
+      fiscalYear('fy-2026', '2026', '2026-01-01'),
+      fiscalYear('fy-2025', '2025', '2025-01-01', '2025-12-31'),
+    ]);
+    liasseGenerate.mockResolvedValue(liasseResult());
+    financialAnalysisGenerate.mockResolvedValue(financialAnalysisResult('25000.00'));
+    trialBalance.mockResolvedValue({ lines: [] });
+    recentEntriesForClass.mockResolvedValue([]);
+
+    const result = await service.getSummary(company, 'fy-2025');
+
+    expect(result.available).toBe(true);
+    expect((result as { fiscalYear: { id: string } }).fiscalYear.id).toBe('fy-2025');
+    expect(liasseGenerate).toHaveBeenCalledWith(company, { fiscalYearId: 'fy-2025' });
+  });
+
+  it('falls back to the open/most-recent heuristic when the requested fiscal year id belongs to a different company', async () => {
+    const {
+      service,
+      findCurrent,
+      findAll,
+      liasseGenerate,
+      financialAnalysisGenerate,
+      trialBalance,
+      recentEntriesForClass,
+    } = buildService();
+    findCurrent.mockResolvedValue({ regime: Regime.REEL_NORMAL });
+    findAll.mockResolvedValue([fiscalYear('fy-2026', '2026', '2026-01-01')]);
+    liasseGenerate.mockResolvedValue(liasseResult());
+    financialAnalysisGenerate.mockResolvedValue(financialAnalysisResult('25000.00'));
+    trialBalance.mockResolvedValue({ lines: [] });
+    recentEntriesForClass.mockResolvedValue([]);
+
+    const result = await service.getSummary(company, 'fy-from-another-company');
+
+    expect(result.available).toBe(true);
+    expect((result as { fiscalYear: { id: string } }).fiscalYear.id).toBe('fy-2026');
+  });
+
   it('degrades to available:false with the real guard message when the current fiscal year has draft écritures', async () => {
     const { service, findCurrent, findAll, liasseGenerate } = buildService();
     findCurrent.mockResolvedValue({ regime: Regime.REEL_NORMAL });

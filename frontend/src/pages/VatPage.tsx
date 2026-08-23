@@ -4,16 +4,15 @@ import {
   useComputeVatDeclaration,
   useCreateVatRate,
   useEcritures,
-  useFiscalYears,
   useVatRates,
 } from '../api/queries';
 import type { CreateVatRateDto } from '../api/dto';
 import type { Ca3Declaration, Ca3RateLine, FiscalYear } from '../api/types';
 import { ApiError } from '../api/client';
 import { formatMoneyFr, normalizeMoneyInput, sanitizeAmountBuffer } from '../lib/money';
+import { useAppContext } from '../context/appContextStore';
 
 const NO_RATES: never[] = [];
-const NO_FISCAL_YEARS: never[] = [];
 const NO_ECRITURES: never[] = [];
 const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -114,21 +113,22 @@ function sortByFormOrder(lines: Ca3RateLine[]): Ca3RateLine[] {
 }
 
 function DeclarationSection() {
-  const fiscalYearsQuery = useFiscalYears();
+  const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
   const ecrituresQuery = useEcritures();
   const computeDeclaration = useComputeVatDeclaration();
 
-  const fiscalYears = fiscalYearsQuery.data ?? NO_FISCAL_YEARS;
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
 
-  const [fiscalYearId, setFiscalYearId] = useState<string | null>(null);
   const [mode, setMode] = useState<PeriodMode>('month');
   const [periodKey, setPeriodKey] = useState<string | null>(null);
   const [computeError, setComputeError] = useState<string[] | null>(null);
 
+  // Mirrors the old local select's onChange side effects — the global
+  // fiscal-year selector has no such hook, so this effect replaces it.
   useEffect(() => {
-    if (!fiscalYearId && fiscalYears.length > 0) setFiscalYearId(fiscalYears[0].id);
-  }, [fiscalYearId, fiscalYears]);
+    setPeriodKey(null);
+    setComputeError(null);
+  }, [fiscalYearId]);
 
   const fiscalYear = fiscalYears.find((fy) => fy.id === fiscalYearId) ?? null;
   const periods = useMemo(
@@ -175,7 +175,7 @@ function DeclarationSection() {
   }
 
   const declaration: Ca3Declaration | null = computeDeclaration.data ?? null;
-  const isLoading = fiscalYearsQuery.isLoading || ecrituresQuery.isLoading;
+  const isLoading = fiscalYearsLoading || ecrituresQuery.isLoading;
 
   return (
     <section className="flex flex-col gap-4">
@@ -197,21 +197,10 @@ function DeclarationSection() {
         <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
           <div className="flex flex-wrap items-end gap-4">
             <Field label="Exercice">
-              <select
-                value={fiscalYearId ?? ''}
-                onChange={(e) => {
-                  setFiscalYearId(e.target.value);
-                  setPeriodKey(null);
-                  setComputeError(null);
-                }}
-                className="rounded-md border border-border bg-surface px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent"
-              >
-                {fiscalYears.map((fy) => (
-                  <option key={fy.id} value={fy.id}>
-                    {fy.label}
-                  </option>
-                ))}
-              </select>
+              <span className="py-[7px] text-[13px] text-ink">
+                {fiscalYears.find((fy) => fy.id === fiscalYearId)?.label ?? '—'}{' '}
+                <span className="text-ink-faint">(en haut de l'écran)</span>
+              </span>
             </Field>
             <Field label="Périodicité">
               <select

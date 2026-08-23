@@ -1,6 +1,5 @@
 import { NavLink } from 'react-router-dom';
 import type { SVGProps } from 'react';
-import { useCompany } from '../../api/queries';
 import {
   IconBox,
   IconBuilding,
@@ -47,8 +46,6 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export function Sidebar() {
-  const companyQuery = useCompany();
-
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface">
       <div className="flex h-16 items-center gap-2 px-6">
@@ -78,10 +75,6 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
-
-      <div className="truncate border-t border-border px-6 py-4 text-[12px] text-ink-faint">
-        {companyQuery.data?.name ?? ' '}
-      </div>
     </aside>
   );
 }

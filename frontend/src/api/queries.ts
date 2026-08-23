@@ -681,9 +681,12 @@ export function useRevokeCloudCredential() {
  * it's a real GET and a real useQuery, letting it load automatically
  * on mount rather than needing a "Générer" click.
  */
-export function useDashboardSummary() {
+export function useDashboardSummary(fiscalYearId?: string | null) {
   return useQuery({
-    queryKey: ['dashboard-summary'],
-    queryFn: () => api.get<DashboardSummary>('/dashboard/summary'),
+    queryKey: ['dashboard-summary', fiscalYearId],
+    queryFn: () =>
+      api.get<DashboardSummary>(
+        `/dashboard/summary${fiscalYearId ? `?fiscalYearId=${encodeURIComponent(fiscalYearId)}` : ''}`,
+      ),
   });
 }

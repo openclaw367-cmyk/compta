@@ -1,24 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { useFiscalYears, useJournals, useTrialBalance } from '../api/queries';
+import { useJournals, useTrialBalance } from '../api/queries';
 import { TrialBalanceTable } from '../components/ledger/TrialBalanceTable';
+import { useAppContext } from '../context/appContextStore';
 
-const NO_FISCAL_YEARS: never[] = [];
 const NO_JOURNALS: never[] = [];
 
 export function GrandLivrePage() {
-  const fiscalYearsQuery = useFiscalYears();
+  const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
   const journalsQuery = useJournals();
-  const fiscalYears = fiscalYearsQuery.data ?? NO_FISCAL_YEARS;
   const journals = journalsQuery.data ?? NO_JOURNALS;
 
-  const [fiscalYearId, setFiscalYearId] = useState<string | null>(null);
   const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
-
-  useEffect(() => {
-    if (!fiscalYearId && fiscalYears.length > 0) setFiscalYearId(fiscalYears[0].id);
-  }, [fiscalYearId, fiscalYears]);
 
   const trialBalanceQuery = useTrialBalance({
     fiscalYearId,
@@ -26,7 +20,7 @@ export function GrandLivrePage() {
     periodEnd: periodEnd || undefined,
   });
 
-  const isLoading = fiscalYearsQuery.isLoading || journalsQuery.isLoading;
+  const isLoading = fiscalYearsLoading || journalsQuery.isLoading;
 
   if (isLoading) {
     return (
@@ -48,19 +42,14 @@ export function GrandLivrePage() {
           </p>
         </div>
         <div className="ml-auto flex items-end gap-2">
-          <Field label="Exercice">
-            <select
-              value={fiscalYearId ?? ''}
-              onChange={(e) => setFiscalYearId(e.target.value)}
-              className="rounded-md border border-border bg-surface px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent"
-            >
-              {fiscalYears.map((fy) => (
-                <option key={fy.id} value={fy.id}>
-                  {fy.label}
-                </option>
-              ))}
-            </select>
-          </Field>
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              Exercice
+            </span>
+            <span className="py-[7px] text-[13px] text-ink">
+              {fiscalYears.find((fy) => fy.id === fiscalYearId)?.label ?? '—'}
+            </span>
+          </div>
           <Field label="Du">
             <input
               type="date"

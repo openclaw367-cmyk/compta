@@ -4,7 +4,6 @@ import {
   useAccounts,
   useDeleteEcriture,
   useEcritures,
-  useFiscalYears,
   useJournals,
   useReverseEcriture,
   useValidateEcriture,
@@ -12,6 +11,7 @@ import {
 import { ApiError } from '../api/client';
 import { EcrituresList } from '../components/journal/EcrituresList';
 import { EcritureEditor } from '../components/journal/EcritureEditor';
+import { useAppContext } from '../context/appContextStore';
 
 type EditorState = { mode: 'closed' } | { mode: 'new' } | { mode: 'edit'; ecriture: Ecriture };
 
@@ -20,28 +20,25 @@ type EditorState = { mode: 'closed' } | { mode: 'new' } | { mode: 'edit'; ecritu
 // exhaustive-deps (rightly) treat every effect/memo keyed on it as dirty
 // on every render.
 const NO_JOURNALS: never[] = [];
-const NO_FISCAL_YEARS: never[] = [];
 const NO_ACCOUNTS: never[] = [];
 const NO_ECRITURES: never[] = [];
 
 export function JournalEntriesPage() {
+  const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
   const journalsQuery = useJournals();
   const accountsQuery = useAccounts();
-  const fiscalYearsQuery = useFiscalYears();
   const ecrituresQuery = useEcritures();
   const deleteEcriture = useDeleteEcriture();
   const validateEcriture = useValidateEcriture();
   const reverseEcriture = useReverseEcriture();
 
   const [journalId, setJournalId] = useState<string | null>(null);
-  const [fiscalYearId, setFiscalYearId] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState>({ mode: 'closed' });
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionWarnings, setActionWarnings] = useState<string[] | null>(null);
 
   const journals = journalsQuery.data ?? NO_JOURNALS;
-  const fiscalYears = fiscalYearsQuery.data ?? NO_FISCAL_YEARS;
   const accounts = accountsQuery.data ?? NO_ACCOUNTS;
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
 
@@ -49,9 +46,12 @@ export function JournalEntriesPage() {
     if (!journalId && journals.length > 0) setJournalId(journals[0].id);
   }, [journalId, journals]);
 
+  // Closing over the editor when the global fiscal year changes avoids
+  // leaving a "Nouvelle écriture" form open against a year that's no
+  // longer the one shown in the topbar.
   useEffect(() => {
-    if (!fiscalYearId && fiscalYears.length > 0) setFiscalYearId(fiscalYears[0].id);
-  }, [fiscalYearId, fiscalYears]);
+    setEditor({ mode: 'closed' });
+  }, [fiscalYearId]);
 
   const scopedEcritures = useMemo(
     () =>
@@ -127,8 +127,7 @@ export function JournalEntriesPage() {
     }
   }
 
-  const isLoading =
-    journalsQuery.isLoading || accountsQuery.isLoading || fiscalYearsQuery.isLoading;
+  const isLoading = journalsQuery.isLoading || accountsQuery.isLoading || fiscalYearsLoading;
 
   if (isLoading) {
     return (
@@ -153,11 +152,9 @@ export function JournalEntriesPage() {
             onChange={setJournalId}
             options={journals.map((j) => ({ value: j.id, label: `${j.code} — ${j.label}` }))}
           />
-          <Select
-            value={fiscalYearId ?? ''}
-            onChange={setFiscalYearId}
-            options={fiscalYears.map((fy) => ({ value: fy.id, label: fy.label }))}
-          />
+          <span className="text-[13px] text-ink-muted">
+            {fiscalYears.find((fy) => fy.id === fiscalYearId)?.label ?? '—'}
+          </span>
           <button
             type="button"
             onClick={() => setEditor({ mode: 'new' })}
