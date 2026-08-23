@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './common/prisma/prisma.module';
+import { CryptoModule } from './common/crypto/crypto.module';
 import { CompanyContextMiddleware } from './common/tenant/company-context.middleware';
 import { CompaniesModule } from './modules/companies/companies.module';
 import { CompaniesController } from './modules/companies/companies.controller';
@@ -34,6 +35,8 @@ import { LedgerModule } from './modules/ledger/ledger.module';
 import { LedgerController } from './modules/ledger/ledger.controller';
 import { AiChatModule } from './modules/ai-chat/ai-chat.module';
 import { AiChatController } from './modules/ai-chat/ai-chat.controller';
+import { CloudCredentialsModule } from './modules/cloud-credentials/cloud-credentials.module';
+import { CloudCredentialsController } from './modules/cloud-credentials/cloud-credentials.controller';
 import { DevModule } from './modules/dev/dev.module';
 import { DevController } from './modules/dev/dev.controller';
 
@@ -47,6 +50,7 @@ const isProduction = process.env.NODE_ENV === 'production';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    CryptoModule,
     CompaniesModule,
     AccountsModule,
     JournalsModule,
@@ -63,6 +67,7 @@ const isProduction = process.env.NODE_ENV === 'production';
     ResultatFiscalModule,
     LedgerModule,
     AiChatModule,
+    CloudCredentialsModule,
     ...(isProduction ? [] : [DevModule]),
   ],
 })
@@ -96,6 +101,7 @@ export class AppModule implements NestModule {
         ResultatFiscalController,
         LedgerController,
         AiChatController,
+        CloudCredentialsController,
         ...(isProduction ? [] : [DevController]),
       );
   }

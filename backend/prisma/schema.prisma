@@ -67,6 +67,18 @@ enum ChatMessageRole {
   TOOL
 }
 
+/// Which cloud LLM provider a CloudModelCredential authenticates to — see
+/// CLAUDE.md "AI chatbot cloud tier" and
+/// specs/ai-chatbot-cloud-tier-implementation-spec.md. Deliberately only
+/// the two providers with verified, cited residency/DPA terms; an
+/// OpenAI-compatible custom-endpoint option is explicitly deferred (a
+/// user-supplied endpoint can't carry a stated residency guarantee) — do
+/// not add a value here for it without updating that spec first.
+enum CloudModelProvider {
+  CLAUDE
+  DEEPSEEK
+}
+
 /// A tenant ("dossier"). The UI only ever shows one Company today, but the
 /// schema is multi-tenant from day one — every other model scopes to a
 /// companyId. See CLAUDE.md "Multi-tenant data model".
@@ -107,26 +119,27 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  fiscalYears     FiscalYear[]
-  accounts        Account[]
-  journals        Journal[]
-  ecritures       Ecriture[]
-  ecritureLignes  EcritureLigne[]
-  fixedAssets     FixedAsset[]
-  depreciationEntries DepreciationEntry[]
-  vatRates        VatRate[]
-  importBatches   ImportBatch[]
-  chatSessions    ChatSession[]
-  chatMessages    ChatMessage[]
+  fiscalYears           FiscalYear[]
+  accounts              Account[]
+  journals              Journal[]
+  ecritures             Ecriture[]
+  ecritureLignes        EcritureLigne[]
+  fixedAssets           FixedAsset[]
+  depreciationEntries   DepreciationEntry[]
+  vatRates              VatRate[]
+  importBatches         ImportBatch[]
+  chatSessions          ChatSession[]
+  chatMessages          ChatMessage[]
+  cloudModelCredentials CloudModelCredential[]
 }
 
 /// Exercice comptable. Ecritures are validated (locked) relative to a
 /// fiscal year's close, and FEC exports are always for exactly one
 /// fiscal year.
 model FiscalYear {
-  id        String    @id @default(cuid())
+  id        String  @id @default(cuid())
   companyId String
-  company   Company   @relation(fields: [companyId], references: [id])
+  company   Company @relation(fields: [companyId], references: [id])
 
   label     String
   startDate DateTime
@@ -167,9 +180,9 @@ model Account {
   linesAsMain EcritureLigne[] @relation("EcritureLigneCompte")
   linesAsAux  EcritureLigne[] @relation("EcritureLigneCompteAux")
 
-  fixedAssetsAsAsset       FixedAsset[] @relation("FixedAssetAccount")
+  fixedAssetsAsAsset        FixedAsset[] @relation("FixedAssetAccount")
   fixedAssetsAsDepreciation FixedAsset[] @relation("FixedAssetDepreciationAccount")
-  fixedAssetsAsExpense     FixedAsset[] @relation("FixedAssetExpenseAccount")
+  fixedAssetsAsExpense      FixedAsset[] @relation("FixedAssetExpenseAccount")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -180,9 +193,9 @@ model Account {
 
 /// Journal comptable (JournalCode / JournalLib in FEC terms).
 model Journal {
-  id        String      @id @default(cuid())
+  id        String  @id @default(cuid())
   companyId String
-  company   Company     @relation(fields: [companyId], references: [id])
+  company   Company @relation(fields: [companyId], references: [id])
 
   code  String
   label String
@@ -266,8 +279,8 @@ model EcritureLigne {
   compteAuxId String?
   compteAux   Account? @relation("EcritureLigneCompteAux", fields: [compteAuxId], references: [id])
 
-  debit  Decimal @db.Decimal(15, 2) @default(0)
-  credit Decimal @db.Decimal(15, 2) @default(0)
+  debit  Decimal @default(0) @db.Decimal(15, 2)
+  credit Decimal @default(0) @db.Decimal(15, 2)
 
   /// EcritureLet / DateLet: lettrage (reconciliation) marker.
   lettrage     String?
@@ -310,18 +323,18 @@ model FixedAsset {
   companyId String
   company   Company @relation(fields: [companyId], references: [id])
 
-  label            String
-  accountId        String
-  account          Account @relation("FixedAssetAccount", fields: [accountId], references: [id])
+  label                 String
+  accountId             String
+  account               Account @relation("FixedAssetAccount", fields: [accountId], references: [id])
   depreciationAccountId String
   depreciationAccount   Account @relation("FixedAssetDepreciationAccount", fields: [depreciationAccountId], references: [id])
-  expenseAccountId String
-  expenseAccount   Account @relation("FixedAssetExpenseAccount", fields: [expenseAccountId], references: [id])
+  expenseAccountId      String
+  expenseAccount        Account @relation("FixedAssetExpenseAccount", fields: [expenseAccountId], references: [id])
 
   acquisitionDate  DateTime
   serviceStartDate DateTime
-  acquisitionValue Decimal @db.Decimal(15, 2)
-  residualValue    Decimal @db.Decimal(15, 2) @default(0)
+  acquisitionValue Decimal            @db.Decimal(15, 2)
+  residualValue    Decimal            @default(0) @db.Decimal(15, 2)
   usefulLifeYears  Int
   method           DepreciationMethod @default(LINEAR)
 
@@ -442,5 +455,39 @@ model ChatMessage {
   createdAt DateTime @default(now())
 
   @@index([sessionId])
+  @@index([companyId])
+}
+
+/// A company's own (BYO) API key for one cloud LLM provider — used ONLY
+/// by the propose_ecriture write path (see CLAUDE.md "AI chatbot cloud
+/// tier"). Cloud is opt-in, never default: a row here only exists once a
+/// user has explicitly completed the consent flow for that provider.
+///
+/// `encryptedApiKey` is ciphertext (AES-256-GCM, see
+/// src/common/crypto/credential-encryption.service.ts), never plaintext.
+/// The decryption key lives OUTSIDE this database entirely
+/// (CLOUD_CREDENTIAL_ENCRYPTION_KEY) — that file's own doc comment states
+/// the real threat model this defends against (a leaked DB backup or
+/// DB-only compromise, not full machine access). `maskedKey` (e.g.
+/// "sk-...ab12") is stored separately, in the clear, specifically so
+/// listing credentials for display never needs to decrypt the real key —
+/// decryption is reserved for the one place that actually calls the
+/// provider.
+model CloudModelCredential {
+  id        String             @id @default(cuid())
+  companyId String
+  company   Company            @relation(fields: [companyId], references: [id])
+  provider  CloudModelProvider
+
+  encryptedApiKey String
+  maskedKey       String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One credential per provider per company — setting a new key for a
+  /// provider replaces (upserts) the existing row rather than
+  /// accumulating stale ones.
+  @@unique([companyId, provider])
   @@index([companyId])
 }
