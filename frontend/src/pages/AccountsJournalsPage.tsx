@@ -283,8 +283,8 @@ function AccountsSection() {
             </div>
           </div>
           <p className="text-[11.5px] text-ink-faint">
-            Pour un compte auxiliaire (tiers) sous un collectif 401/411, utilisez l'écran Tiers —
-            ce formulaire crée un compte de plan comptable standard.
+            Pour un compte auxiliaire (tiers) sous un collectif 401/411/455, utilisez l'écran
+            Tiers — ce formulaire crée un compte de plan comptable standard.
           </p>
           {error && <p className="text-[12.5px] text-negative">{error}</p>}
         </div>

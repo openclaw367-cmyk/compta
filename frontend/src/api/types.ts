@@ -914,3 +914,63 @@ export interface ProposedEcriture {
   /** Judgment calls the model made — surfaced, never silently decided. */
   assumptions: string[];
 }
+
+/**
+ * The landing screen — see CLAUDE.md "Dashboard". Every figure here is
+ * already computed and verified by an existing service (LiasseService,
+ * FinancialAnalysisService, LedgerService); this page only arranges
+ * them. `available: false` is a real, expected state (drafts pending,
+ * no fiscal year, régime réel simplifié), not an error — render its
+ * `reason` as a calm banner, never throw.
+ */
+export interface DashboardCaHistoryPoint {
+  fiscalYearId: string;
+  label: string;
+  chiffreDAffaires: string;
+}
+
+export interface DashboardAssocieBalance {
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  /** debit − credit. Positive = the associé owes the company; negative = the company owes the associé. */
+  balance: string;
+  /** True only for the flat 455000 collectif itself — lines never attributed to a named associé. */
+  isUnattributed: boolean;
+}
+
+export interface DashboardRecentEntry {
+  ecritureId: string;
+  ecritureDate: string;
+  libelle: string;
+  accountNumber: string;
+  accountLabel: string;
+  debit: string;
+  credit: string;
+  isValidated: boolean;
+}
+
+export interface DashboardSummaryAvailable {
+  available: true;
+  fiscalYear: { id: string; label: string };
+  tresorerie: string;
+  chiffreAffaires: string;
+  dettesFournisseurs: string;
+  encoursClient: string;
+  revenus: string;
+  depenses: string;
+  /** SIG cascade's own resultatNet — reused directly, never revenus − dépenses re-derived on the frontend. */
+  resultatNet: string;
+  ebe: string;
+  margeEbe: string | null;
+  caHistory: DashboardCaHistoryPoint[];
+  comptesCourantsAssocies: DashboardAssocieBalance[];
+  recentBankEntries: DashboardRecentEntry[];
+}
+
+export interface DashboardSummaryUnavailable {
+  available: false;
+  reason: string;
+}
+
+export type DashboardSummary = DashboardSummaryAvailable | DashboardSummaryUnavailable;

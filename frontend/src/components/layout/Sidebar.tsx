@@ -11,6 +11,7 @@ import {
   IconFlow,
   IconGauge,
   IconGrid,
+  IconHome,
   IconLedger,
   IconList,
   IconPercent,
@@ -27,7 +28,8 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/', label: 'Écritures', Icon: IconGrid, end: true },
+  { to: '/', label: 'Tableau de bord', Icon: IconHome, end: true },
+  { to: '/ecritures', label: 'Écritures', Icon: IconGrid },
   { to: '/exercices', label: 'Exercices', Icon: IconCalendar },
   { to: '/tiers', label: 'Tiers', Icon: IconUsers },
   { to: '/comptes', label: 'Comptes & journaux', Icon: IconList },

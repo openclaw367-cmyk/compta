@@ -30,8 +30,8 @@ export function TiersPage() {
       <header>
         <h1 className="text-[20px] font-semibold tracking-tight text-ink">Tiers</h1>
         <p className="mt-0.5 text-[13px] text-ink-muted">
-          Comptes auxiliaires (fournisseurs, clients) rattachés aux comptes collectifs 401 et
-          411.
+          Comptes auxiliaires (fournisseurs, clients, associés) rattachés aux comptes collectifs
+          401, 411 et 455.
         </p>
       </header>
 

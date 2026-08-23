@@ -13,33 +13,23 @@ import type {
   TresorerieNette,
 } from '../api/types';
 import { ApiError } from '../api/client';
-import { addMoneyStrings, formatMoneyFr, isZeroMoney, subtractMoneyStrings } from '../lib/money';
+import {
+  addMoneyStrings,
+  formatMoneyFr,
+  formatPercent,
+  formatRatio,
+  isNegativeMoney,
+  isZeroMoney,
+  subtractMoneyStrings,
+} from '../lib/money';
 
 const NO_FISCAL_YEARS: never[] = [];
 const NO_ECRITURES: never[] = [];
-
-/** Percentage strings from the backend are plain decimals ("40.00" = 40.00%), not money — comma-localized here, never re-computed. */
-function formatPercent(value: string | null): string {
-  if (value === null) return 'n/a';
-  const negative = value.startsWith('-');
-  return `${negative ? '−' : ''}${value.replace('-', '').replace('.', ',')} %`;
-}
-
-/** Dimensionless ratio (e.g. liquidité générale) — same comma-localization, no % suffix. */
-function formatRatio(value: string | null): string {
-  if (value === null) return 'n/a';
-  const negative = value.startsWith('-');
-  return `${negative ? '−' : ''}${value.replace('-', '').replace('.', ',')}`;
-}
 
 /** Day count (DSO/DPO/rotation stocks). */
 function formatDays(value: string | null): string {
   if (value === null) return 'n/a';
   return `${value.replace('.', ',')} j`;
-}
-
-function isNegativeMoney(value: string): boolean {
-  return value.trim().startsWith('-') && !isZeroMoney(value);
 }
 
 export function FinancialAnalysisPage() {

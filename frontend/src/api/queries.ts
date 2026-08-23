@@ -12,6 +12,7 @@ import type {
   CloudCredentialSummary,
   CloudProvider,
   Company,
+  DashboardSummary,
   DepreciationEntry,
   Ecriture,
   EcritureWriteResult,
@@ -668,5 +669,21 @@ export function useRevokeCloudCredential() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['ai-chat-cloud-credentials'] });
     },
+  });
+}
+
+/**
+ * The landing screen's data — see CLAUDE.md "Dashboard". GET despite
+ * every other multi-step "generate" report in this app being POST
+ * (VatPage/LiassePage/CashFlowPage/etc. all model theirs as a
+ * useMutation, since their backend routes are POST) — the dashboard's
+ * own `/dashboard/summary` route is a genuine read with no body, so
+ * it's a real GET and a real useQuery, letting it load automatically
+ * on mount rather than needing a "Générer" click.
+ */
+export function useDashboardSummary() {
+  return useQuery({
+    queryKey: ['dashboard-summary'],
+    queryFn: () => api.get<DashboardSummary>('/dashboard/summary'),
   });
 }

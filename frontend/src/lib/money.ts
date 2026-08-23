@@ -81,6 +81,59 @@ export function isZeroMoney(value: string): boolean {
   return normalizeMoneyInput(value) === '' || centsOf(value) === 0n;
 }
 
+export function isNegativeMoney(value: string): boolean {
+  return value.trim().startsWith('-') && !isZeroMoney(value);
+}
+
+/**
+ * Percentage strings from the backend are plain decimals ("40.00" =
+ * 40.00%), NOT money (see financial-analysis.ts's own `percentOrNull` —
+ * a ratio "genuinely isn't money") — comma-localized here for display,
+ * never re-computed. `null` is a real "n/a" (a zero-denominator guard),
+ * not a loading/error state.
+ */
+export function formatPercent(value: string | null): string {
+  if (value === null) return 'n/a';
+  const negative = value.startsWith('-');
+  return `${negative ? '−' : ''}${value.replace('-', '').replace('.', ',')} %`;
+}
+
+/** Dimensionless ratio (e.g. liquidité générale) — same comma-localization, no % suffix. */
+export function formatRatio(value: string | null): string {
+  if (value === null) return 'n/a';
+  const negative = value.startsWith('-');
+  return `${negative ? '−' : ''}${value.replace('-', '').replace('.', ',')}`;
+}
+
+/** BigInt-safe ordering for sorting/max-finding — negative/zero/positive, never a Number(). */
+export function compareMoneyStrings(a: string, b: string): number {
+  const diff = centsOf(a) - centsOf(b);
+  return diff < 0n ? -1 : diff > 0n ? 1 : 0;
+}
+
+/**
+ * value/max as a plain JS number in [0, 1] — for chart bar-height/width
+ * scaling ONLY. This is the one deliberate place in this file that
+ * produces a `number`: it's a dimensionless UI ratio, never a monetary
+ * value in its own right (nothing here is ever formatted as an amount
+ * or fed back into money arithmetic). The division itself stays
+ * BigInt-exact (scaled to basis points) all the way through; only the
+ * already-safe small ratio crosses into a JS number, at the boundary
+ * where it stops being money and starts being layout. A non-positive
+ * max or value clamps to 0 rather than dividing by zero or going
+ * negative-height.
+ */
+export function moneyRatio(value: string, max: string): number {
+  const maxCents = centsOf(max);
+  const valueCents = centsOf(value);
+  if (maxCents <= 0n || valueCents <= 0n) {
+    return 0;
+  }
+  const basisPoints = (valueCents * 10000n) / maxCents;
+  const clamped = basisPoints > 10000n ? 10000n : basisPoints;
+  return Number(clamped) / 10000;
+}
+
 function centsOf(value: string): bigint {
   const [whole, frac] = toCents(value);
   return whole * 100n + frac;

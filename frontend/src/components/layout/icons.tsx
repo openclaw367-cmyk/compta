@@ -16,6 +16,16 @@ function base(props: SVGProps<SVGSVGElement>) {
   };
 }
 
+export function IconHome(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3.5 9.5 10 4l6.5 5.5" />
+      <path d="M5 8.5V16h10V8.5" />
+      <path d="M8 16v-4.5h4V16" />
+    </svg>
+  );
+}
+
 export function IconGrid(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base(props)}>

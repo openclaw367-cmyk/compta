@@ -37,6 +37,8 @@ import { AiChatModule } from './modules/ai-chat/ai-chat.module';
 import { AiChatController } from './modules/ai-chat/ai-chat.controller';
 import { CloudCredentialsModule } from './modules/cloud-credentials/cloud-credentials.module';
 import { CloudCredentialsController } from './modules/cloud-credentials/cloud-credentials.controller';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { DashboardController } from './modules/dashboard/dashboard.controller';
 import { DevModule } from './modules/dev/dev.module';
 import { DevController } from './modules/dev/dev.controller';
 
@@ -68,6 +70,7 @@ const isProduction = process.env.NODE_ENV === 'production';
     LedgerModule,
     AiChatModule,
     CloudCredentialsModule,
+    DashboardModule,
     ...(isProduction ? [] : [DevModule]),
   ],
 })
@@ -102,6 +105,7 @@ export class AppModule implements NestModule {
         LedgerController,
         AiChatController,
         CloudCredentialsController,
+        DashboardController,
         ...(isProduction ? [] : [DevController]),
       );
   }

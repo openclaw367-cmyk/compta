@@ -1,5 +1,6 @@
 import { Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';
+import { DashboardPage } from './pages/DashboardPage';
 import { JournalEntriesPage } from './pages/JournalEntriesPage';
 import { FiscalYearsPage } from './pages/FiscalYearsPage';
 import { CompanyProfilePage } from './pages/CompanyProfilePage';
@@ -22,7 +23,8 @@ export default function App() {
   return (
     <AppShell>
       <Routes>
-        <Route path="/" element={<JournalEntriesPage />} />
+        <Route path="/" element={<DashboardPage />} />
+        <Route path="/ecritures" element={<JournalEntriesPage />} />
         <Route path="/exercices" element={<FiscalYearsPage />} />
         <Route path="/tiers" element={<TiersPage />} />
         <Route path="/comptes" element={<AccountsJournalsPage />} />

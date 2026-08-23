@@ -104,7 +104,7 @@ describe('AccountsService', () => {
       );
     });
 
-    it('rejects a parent collectif that is not 401 or 411', async () => {
+    it('rejects a parent collectif that is not 401, 411, or 455', async () => {
       prisma.account.findFirst.mockResolvedValueOnce({
         ...collectif401,
         id: 'acc-607',
@@ -113,6 +113,18 @@ describe('AccountsService', () => {
       await expect(service.createTiers(company, 'acc-607', { label: 'X' })).rejects.toThrow(
         BadRequestException,
       );
+    });
+
+    it("accepts 455 (comptes courants d'associés) as an auxiliary-bearing collectif", async () => {
+      prisma.account.findFirst.mockResolvedValueOnce({
+        ...collectif401,
+        id: 'acc-455',
+        number: '455000',
+        label: 'Associés - Comptes courants',
+      });
+      prisma.account.findMany.mockResolvedValueOnce([]);
+      const tiers = await service.createTiers(company, 'acc-455', { label: 'Jean Dupont' });
+      expect(tiers).toMatchObject({ number: '455001', isAuxiliary: true, parentId: 'acc-455' });
     });
 
     it('translates a unique-constraint race into a clear ConflictException', async () => {

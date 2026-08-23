@@ -160,4 +160,69 @@ describe('LedgerService', () => {
       ).rejects.toThrow(NotFoundException);
     });
   });
+
+  describe('recentEntriesForClass', () => {
+    it('queries lines scoped to the given PCG class, most recent first, capped at the limit', async () => {
+      const account512 = { number: '512000', label: 'Banque' };
+      prisma.ecritureLigne.findMany.mockResolvedValueOnce([
+        {
+          debit: D('1000.00'),
+          credit: D('0.00'),
+          compte: account512,
+          ecriture: {
+            id: 'ecr-2',
+            ecritureDate: new Date('2026-03-10'),
+            libelle: 'Virement client',
+            validatedAt: null,
+          },
+        },
+        {
+          debit: D('0.00'),
+          credit: D('250.00'),
+          compte: account512,
+          ecriture: {
+            id: 'ecr-1',
+            ecritureDate: new Date('2026-03-01'),
+            libelle: 'Prélèvement',
+            validatedAt: new Date('2026-03-02'),
+          },
+        },
+      ]);
+
+      const result = await service.recentEntriesForClass(company, 'fy-1', 5, 8);
+
+      expect(prisma.ecritureLigne.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            companyId: 'company-1',
+            ecriture: { fiscalYearId: 'fy-1' },
+            compte: { pcgClass: 5 },
+          }),
+          take: 8,
+        }),
+      );
+      expect(result).toEqual([
+        {
+          ecritureId: 'ecr-2',
+          ecritureDate: '2026-03-10',
+          libelle: 'Virement client',
+          accountNumber: '512000',
+          accountLabel: 'Banque',
+          debit: '1000.00',
+          credit: '0.00',
+          isValidated: false,
+        },
+        {
+          ecritureId: 'ecr-1',
+          ecritureDate: '2026-03-01',
+          libelle: 'Prélèvement',
+          accountNumber: '512000',
+          accountLabel: 'Banque',
+          debit: '0.00',
+          credit: '250.00',
+          isValidated: true,
+        },
+      ]);
+    });
+  });
 });

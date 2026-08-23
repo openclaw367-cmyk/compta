@@ -15,13 +15,18 @@ const PRISMA_UNIQUE_CONSTRAINT_ERROR = 'P2002';
 
 /**
  * Collectifs that accept a tiers (compte auxiliaire) breakdown — 401
- * fournisseurs, 411 clients. Matches the frontend's identically-named
- * check (frontend/src/components/journal/EcritureEditor.tsx); duplicated
+ * fournisseurs, 411 clients, and (as of the dashboard's comptes courants
+ * d'associés tile, 2026-08-24) 455 associés. Matches the frontend's
+ * identically-named check (frontend/src/lib/accounts.ts); duplicated
  * rather than shared because only types cross the frontend/backend
- * boundary in this project, not runtime code — see CLAUDE.md.
+ * boundary in this project, not runtime code — see CLAUDE.md. Widening
+ * this only affects NEW auxiliary sub-accounts created going forward —
+ * historical écritures posted to the flat 455000 collectif before this
+ * change stay unattributed to any specific associé unless re-tagged by
+ * hand; nothing here retroactively reclassifies existing data.
  */
 function isAuxiliaryBearingCollectif(number: string): boolean {
-  return number.startsWith('401') || number.startsWith('411');
+  return number.startsWith('401') || number.startsWith('411') || number.startsWith('455');
 }
 
 @Injectable()

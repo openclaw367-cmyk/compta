@@ -8,6 +8,25 @@ import { TrialBalanceResponseDto } from './dto/trial-balance-response.dto';
 import { AccountLedgerResponseDto } from './dto/account-ledger-response.dto';
 
 /**
+ * One écriture line on a single account, for `recentEntriesForClass()` —
+ * a plain interface (no `@ApiProperty` DTO class) since, unlike
+ * `trialBalance()`/`accountLedger()`, this method has no controller
+ * endpoint of its own: it exists to be called in-process by
+ * `DashboardService`, the same way `CashFlowService.buildContext()` is
+ * called directly by `FinancialAnalysisService` rather than over HTTP.
+ */
+export interface RecentEntryLine {
+  ecritureId: string;
+  ecritureDate: string;
+  libelle: string;
+  accountNumber: string;
+  accountLabel: string;
+  debit: string;
+  credit: string;
+  isValidated: boolean;
+}
+
+/**
  * Trial balance (balance générale) and per-account grand livre. Reporting
  * only — reads écriture lines already persisted by EntriesService /
  * ImportExcelService, never writes. Includes draft (unvalidated) écritures
@@ -136,6 +155,46 @@ export class LedgerService {
         balance: totalDebit.minus(totalCredit).toApiString(),
       },
     };
+  }
+
+  /**
+   * The most recent N écriture lines posted to a given PCG class (e.g. 5
+   * for trésorerie), across a fiscal year — the primitive the
+   * dashboard's "recent bank transactions" section needs and no
+   * existing method exposed cleanly (`trialBalance()` only returns
+   * per-account TOTALS, `EntriesService.findAll()` returns every line on
+   * every account with no class filter). Reporting only, same as every
+   * other method here: draft and validated lines both included, exactly
+   * like `trialBalance()` — the caller renders `isValidated` rather than
+   * this method silently picking a side.
+   */
+  async recentEntriesForClass(
+    company: CompanyContext,
+    fiscalYearId: string,
+    pcgClass: number,
+    limit: number,
+  ): Promise<RecentEntryLine[]> {
+    const lignes = await this.prisma.ecritureLigne.findMany({
+      where: {
+        companyId: company.companyId,
+        ecriture: { fiscalYearId },
+        compte: { pcgClass },
+      },
+      include: { compte: true, ecriture: true },
+      orderBy: [{ ecriture: { ecritureDate: 'desc' } }, { ecriture: { createdAt: 'desc' } }],
+      take: limit,
+    });
+
+    return lignes.map((ligne) => ({
+      ecritureId: ligne.ecriture.id,
+      ecritureDate: ligne.ecriture.ecritureDate.toISOString().slice(0, 10),
+      libelle: ligne.ecriture.libelle,
+      accountNumber: ligne.compte.number,
+      accountLabel: ligne.compte.label,
+      debit: Money.fromDecimal(ligne.debit).toApiString(),
+      credit: Money.fromDecimal(ligne.credit).toApiString(),
+      isValidated: ligne.ecriture.validatedAt !== null,
+    }));
   }
 
   private async requireFiscalYear(
