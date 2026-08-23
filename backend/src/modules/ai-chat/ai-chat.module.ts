@@ -14,6 +14,7 @@ import { EntriesModule } from '../entries/entries.module';
 import { ChatModelModule } from './chat-model/chat-model.module';
 import { ReadToolsService } from './tools/read-tools.service';
 import { ProposeToolsService } from './tools/propose-tools.service';
+import { CloudProposeToolsService } from './tools/cloud-propose-tools.service';
 import { ChatContextService } from './chat-context.service';
 import { ChatOrchestratorService } from './chat-orchestrator.service';
 import { InvoiceExtractionService } from './invoice-extraction.service';
@@ -34,6 +35,15 @@ import { AiChatController } from './ai-chat.controller';
  * this module: a confirmed proposal reaches the ledger only through the
  * frontend's ORDINARY `POST /entries` call — this module has no code
  * path to that write at all, gated or otherwise.
+ * `CloudProposeToolsService` (see CLAUDE.md "AI chatbot cloud tier") is
+ * a THIRD registry, for the not-yet-wired-in cloud path — it inherits
+ * this same non-persisting guarantee by construction, since it only
+ * reuses `ProposeToolsService`'s own `propose_ecriture` `ChatTool` object
+ * plus two of `ReadToolsService`'s tools (`search_accounts`,
+ * `list_vat_rates`), never the other 14. Registered here as a normal DI
+ * provider; not yet injected into `ChatOrchestratorService` — that
+ * wiring, and the server-side enforcement of when a turn is allowed to
+ * use it, is a later, separate build step.
  * `CompaniesModule` is imported for `ChatContextService`'s eager-context
  * fetch (see that file), which calls `CompaniesService.findCurrent()`
  * only — `updateCurrent()` exists on that class but nothing in this
@@ -59,6 +69,7 @@ import { AiChatController } from './ai-chat.controller';
   providers: [
     ReadToolsService,
     ProposeToolsService,
+    CloudProposeToolsService,
     ChatContextService,
     ChatOrchestratorService,
     InvoiceExtractionService,
