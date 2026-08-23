@@ -2156,15 +2156,63 @@ before touching this again, this section is deliberately compressed.
   call like `query_liasse` failing cleanly rather than reaching
   `ReadToolsService`), plus a live boot of the full app confirming the
   module graph resolves with the new provider.
+- **Consent flow and the always-visible indicator are built** (2026-08-23,
+  commit `12fc103`) — the always-visible half first: new `ChatEngine`
+  enum (`LOCAL`|`CLOUD`) plus nullable `cloudProvider` on `ChatMessage`
+  (migration `20260823103441_add_chat_message_engine`), set explicitly
+  (`ChatEngine.LOCAL`) at all three `prisma.chatMessage.create()` call
+  sites in `ai-chat.service.ts` — never inferred from `cloudProvider`
+  being non-null. Every write path sets `LOCAL` today, on purpose:
+  no cloud engine is wired into `ChatOrchestratorService` yet (see the
+  next build-order step), so the field exists now purely so the
+  indicator has real persisted state to render the moment a cloud turn
+  becomes possible, rather than being retrofitted later. The frontend
+  `EngineBadge` (🔒 Local, green / ☁️ Claude or ☁️ DeepSeek, amber)
+  reads this field directly in all three required places:
+  `AssistantPage`'s composer (a static bar above the send form, since
+  no per-invocation cloud toggle exists until the next build-order
+  step), every persisted `MessageRow` (assistant text and
+  `ToolCallProposalRow`), and `ProposalCard`'s own header, whose border/
+  text color also switches to amber under `engine === 'CLOUD'`.
+  `AssistantSettingsPage.tsx` (new, route `/assistant/parametres`,
+  reachable only via a link from `AssistantPage`'s header, no sidebar
+  entry) is the consent surface: one card per provider showing
+  `CloudCredentialsService`'s masked summary or "Non configuré", an
+  "Activer…" action opening `ConsentDialog` — a real two-step modal, not
+  a single click. Step one shows the provider's title/body paragraphs/
+  policy link/checkbox verbatim from
+  `specs/ai-chatbot-cloud-tier-implementation-spec.md`'s approved copy
+  (Claude vs. DeepSeek genuinely differ — the China-storage/training-use
+  disclosure only appears on DeepSeek's, per the residency fact recorded
+  above) with "Activer" disabled until the checkbox is checked; step two
+  is the API-key input, saved via `useSetCloudCredential()` against the
+  real `POST /ai-chat/cloud-credentials` endpoint. `useCloudCredentials`/
+  `useSetCloudCredential`/`useRevokeCloudCredential` in `api/queries.ts`
+  follow this file's existing `useQuery`/`useMutation` +
+  `invalidateQueries` convention exactly, nothing new introduced.
+  **Verified live end to end against the real dev backend/DB, not just
+  build/tests**: the settings page rendering both providers as "Non
+  configuré"; the Claude dialog's exact copy and disabled-until-checked
+  button (`activerDisabled` confirmed `true→false` via direct DOM
+  inspection, not just clicking and hoping); the DeepSeek dialog's own
+  distinct copy and policy URL; saving a test key producing a masked
+  `sk-...7890` credential; revoking it and confirming the card reverts
+  to "Non configuré" (the test credential was cleaned up, not left
+  behind); and the composer's/historical messages' 🔒 Local badges
+  rendering correctly from real persisted data. 428 backend tests pass
+  unmodified; frontend `tsc`/`eslint`/`vite build` all clean.
 - **Build order**: rename (done) → `CloudModelCredential` + key
   handling (done) → Claude adapter (done) → DeepSeek adapter (done) →
   narrow cloud tool registry (done) → consent flow + always-visible
-  indicator (composer/message/`ProposalCard`, three places) →
-  server-side thread/granularity enforcement. Not shippable until the
-  consent flow and indicator are demonstrated working, the residency
-  facts above are verified (done — see the spec's citations), and both
-  cloud adapters are verified against their real APIs with real keys
-  (not yet done for either).
+  indicator (done) → server-side thread/granularity enforcement. Not
+  shippable until the residency facts above are verified (done — see
+  the spec's citations), both cloud adapters are verified against their
+  real APIs with real keys (not yet done for either), and the
+  server-side enforcement step itself lands — today `EngineBadge`
+  always shows 🔒 Local because no code path can produce a CLOUD
+  message yet; the composer's "☁️ Proposer avec [Provider]" per-
+  invocation action from the original design also isn't built yet,
+  since it depends on that same wiring.
 
 ## Known scope boundaries
 
