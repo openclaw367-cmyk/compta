@@ -1278,6 +1278,52 @@ from the ledger, not modeled on any external document.
   above. A dedicated oracle test (`cash-flow-statement.spec.ts`,
   "445660/445662 (TVA déductible) split correctly between exploitation
   and investissement") reproduces this exact scenario in isolation.
+- **Comptes courants d'associés (455) is classified as FINANCEMENT**
+  (2026-08-24, fixed the same day the gap was found via the dashboard's
+  new per-associé tile — see "Dashboard" below) — `Δ` of the raw
+  account 455 balance, credit − debit (so a growing amount owed to
+  associés is a cash inflow, same sign convention as
+  `variationEmprunts`), is its own `variationComptesCourantsAssocies`
+  line in `FluxFinancement`. **Found live, not by inspection**: 455
+  sits in `bilan-2050.ts`'s dual-nature EA/BZ family (`DualNatureRule`s
+  routing 455/458/467/468 to BZ when net-debit, EA when net-credit),
+  and neither EA nor BZ was in scope ANYWHERE in this module — posting
+  a real "avance en compte courant" (an associé lending the company
+  cash) broke `assertCashFlowReconciles` outright the moment the
+  dashboard's new per-associé 455 tiers made a real posting to 455
+  possible for the first time. Fixed the same way 445660/445662 were
+  carved out of BZ: 455 is individually addressable (a real, named PCG
+  account, not a genuinely-commingled catch-all) and carved OUT of the
+  EA/BZ family specifically, while the REST of that family (451 groupe,
+  458 opérations en commun, 464 dettes sur acquisition, 467/468 autres
+  comptes divers) stays exactly as excluded/unclassified as before —
+  those are a genuinely mixed bag (458 operational, 464
+  investing-adjacent, 467/468 opaque) that dumping wholesale into
+  financement would misclassify, the same lesson as the 445660/445662
+  bug directly above. **Deliberately NOT reconciled with
+  `financial-analysis.ts`'s own treatment of EA** — that module's
+  `computeBfrHorsExploitation()` groups the WHOLE EA family (including
+  455) into "dettes hors exploitation," a working-capital framing, not
+  financing. The two modules answer different questions (this one
+  classifies actual cash MOVEMENTS into three sections; that one
+  snapshots a BFR figure for its own trésorerie-nette identity) and
+  `assertBfrExploitationTiesToCashFlow` only ties out the EXPLOITATION
+  bucket, never hors-exploitation, so nothing requires them to agree on
+  which bucket 455 belongs to — this fix doesn't touch
+  `financial-analysis.ts` at all. Worth a deliberate look in a future
+  pass, not assumed resolved here. Two new hand-computed oracle tests
+  in `cash-flow-statement.spec.ts` (the inflow case — an associé
+  advancing cash — and its mirror, the company advancing cash to an
+  associé, proving the sign isn't a special case). Verified live on the
+  FR demo company: posted a real écriture crediting a `455001` tiers
+  sub-account (débit 512000 / crédit 455001, 1 000,00), confirmed it
+  broke reconciliation with exactly the predicted message BEFORE the
+  fix, confirmed the fix restored `variationComptesCourantsAssocies:
+  "1000.00"` and a fully reconciling statement (`18 355,00 = 33 355,00
+  − 15 000,00`) AFTER, and confirmed the same figures render correctly
+  in `CashFlowPage`'s own Financement table. Test écriture reversed and
+  the reversal validated afterward, restoring the exact original
+  32 355,00 trésorerie baseline.
 - **`distributions` is always `"0.00"`** — no affectation-du-résultat
   mechanism exists anywhere in this app (à-nouveau carries the whole
   prior result into 120/129 with no distribution/réserve split), so
@@ -2452,33 +2498,29 @@ its own beyond what those services already expose.
   line codes this pass's mapping could reuse; this is a stated scope
   boundary (RÉEL_NORMAL only for now), not a bug.
 - **A real, live-found gap in the CASH FLOW module, not a dashboard
-  bug — logged here, not fixed this pass.** Testing the new 455
+  bug — found this pass, fixed the same day.** Testing the new 455
   auxiliary capability end to end (creating a tiers, posting a real
   "avance en compte courant" écriture debiting 512000/crediting the
   new 455 sub-account) broke `FinancialAnalysisService.generate()`
   outright — `CashFlowService.buildContext()`'s own reconciliation
   assertion failed, because `cash-flow-statement.ts`'s three flux
-  sections (see "Tableau des flux de trésorerie" above) have NO scope
-  entry for account 455 anywhere: not BFR exploitation, not BFR hors
-  exploitation, not financing. A comptes-courants-d'associés movement
-  is economically closest to financing cash flow (akin to
-  DS/DT/DU/DV, dettes financières) but was never classified there —
-  before this pass, this never surfaced because the demo company had
-  zero 455 activity to expose it. Verified live: posting the test
-  écriture broke the dashboard with exactly this reconciliation
-  message; reversing and validating the reversal (both écritures,
-  since a validated entry can only be corrected via a real
-  contre-passation) restored it to the exact original figures,
-  confirming the gap is real and confirming nothing else broke.
-  **Not fixed this pass** — deciding where 455 belongs in the flux
-  scope is a real, judgment-heavy classification decision for
-  `cash-flow-statement.ts` (same category of decision as every other
-  scope call already logged in that module's own CLAUDE.md section),
-  not a dashboard-layer fix. Any company that starts using per-associé
-  455 sub-accounts will hit this the moment `FinancialAnalysisService`/
-  `CashFlowService` is asked to compute a fiscal year containing that
-  activity — flagged here so a future session doesn't have to
-  rediscover it live again.
+  sections had NO scope entry for account 455 anywhere: not BFR
+  exploitation, not BFR hors exploitation, not financing — before this
+  pass, this never surfaced because the demo company had zero 455
+  activity to expose it. **Fixed the same day** — see "Tableau des flux
+  de trésorerie" above ("Comptes courants d'associés (455) is
+  classified as FINANCEMENT") for the full design and verification:
+  455 is now individually carved out of the EA/BZ dual-nature family
+  into its own `variationComptesCourantsAssocies` financement line,
+  the rest of that family (451/458/464/467/468) stays exactly as
+  unclassified as before, and `financial-analysis.ts`'s own (different)
+  EA-in-BFR-hors-exploitation treatment is deliberately left untouched
+  — the two modules answer different questions and nothing ties them
+  together on this account. Re-verified live on the FR demo company
+  after the fix: the exact same test écriture that broke reconciliation
+  now reconciles cleanly and populates a real, correct per-associé
+  balance in both the dashboard tile and `CashFlowPage`'s own
+  Financement table.
 - **Hand-rolled SVG-free bar charts (plain styled `<div>`s with
   pixel heights), no charting library added** — matches this app's
   existing "no dependency for a handful of glyphs" discipline (the
@@ -2896,10 +2938,10 @@ A-1 §VIII uncross-checked).
    collectif, same as 401/411 — decided with the user before building
    the per-associé tile, not assumed. Verified live end to end,
    including the new 455 capability through the real Tiers UI, which
-   in turn surfaced a real, NOT-yet-fixed gap in the cash-flow module
-   (comptes courants d'associés movements aren't classified into any
-   of the three flux sections — see "Dashboard" above for the full
-   finding and why it's logged rather than patched this pass).
+   in turn surfaced a real gap in the cash-flow module (comptes
+   courants d'associés movements weren't classified into any of the
+   three flux sections) — **found and fixed the same day**, see
+   "Tableau des flux de trésorerie" above.
 
 Not on this numbered list but still open whenever it's picked back up:
 widening either VAT computation — FR: remaining taux particuliers beyond
