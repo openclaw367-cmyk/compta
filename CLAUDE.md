@@ -2083,15 +2083,39 @@ before touching this again, this section is deliberately compressed.
   live against the FR demo company (set/list/upsert-replace/revoke/
   404/400) plus a direct `psql` check confirming the stored value is
   real ciphertext.
+- **`ClaudeCloudModelAdapter` is built** (2026-08-23, commit `f79208d`)
+  — `src/modules/ai-chat/chat-model/claude-cloud-model.adapter.ts`,
+  implementing `ChatModelPort` via the official `@anthropic-ai/sdk`
+  (never raw fetch — the local Ollama adapter uses raw fetch because no
+  first-party Ollama SDK exists, but Claude has one, and this
+  codebase's own claude-api reference requires using it). Host-pinned
+  (explicit `baseURL`, immune to an ambient `ANTHROPIC_BASE_URL`),
+  constructed per-call with a company's own decrypted key — never
+  DI-bound, no single instance could serve every company. Always
+  passes `thinking: {type: "adaptive"}` explicitly, never omitted or
+  disabled — disabling thinking on current Claude models can itself
+  cause a tool call to be written as plain text instead of a real
+  `tool_use` block, the exact failure class this whole cloud tier
+  exists to escape. Translates the normalized `ChatModelMessage[]` to
+  Claude's shape, merging consecutive tool-role messages into one user
+  turn with multiple `tool_result` blocks (splitting them trains the
+  model away from parallel tool calls, per Claude's own guidance); a
+  `refusal` `stop_reason` degrades to a clear French assistant message
+  rather than assuming `content[0]` exists; `isAvailable()` uses the
+  token-free `models.list()` rather than spending a completion. 12 new
+  tests; every Anthropic type name used was confirmed directly against
+  the installed SDK source before writing the code. **Not verified
+  live against the real API** — no key was available in the build
+  environment; that check is deferred to when one is on hand.
 - **Build order**: rename (done) → `CloudModelCredential` + key
-  handling (done) → Claude adapter → DeepSeek adapter → narrow cloud
-  tool registry → consent flow + always-visible indicator (composer/
-  message/`ProposalCard`, three places) → server-side thread/
-  granularity enforcement. Not shippable until the consent flow and
-  indicator are demonstrated working and the residency facts above are
-  verified — the verification is done (see the spec's citations); the
-  flow/
-  indicator are not yet built.
+  handling (done) → Claude adapter (done) → DeepSeek adapter → narrow
+  cloud tool registry → consent flow + always-visible indicator
+  (composer/message/`ProposalCard`, three places) → server-side
+  thread/granularity enforcement. Not shippable until the consent flow
+  and indicator are demonstrated working, the residency facts above
+  are verified (done — see the spec's citations), and the Claude
+  adapter is verified against the real API with a real key (not yet
+  done).
 
 ## Known scope boundaries
 
