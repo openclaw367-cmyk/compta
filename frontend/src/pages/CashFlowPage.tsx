@@ -314,8 +314,10 @@ function FluxFinancementSection({ flux }: { flux: FluxFinancement }) {
       <div>
         <h2 className="text-[14px] font-semibold text-ink">Flux de financement</h2>
         <p className="mt-0.5 text-[12.5px] text-ink-muted">
-          Variation des emprunts et du capital. Les distributions restent à 0,00 — aucun mécanisme
-          d'affectation du résultat n'existe encore dans l'application.
+          Variation des emprunts, du capital et des comptes courants d'associés (compte 455 —
+          positif quand un associé avance de la trésorerie à la société). Les distributions
+          restent à 0,00 — aucun mécanisme d'affectation du résultat n'existe encore dans
+          l'application.
         </p>
       </div>
 
@@ -330,6 +332,10 @@ function FluxFinancementSection({ flux }: { flux: FluxFinancement }) {
           <tbody>
             <Row label="+ Variation des emprunts" value={flux.variationEmprunts} />
             <Row label="+ Variation du capital" value={flux.variationCapital} />
+            <Row
+              label="+ Variation des comptes courants d'associés"
+              value={flux.variationComptesCourantsAssocies}
+            />
             <Row label="− Distributions" value={flux.distributions} muted />
             <TotalRow label="= Flux net de trésorerie de financement" value={flux.total} />
           </tbody>

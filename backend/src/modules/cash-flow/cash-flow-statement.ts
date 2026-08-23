@@ -70,6 +70,37 @@ import { CESSION_PRODUIT_CODES, CESSION_CHARGE_CODES } from '../liasse/liasse-ar
  *   mechanism exists anywhere in this app (à-nouveau carries the whole
  *   prior result into 120/129 with no distribution/réserve split), so
  *   there is nothing to read. A documented, permanent gap, not a guess.
+ * - Comptes courants d'associés (455) is classified as FINANCEMENT —
+ *   Δ(raw account 455 balance, credit − debit, so a GROWING amount owed
+ *   to associés is a cash inflow, same sign convention as
+ *   `variationEmprunts`) is its own line in `FluxFinancement`, alongside
+ *   emprunts and capital. Found live, not by inspection: posting a real
+ *   "avance en compte courant" (an associé lending the company cash)
+ *   broke `assertCashFlowReconciles` outright, because 455 sits in
+ *   `bilan-2050.ts`'s dual-nature EA/BZ family (see that file's own
+ *   `DualNatureRule`s) and neither EA nor BZ was in scope anywhere in
+ *   this module. 455 is carved out of that family the SAME way
+ *   462/445660/445662 are already carved out of BZ — it's individually
+ *   addressable (a real PCG account number, not a genuinely-commingled
+ *   catch-all) — while the REST of the EA/BZ family (451 groupe, 458
+ *   opérations en commun, 464 dettes sur acquisition, 467/468 autres
+ *   comptes divers) stays exactly as excluded as it was before this
+ *   fix: those are a genuinely mixed bag (458 operational, 464
+ *   investing-adjacent, 467/468 opaque) that "financing" would
+ *   misclassify the same way dumping 500,00 of TVA déductible into
+ *   exploitation would have (see the 445660/445662 bullet above) — a
+ *   real classification call for a future pass, not something this fix
+ *   silently extends to. **Not reconciled with `financial-analysis.ts`'s
+ *   own treatment of EA** (that module's `computeBfrHorsExploitation()`
+ *   groups the WHOLE EA family, including 455, into "dettes hors
+ *   exploitation" — a working-capital framing, not financing). The two
+ *   modules answer different questions (this one classifies actual cash
+ *   MOVEMENTS into three sections; that one snapshots a BFR figure for
+ *   its own trésorerie-nette identity) and nothing asserts they must
+ *   agree on which bucket 455 belongs to — `assertBfrExploitationTiesToCashFlow`
+ *   only ties out the EXPLOITATION bucket, never hors-exploitation — so
+ *   this fix doesn't touch `financial-analysis.ts` at all. Worth a
+ *   deliberate look in a future pass, not assumed resolved here.
  */
 
 const CLIENTS_CODE = 'BX';
@@ -122,6 +153,10 @@ export interface CashFlowStatementInput {
   openingTvaDeductibleImmobilisations: Money;
   /** Same, at fiscal-year end. */
   closingTvaDeductibleImmobilisations: Money;
+  /** Raw account 455 ("Comptes courants d'associés") balance at fiscal-year start, credit − debit (positive = the company owes its associés) — carved out of the EA/BZ dual-nature family into financement, see module doc comment. Includes every 455-prefixed account, so a per-associé auxiliary sub-account (455001, 455002, ...) is summed in automatically. */
+  openingComptesCourantsAssocies: Money;
+  /** Same, at fiscal-year end. */
+  closingComptesCourantsAssocies: Money;
 }
 
 export interface FluxExploitation {
@@ -152,6 +187,8 @@ export interface FluxInvestissement {
 export interface FluxFinancement {
   variationEmprunts: string;
   variationCapital: string;
+  /** Δ raw account 455, credit − debit — see module doc comment for why this is financement, not BFR. */
+  variationComptesCourantsAssocies: string;
   /** Always "0.00" — see module doc comment. */
   distributions: string;
   total: string;
@@ -181,6 +218,8 @@ export function computeCashFlowStatement(input: CashFlowStatementInput): CashFlo
     closingTvaDeductibleAutres,
     openingTvaDeductibleImmobilisations,
     closingTvaDeductibleImmobilisations,
+    openingComptesCourantsAssocies,
+    closingComptesCourantsAssocies,
   } = input;
 
   const montantByCode = new Map(closingCompteResultat.lignes.map((l) => [l.code, l.montant]));
@@ -245,8 +284,14 @@ export function computeCashFlowStatement(input: CashFlowStatementInput): CashFlo
   const variationCapital = montantPassif(closingBilan, [CAPITAL_CODE]).minus(
     montantPassif(openingBilan, [CAPITAL_CODE]),
   );
+  const variationComptesCourantsAssocies = closingComptesCourantsAssocies.minus(
+    openingComptesCourantsAssocies,
+  );
   const distributions = Money.zero();
-  const totalFinancement = variationEmprunts.plus(variationCapital).plus(distributions);
+  const totalFinancement = variationEmprunts
+    .plus(variationCapital)
+    .plus(variationComptesCourantsAssocies)
+    .plus(distributions);
 
   const variationTresorerie = totalExploitation.plus(totalInvestissement).plus(totalFinancement);
 
@@ -278,6 +323,7 @@ export function computeCashFlowStatement(input: CashFlowStatementInput): CashFlo
     fluxFinancement: {
       variationEmprunts: variationEmprunts.toApiString(),
       variationCapital: variationCapital.toApiString(),
+      variationComptesCourantsAssocies: variationComptesCourantsAssocies.toApiString(),
       distributions: distributions.toApiString(),
       total: totalFinancement.toApiString(),
     },

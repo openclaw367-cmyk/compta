@@ -622,6 +622,8 @@ export interface FluxInvestissement {
 export interface FluxFinancement {
   variationEmprunts: string;
   variationCapital: string;
+  /** Δ raw account 455 (comptes courants d'associés), credit − debit — positive when associés advance more cash to the company. */
+  variationComptesCourantsAssocies: string;
   distributions: string;
   total: string;
 }

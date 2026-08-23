@@ -23,6 +23,7 @@ import { ComputeCashFlowDto } from './dto/compute-cash-flow.dto';
 const CREANCES_SUR_CESSIONS_ACCOUNT_PREFIX = '462';
 const TVA_DEDUCTIBLE_AUTRES_ACCOUNT_PREFIX = '445660';
 const TVA_DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT_PREFIX = '445662';
+const COMPTES_COURANTS_ASSOCIES_ACCOUNT_PREFIX = '455';
 
 /**
  * Everything computeCashFlowStatement() needs, plus the intermediate
@@ -47,6 +48,8 @@ export interface CashFlowContext {
   closingTvaDeductibleAutres: Money;
   openingTvaDeductibleImmobilisations: Money;
   closingTvaDeductibleImmobilisations: Money;
+  openingComptesCourantsAssocies: Money;
+  closingComptesCourantsAssocies: Money;
   acquisitionsImmobilisations: Money;
   cessionsImmobilisations: Money;
 }
@@ -186,6 +189,17 @@ export class CashFlowService {
       closingBilanAccounts,
       TVA_DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT_PREFIX,
     );
+    // Credit − debit (liability convention, same as montantPassif), not sumAccountBalance's own
+    // debit − credit — 455 is ordinarily a liability (the company owing its associés), and this
+    // figure feeds variationComptesCourantsAssocies with the SAME "liability grew → cash in"
+    // sign convention variationEmprunts already uses. See cash-flow-statement.ts's own doc
+    // comment for why 455 is carved out of the EA/BZ dual-nature family this way.
+    const openingComptesCourantsAssocies = Money.zero().minus(
+      sumAccountBalance(openingBilanAccounts, COMPTES_COURANTS_ASSOCIES_ACCOUNT_PREFIX),
+    );
+    const closingComptesCourantsAssocies = Money.zero().minus(
+      sumAccountBalance(closingBilanAccounts, COMPTES_COURANTS_ASSOCIES_ACCOUNT_PREFIX),
+    );
 
     const assetsAcquiredThisYear = await this.prisma.fixedAsset.findMany({
       where: {
@@ -222,6 +236,8 @@ export class CashFlowService {
       closingTvaDeductibleAutres,
       openingTvaDeductibleImmobilisations,
       closingTvaDeductibleImmobilisations,
+      openingComptesCourantsAssocies,
+      closingComptesCourantsAssocies,
       acquisitionsImmobilisations,
       cessionsImmobilisations,
     };

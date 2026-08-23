@@ -170,6 +170,7 @@ function fluxLigne(overrides: Partial<CashFlowStatement>): CashFlowStatement {
     fluxFinancement: {
       variationEmprunts: '0.00',
       variationCapital: '0.00',
+      variationComptesCourantsAssocies: '0.00',
       distributions: '0.00',
       total: '0.00',
     },

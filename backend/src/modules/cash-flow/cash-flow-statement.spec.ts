@@ -71,6 +71,12 @@ const NO_TVA_DEDUCTIBLE = {
   closingTvaDeductibleImmobilisations: Money.zero(),
 };
 
+/** Every scenario not specifically exercising 455 supplies these as zero. */
+const NO_COMPTES_COURANTS_ASSOCIES = {
+  openingComptesCourantsAssocies: Money.zero(),
+  closingComptesCourantsAssocies: Money.zero(),
+};
+
 function cdrLigne(code: string, montant: string): CompteResultatLigne {
   return { code, label: code, montant };
 }
@@ -109,6 +115,7 @@ describe('computeCashFlowStatement', () => {
       openingCreancesSurCessions: Money.zero(),
       closingCreancesSurCessions: Money.zero(),
       ...NO_TVA_DEDUCTIBLE,
+      ...NO_COMPTES_COURANTS_ASSOCIES,
     });
 
     expect(statement.fluxExploitation).toMatchObject({
@@ -156,6 +163,7 @@ describe('computeCashFlowStatement', () => {
       openingCreancesSurCessions: Money.zero(),
       closingCreancesSurCessions: Money.fromString('1000.00'),
       ...NO_TVA_DEDUCTIBLE,
+      ...NO_COMPTES_COURANTS_ASSOCIES,
     });
 
     // CAF = 400 + 600(VNC) − 1000(produit cession) = 0. ΔBFR = 0. Flux exploitation = 0.
@@ -196,6 +204,7 @@ describe('computeCashFlowStatement', () => {
       openingCreancesSurCessions: Money.zero(),
       closingCreancesSurCessions: Money.zero(),
       ...NO_TVA_DEDUCTIBLE,
+      ...NO_COMPTES_COURANTS_ASSOCIES,
     });
 
     // CAF = 3800(résultat) + 1200(GC dotation) = 5000. Δcréances(brut) = 5000 − 0 = 5000.
@@ -234,6 +243,7 @@ describe('computeCashFlowStatement', () => {
       closingTvaDeductibleAutres: Money.fromString('410.00'),
       openingTvaDeductibleImmobilisations: Money.zero(),
       closingTvaDeductibleImmobilisations: Money.fromString('90.00'),
+      ...NO_COMPTES_COURANTS_ASSOCIES,
     });
 
     // Exploitation: CAF(0) − Δ445660(410) = −410 — the 410 lands here, not investissement.
@@ -249,6 +259,64 @@ describe('computeCashFlowStatement', () => {
     });
     expect(statement.variationTresorerie).toBe('-410.00');
     expect(statement.tresorerieCloture).toBe('590.00');
+    expect(() => assertCashFlowReconciles(statement)).not.toThrow();
+  });
+
+  it("an avance en compte courant d'associé (455) lands in financement and reconciles", () => {
+    // Reproduces, in isolation, the exact live gap found while verifying the dashboard's new
+    // per-associé 455 tile: an associé lending the company cash (débit trésorerie / crédit 455)
+    // broke assertCashFlowReconciles outright, because 455 sits in bilan-2050.ts's dual-nature
+    // EA/BZ family and neither was in scope anywhere in this module. See CLAUDE.md "Tableau des
+    // flux de trésorerie" and this module's own doc comment for why 455 specifically (not the
+    // rest of the EA/BZ family) is now carved out into financement.
+    const statement = computeCashFlowStatement({
+      openingBilan: bilan([actifLigne('CF', '1000.00')], []),
+      closingBilan: bilan([actifLigne('CF', '2000.00')], []),
+      closingCompteResultat: { ...CLOSING_CDR, lignes: [], beneficeOuPerte: '0.00' },
+      acquisitionsImmobilisations: Money.zero(),
+      cessionsImmobilisations: Money.zero(),
+      openingCreancesSurCessions: Money.zero(),
+      closingCreancesSurCessions: Money.zero(),
+      ...NO_TVA_DEDUCTIBLE,
+      // The associé advanced 1000,00 — the company owes MORE, so credit − debit grows by 1000.00.
+      openingComptesCourantsAssocies: Money.zero(),
+      closingComptesCourantsAssocies: Money.fromString('1000.00'),
+    });
+
+    expect(statement.fluxExploitation.total).toBe('0.00');
+    expect(statement.fluxInvestissement.total).toBe('0.00');
+    expect(statement.fluxFinancement).toMatchObject({
+      variationComptesCourantsAssocies: '1000.00',
+      total: '1000.00',
+    });
+    expect(statement.variationTresorerie).toBe('1000.00');
+    expect(statement.tresorerieOuverture).toBe('1000.00');
+    expect(statement.tresorerieCloture).toBe('2000.00');
+    expect(() => assertCashFlowReconciles(statement)).not.toThrow();
+  });
+
+  it('the company advancing cash TO an associé (455 nets debit) is also financement, in the opposite direction', () => {
+    // The mirror case: the company extends credit to an associé (débit 455 / crédit trésorerie).
+    // credit − debit goes NEGATIVE — a cash outflow in financement, symmetric with the inflow case
+    // above, not a special case requiring its own sign handling.
+    const statement = computeCashFlowStatement({
+      openingBilan: bilan([actifLigne('CF', '2000.00')], []),
+      closingBilan: bilan([actifLigne('CF', '1000.00')], []),
+      closingCompteResultat: { ...CLOSING_CDR, lignes: [], beneficeOuPerte: '0.00' },
+      acquisitionsImmobilisations: Money.zero(),
+      cessionsImmobilisations: Money.zero(),
+      openingCreancesSurCessions: Money.zero(),
+      closingCreancesSurCessions: Money.zero(),
+      ...NO_TVA_DEDUCTIBLE,
+      openingComptesCourantsAssocies: Money.zero(),
+      closingComptesCourantsAssocies: Money.fromString('-1000.00'),
+    });
+
+    expect(statement.fluxFinancement).toMatchObject({
+      variationComptesCourantsAssocies: '-1000.00',
+      total: '-1000.00',
+    });
+    expect(statement.variationTresorerie).toBe('-1000.00');
     expect(() => assertCashFlowReconciles(statement)).not.toThrow();
   });
 });
