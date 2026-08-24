@@ -176,3 +176,29 @@ export function IconSettings(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function IconSun(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="10" cy="10" r="3.25" />
+      <path d="M10 3v1.6M10 15.4V17M17 10h-1.6M4.6 10H3M14.8 5.2l-1.1 1.1M6.3 13.7l-1.1 1.1M14.8 14.8l-1.1-1.1M6.3 6.3 5.2 5.2" />
+    </svg>
+  );
+}
+
+export function IconMoon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M15.5 11.8A6 6 0 0 1 8.2 4.5a6.3 6.3 0 1 0 7.3 7.3Z" />
+    </svg>
+  );
+}
+
+export function IconMonitor(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <rect x="3" y="4" width="14" height="9.5" rx="1.2" />
+      <path d="M7 17h6M10 13.5V17" />
+    </svg>
+  );
+}

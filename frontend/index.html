@@ -4,6 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>compta-fr-mc</title>
+    <script>
+      // Applied synchronously, before the stylesheet paints, so a saved
+      // theme/density preference never flashes the wrong one on load.
+      // Mirrors PreferencesProvider's own storage keys and defaults exactly.
+      (function () {
+        try {
+          var theme = localStorage.getItem('compta:theme');
+          if (theme === 'light' || theme === 'dark') {
+            document.documentElement.setAttribute('data-theme', theme);
+          }
+          var density = localStorage.getItem('compta:density');
+          if (density === 'compact') {
+            document.documentElement.setAttribute('data-density', density);
+          }
+        } catch (e) {
+          // localStorage unavailable (private mode, etc.) — fall back to
+          // the system theme and comfortable density, same as a first visit.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

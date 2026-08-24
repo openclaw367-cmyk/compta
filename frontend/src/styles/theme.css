@@ -17,6 +17,7 @@
 
   --color-bg: #f5f6f9;
   --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
   --color-border: #e3e6ec;
   --color-border-strong: #c9cedb;
   --color-ink: #1a1d29;
@@ -33,12 +34,30 @@
   --color-negative-soft: #faeae8;
   --color-warning: #93630b;
   --color-warning-soft: #faf1e0;
+
+  /* Elevation — a considered two-step scale (card / elevated), not a
+     default. Redefined per theme below: dark grounds need a lighter,
+     more diffuse shadow than light ones to read at all. */
+  --shadow-card: 0 1px 2px rgba(23, 27, 43, 0.04), 0 1px 1px rgba(23, 27, 43, 0.03);
+  --shadow-elevated: 0 8px 24px rgba(23, 27, 43, 0.10), 0 2px 6px rgba(23, 27, 43, 0.05);
+}
+
+/* Smooth, deliberate theme switches — color-only properties, never
+   `transition: all` (which would fight scroll/layout perf), and fully
+   neutralized under prefers-reduced-motion below. */
+* {
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --color-bg: #14151d;
     --color-surface: #1b1d29;
+    --color-surface-raised: #242631;
     --color-border: #2b2e3d;
     --color-border-strong: #3c4155;
     --color-ink: #e9eaf0;
@@ -55,12 +74,16 @@
     --color-negative-soft: #301a18;
     --color-warning: #d9a441;
     --color-warning-soft: #2e2717;
+
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.2);
+    --shadow-elevated: 0 16px 36px rgba(0, 0, 0, 0.5), 0 4px 10px rgba(0, 0, 0, 0.32);
   }
 }
 
 :root[data-theme="dark"] {
   --color-bg: #14151d;
   --color-surface: #1b1d29;
+  --color-surface-raised: #242631;
   --color-border: #2b2e3d;
   --color-border-strong: #3c4155;
   --color-ink: #e9eaf0;
@@ -77,11 +100,15 @@
   --color-negative-soft: #301a18;
   --color-warning: #d9a441;
   --color-warning-soft: #2e2717;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.2);
+  --shadow-elevated: 0 16px 36px rgba(0, 0, 0, 0.5), 0 4px 10px rgba(0, 0, 0, 0.32);
 }
 
 :root[data-theme="light"] {
   --color-bg: #f5f6f9;
   --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
   --color-border: #e3e6ec;
   --color-border-strong: #c9cedb;
   --color-ink: #1a1d29;
@@ -98,6 +125,9 @@
   --color-negative-soft: #faeae8;
   --color-warning: #93630b;
   --color-warning-soft: #faf1e0;
+
+  --shadow-card: 0 1px 2px rgba(23, 27, 43, 0.04), 0 1px 1px rgba(23, 27, 43, 0.03);
+  --shadow-elevated: 0 8px 24px rgba(23, 27, 43, 0.1), 0 2px 6px rgba(23, 27, 43, 0.05);
 }
 
 html {
@@ -124,4 +154,19 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/*
+ * Density — "Compacte" tightens vertical rhythm on every data table at
+ * once, from one attribute on <html>, rather than a per-page prop this
+ * app's ~15 table components would each need to thread through. The
+ * attribute selector out-specifies Tailwind's own py-* utility classes
+ * (a class selector) without an !important: :root[data-density] alone
+ * already outweighs a bare class, so this applies uniformly no matter
+ * which py-* value a given table happens to use.
+ */
+:root[data-density="compact"] table td,
+:root[data-density="compact"] table th {
+  padding-top: 0.3125rem;
+  padding-bottom: 0.3125rem;
 }
