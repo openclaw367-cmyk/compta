@@ -5,6 +5,17 @@ import { AccountLedgerDrilldown } from './AccountLedgerDrilldown';
 
 type SortKey = 'compte' | 'solde';
 
+const PCG_CLASS_LABEL: Record<string, string> = {
+  '1': 'Classe 1 — Capitaux',
+  '2': 'Classe 2 — Immobilisations',
+  '3': 'Classe 3 — Stocks',
+  '4': 'Classe 4 — Tiers',
+  '5': 'Classe 5 — Financiers',
+  '6': 'Classe 6 — Charges',
+  '7': 'Classe 7 — Produits',
+  '8': 'Classe 8 — Comptes spéciaux',
+};
+
 export function TrialBalanceTable({
   data,
   fiscalYearId,
@@ -106,7 +117,7 @@ export function TrialBalanceTable({
           Aucun compte ne correspond à « {search} ».
         </div>
       ) : (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface">
+    <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
       <table className="w-full border-collapse text-[13px]">
         <thead>
           <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -127,10 +138,27 @@ export function TrialBalanceTable({
           </tr>
         </thead>
         <tbody>
-          {filteredLines.map((line) => {
+          {filteredLines.map((line, index) => {
             const isExpanded = expandedId === line.accountId;
+            // Class dividers only make sense in the account's own natural
+            // numeric order — sorting by solde or filtering by search
+            // scatters classes, so this stays a plain flat list then.
+            const groupingActive = sortKey === 'compte' && sortAsc && search.trim() === '';
+            const pcgClass = line.accountNumber.charAt(0);
+            const priorClass = index > 0 ? filteredLines[index - 1].accountNumber.charAt(0) : null;
+            const showClassDivider = groupingActive && pcgClass !== priorClass;
             return (
               <Fragment key={line.accountId}>
+                {showClassDivider && (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="bg-bg px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint"
+                    >
+                      {PCG_CLASS_LABEL[pcgClass] ?? `Classe ${pcgClass}`}
+                    </td>
+                  </tr>
+                )}
                 <tr
                   id={`compte-${line.accountId}`}
                   onClick={() => setExpandedId(isExpanded ? null : line.accountId)}

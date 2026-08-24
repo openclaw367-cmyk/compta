@@ -8,7 +8,7 @@ import { useAppContext } from '../context/appContextStore';
 const NO_JOURNALS: never[] = [];
 
 export function GrandLivrePage() {
-  const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
+  const { fiscalYearId, fiscalYearsLoading } = useAppContext();
   const journalsQuery = useJournals();
   const journals = journalsQuery.data ?? NO_JOURNALS;
   const [searchParams] = useSearchParams();
@@ -27,8 +27,12 @@ export function GrandLivrePage() {
 
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center text-[13px] text-ink-faint">
-        Chargement…
+      <div className="mx-auto flex max-w-5xl flex-col gap-5 px-8 py-8">
+        <div className="flex flex-col gap-2">
+          <div className="h-6 w-32 animate-pulse rounded-md bg-border" />
+          <div className="h-3.5 w-80 animate-pulse rounded-md bg-border" />
+        </div>
+        <div className="h-96 w-full animate-pulse rounded-lg bg-border" />
       </div>
     );
   }
@@ -45,14 +49,6 @@ export function GrandLivrePage() {
           </p>
         </div>
         <div className="ml-auto flex items-end gap-2">
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-              Exercice
-            </span>
-            <span className="py-[7px] text-[13px] text-ink">
-              {fiscalYears.find((fy) => fy.id === fiscalYearId)?.label ?? '—'}
-            </span>
-          </div>
           <Field label="Du">
             <input
               type="date"
