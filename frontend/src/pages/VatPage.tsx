@@ -149,9 +149,13 @@ function DeclarationSection() {
     [fiscalYear, mode],
   );
 
+  // Defaults to whichever period contains today, not just the fiscal
+  // year's first one — the period a bookkeeper wants to declare is
+  // almost always "the one we're in," not January.
   useEffect(() => {
     if (periods.length > 0 && !periods.some((p) => p.key === periodKey)) {
-      setPeriodKey(periods[0].key);
+      const current = periods.find((p) => p.periodStart <= TODAY && TODAY <= p.periodEnd);
+      setPeriodKey((current ?? periods[0]).key);
     }
   }, [periods, periodKey]);
 
@@ -207,7 +211,7 @@ function DeclarationSection() {
           Aucun exercice — créez-en un dans « Exercices » pour calculer une déclaration.
         </div>
       ) : (
-        <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
+        <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5 shadow-card">
           <div className="flex flex-wrap items-end gap-4">
             <Field label="Exercice">
               <span className="py-[7px] text-[13px] text-ink">
@@ -310,7 +314,7 @@ function DeclarationResult({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -348,7 +352,7 @@ function DeclarationResult({
         </table>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -536,7 +540,7 @@ function RatesSection() {
       </div>
 
       {isCreating && (
-        <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
+        <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5 shadow-card">
           <div className="flex flex-wrap items-end gap-4">
             <Field label="Libellé">
               <input
@@ -613,7 +617,7 @@ function RatesSection() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
