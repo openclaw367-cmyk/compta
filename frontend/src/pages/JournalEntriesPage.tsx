@@ -225,6 +225,7 @@ export function JournalEntriesPage() {
       <EcrituresList
         ecritures={scopedEcritures}
         selectedId={editor.mode === 'edit' ? editor.ecriture.id : null}
+        accounts={accounts}
         onSelect={(ecriture) => setEditor({ mode: 'edit', ecriture })}
         onDelete={handleDelete}
         onValidate={handleValidate}
