@@ -175,7 +175,9 @@ export function AssistantPage() {
               Démarrez une nouvelle conversation pour poser une question sur vos comptes.
             </div>
           ) : sessionQuery.isLoading ? (
-            <div className="text-[13px] text-ink-faint">Chargement…</div>
+            <div className="flex h-full items-center justify-center text-[13px] text-ink-faint">
+              Chargement…
+            </div>
           ) : (
             <div className="flex flex-col gap-3">
               {(sessionQuery.data?.messages ?? []).map((message) => (
