@@ -27,6 +27,16 @@ import { formatMoneyFr, isZeroMoney, normalizeMoneyInput, sanitizeAmountBuffer }
 
 const PROVIDER_LABELS: Record<CloudProvider, string> = { CLAUDE: 'Claude', DEEPSEEK: 'DeepSeek' };
 
+/** A blank chat gives a first-time user no idea what this can actually
+ * answer — these fill the composer (never auto-send) with realistic
+ * questions the read-tool registry genuinely supports. */
+const EXAMPLE_PROMPTS = [
+  "Quelle est ma trésorerie actuelle ?",
+  "Quel est mon chiffre d'affaires de l'exercice ?",
+  'Résume ma dernière déclaration de TVA.',
+  'Ai-je des écritures en brouillon ?',
+];
+
 export function AssistantPage() {
   const availability = useLocalModelAvailability();
   const sessionsQuery = useChatSessions();
@@ -170,25 +180,18 @@ export function AssistantPage() {
         )}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-          {!sessionId ? (
-            <div className="flex h-full items-center justify-center text-[13px] text-ink-faint">
-              Démarrez une nouvelle conversation pour poser une question sur vos comptes.
-            </div>
-          ) : sessionQuery.isLoading ? (
+          {sessionId && sessionQuery.isLoading ? (
             <div className="flex h-full items-center justify-center text-[13px] text-ink-faint">
               Chargement…
             </div>
+          ) : (sessionQuery.data?.messages ?? []).length === 0 ? (
+            <EmptyState onPick={setDraft} />
           ) : (
             <div className="flex flex-col gap-3">
               {(sessionQuery.data?.messages ?? []).map((message) => (
                 <MessageRow key={message.id} message={message} />
               ))}
-              {sendMessage.isPending && (
-                <div className="max-w-[70%] rounded-lg bg-bg px-4 py-2.5 text-[13px] text-ink-faint">
-                  Réflexion en cours… (jusqu'à une à deux minutes sur un modèle local exécuté sur
-                  CPU)
-                </div>
-              )}
+              {sendMessage.isPending && <TypingIndicator />}
               <div ref={bottomRef} />
             </div>
           )}
@@ -323,6 +326,51 @@ export function AssistantPage() {
           </button>
         </form>
       </div>
+    </div>
+  );
+}
+
+/** Shown both before any session exists and right after "+ Nouvelle
+ * conversation" (a real session with zero messages yet) — the more
+ * common of the two, and the one the original !sessionId-only check
+ * missed entirely. */
+function EmptyState({ onPick }: { onPick: (prompt: string) => void }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+      <p className="text-[13px] text-ink-faint">
+        Posez une question sur vos comptes, ou essayez :
+      </p>
+      <div className="flex max-w-md flex-wrap items-center justify-center gap-2">
+        {EXAMPLE_PROMPTS.map((prompt) => (
+          <button
+            key={prompt}
+            type="button"
+            onClick={() => onPick(prompt)}
+            className="rounded-full border border-border bg-surface px-3 py-1.5 text-[12.5px] text-ink-muted transition-colors hover:border-accent-soft hover:bg-accent-soft hover:text-accent"
+          >
+            {prompt}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TypingIndicator() {
+  return (
+    <div className="flex max-w-[70%] items-center gap-2.5 rounded-lg bg-bg px-4 py-2.5">
+      <span className="flex items-center gap-1">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-faint"
+            style={{ animationDelay: `${i * 0.15}s` }}
+          />
+        ))}
+      </span>
+      <span className="text-[12px] text-ink-faint">
+        Réflexion en cours… (jusqu'à une à deux minutes sur un modèle local exécuté sur CPU)
+      </span>
     </div>
   );
 }
@@ -556,7 +604,7 @@ function ProposalCard({
   return (
     <div
       className={[
-        'max-w-[85%] rounded-lg border bg-surface p-4',
+        'max-w-[85%] rounded-lg border bg-surface p-4 shadow-elevated',
         isCloud ? 'border-warning' : 'border-accent',
       ].join(' ')}
     >
