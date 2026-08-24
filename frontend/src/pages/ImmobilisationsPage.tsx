@@ -1,10 +1,20 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAccounts, useCreateFixedAsset, useFixedAssets } from '../api/queries';
 import type { CreateFixedAssetDto } from '../api/dto';
+import type { FixedAsset } from '../api/types';
 import { ApiError } from '../api/client';
-import { formatMoneyFr, normalizeMoneyInput, sanitizeAmountBuffer } from '../lib/money';
+import {
+  compareMoneyStrings,
+  formatMoneyFr,
+  isZeroMoney,
+  moneyRatio,
+  normalizeMoneyInput,
+  sanitizeAmountBuffer,
+} from '../lib/money';
 import { AccountCombobox } from '../components/journal/AccountCombobox';
+
+type SortKey = 'service' | 'vnc';
 
 const NO_ASSETS: never[] = [];
 const NO_ACCOUNTS: never[] = [];
@@ -41,13 +51,41 @@ function emptyDraft(): Draft {
 }
 
 export function ImmobilisationsPage() {
+  const navigate = useNavigate();
   const assetsQuery = useFixedAssets();
   const accountsQuery = useAccounts();
   const createFixedAsset = useCreateFixedAsset();
 
   const assets = assetsQuery.data ?? NO_ASSETS;
-  const sorted = [...assets].sort((a, b) => a.acquisitionDate.localeCompare(b.acquisitionDate));
   const accounts = accountsQuery.data ?? NO_ACCOUNTS;
+
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('service');
+  const [sortAsc, setSortAsc] = useState(true);
+
+  const filteredSorted = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    let list: FixedAsset[] = assets;
+    if (needle !== '') {
+      list = list.filter((a) => a.label.toLowerCase().includes(needle));
+    }
+    return [...list].sort((a, b) => {
+      const cmp =
+        sortKey === 'service'
+          ? a.serviceStartDate.localeCompare(b.serviceStartDate)
+          : compareMoneyStrings(a.vnc, b.vnc);
+      return sortAsc ? cmp : -cmp;
+    });
+  }, [assets, search, sortKey, sortAsc]);
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortAsc((asc) => !asc);
+    } else {
+      setSortKey(key);
+      setSortAsc(true);
+    }
+  }
 
   // Pre-filtered per the account-triplet convention (see CLAUDE.md /
   // assertValidAccountTriplet on the backend): immobilisation accounts are
@@ -114,8 +152,12 @@ export function ImmobilisationsPage() {
 
   if (assetsQuery.isLoading) {
     return (
-      <div className="flex h-full items-center justify-center text-[13px] text-ink-faint">
-        Chargement…
+      <div className="mx-auto flex max-w-5xl flex-col gap-5 px-8 py-8">
+        <div className="flex flex-col gap-2">
+          <div className="h-6 w-40 animate-pulse rounded-md bg-border" />
+          <div className="h-3.5 w-56 animate-pulse rounded-md bg-border" />
+        </div>
+        <div className="h-72 w-full animate-pulse rounded-lg bg-border" />
       </div>
     );
   }
@@ -136,14 +178,14 @@ export function ImmobilisationsPage() {
             setCreateError(null);
           }}
           disabled={isCreating}
-          className="ml-auto rounded-md bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
+          className="ml-auto rounded-md bg-accent px-3.5 py-2 text-[13px] font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
         >
           + Nouvelle immobilisation
         </button>
       </header>
 
       {isCreating && (
-        <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
+        <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5 shadow-elevated">
           <div className="flex flex-wrap items-end gap-4">
             <Field label="Désignation" grow>
               <input
@@ -280,58 +322,122 @@ export function ImmobilisationsPage() {
         </div>
       )}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Rechercher une immobilisation…"
+          className="w-72 rounded-md border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+        />
+        {search.trim() !== '' && (
+          <button
+            type="button"
+            onClick={() => setSearch('')}
+            className="rounded-md px-2.5 py-1.5 text-[12.5px] font-medium text-ink-muted hover:bg-bg"
+          >
+            Réinitialiser
+          </button>
+        )}
+        <span className="ml-auto text-[12px] text-ink-faint">
+          {filteredSorted.length} immobilisation{filteredSorted.length !== 1 ? 's' : ''}
+          {search.trim() !== '' ? ` sur ${assets.length}` : ''}
+        </span>
+      </div>
+
+      {search.trim() !== '' && filteredSorted.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border px-5 py-10 text-center text-[13px] text-ink-faint">
+          Aucune immobilisation ne correspond à « {search} ».
+        </div>
+      ) : (
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
               <th className="px-4 py-2.5 font-semibold">Désignation</th>
-              <th className="px-4 py-2.5 font-semibold">Mise en service</th>
+              <th
+                onClick={() => toggleSort('service')}
+                className="cursor-pointer select-none px-4 py-2.5 font-semibold hover:text-ink"
+              >
+                Mise en service {sortKey === 'service' ? (sortAsc ? '↑' : '↓') : ''}
+              </th>
               <th className="px-4 py-2.5 text-right font-semibold">Valeur brute</th>
               <th className="px-4 py-2.5 text-right font-semibold">Amort. cumulés</th>
-              <th className="px-4 py-2.5 text-right font-semibold">VNC</th>
+              <th
+                onClick={() => toggleSort('vnc')}
+                className="cursor-pointer select-none px-4 py-2.5 text-right font-semibold hover:text-ink"
+              >
+                VNC {sortKey === 'vnc' ? (sortAsc ? '↑' : '↓') : ''}
+              </th>
             </tr>
           </thead>
           <tbody>
-            {sorted.length === 0 ? (
+            {filteredSorted.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-4 py-10 text-center text-[13px] text-ink-faint">
                   Aucune immobilisation — créez-en une pour commencer.
                 </td>
               </tr>
             ) : (
-              sorted.map((asset) => (
-                <tr key={asset.id} className="border-b border-border last:border-b-0 hover:bg-bg">
-                  <td className="px-4 py-2.5">
-                    <Link
-                      to={`/immobilisations/${asset.id}`}
-                      className="font-medium text-ink hover:text-accent"
-                    >
-                      {asset.label}
-                    </Link>
-                    {asset.cessionDate && (
-                      <span className="ml-2 inline-flex items-center rounded-full bg-border-strong px-2 py-0.5 text-[11px] font-medium text-ink-muted">
-                        Cédée
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 tabular-nums text-ink-muted">
-                    {formatDate(asset.serviceStartDate)}
-                  </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-ink">
-                    {formatMoneyFr(asset.valeurBrute)}
-                  </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-ink-muted">
-                    {formatMoneyFr(asset.amortissementsCumules)}
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-medium tabular-nums text-ink">
-                    {formatMoneyFr(asset.vnc)}
-                  </td>
-                </tr>
-              ))
+              filteredSorted.map((asset) => {
+                const depreciatedRatio = isZeroMoney(asset.valeurBrute)
+                  ? 0
+                  : moneyRatio(asset.amortissementsCumules, asset.valeurBrute);
+                return (
+                  <tr
+                    key={asset.id}
+                    onClick={() => navigate(`/immobilisations/${asset.id}`)}
+                    className="cursor-pointer border-b border-border last:border-b-0 hover:bg-bg"
+                  >
+                    <td className="px-4 py-2.5">
+                      <Link
+                        to={`/immobilisations/${asset.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="font-medium text-ink hover:text-accent"
+                      >
+                        {asset.label}
+                      </Link>
+                      {asset.cessionDate && (
+                        <span className="ml-2 inline-flex items-center rounded-full bg-border-strong px-2 py-0.5 text-[11px] font-medium text-ink-muted">
+                          Cédée
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 tabular-nums text-ink-muted">
+                      {formatDate(asset.serviceStartDate)}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-ink">
+                      {formatMoneyFr(asset.valeurBrute)}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-ink-muted">
+                      {formatMoneyFr(asset.amortissementsCumules)}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {!asset.cessionDate && (
+                          <div
+                            className="h-1.5 w-12 overflow-hidden rounded-full bg-border"
+                            title={`${Math.round(depreciatedRatio * 100)} % amorti`}
+                          >
+                            <div
+                              className="h-full rounded-full bg-accent"
+                              style={{ width: `${depreciatedRatio * 100}%` }}
+                            />
+                          </div>
+                        )}
+                        <span className="font-medium tabular-nums text-ink">
+                          {formatMoneyFr(asset.vnc)}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

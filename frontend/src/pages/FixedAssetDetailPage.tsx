@@ -155,8 +155,10 @@ export function FixedAssetDetailPage() {
 
   if (assetQuery.isLoading) {
     return (
-      <div className="flex h-full items-center justify-center text-[13px] text-ink-faint">
-        Chargement…
+      <div className="mx-auto flex max-w-4xl flex-col gap-5 px-8 py-8">
+        <div className="h-6 w-56 animate-pulse rounded-md bg-border" />
+        <div className="h-40 w-full animate-pulse rounded-lg bg-border" />
+        <div className="h-64 w-full animate-pulse rounded-lg bg-border" />
       </div>
     );
   }
@@ -218,7 +220,7 @@ export function FixedAssetDetailPage() {
       )}
 
       {isDisposing && (
-        <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
+        <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5 shadow-elevated">
           <div className="flex flex-wrap items-end gap-4">
             <Field label="Date de cession">
               <input
@@ -341,7 +343,7 @@ export function FixedAssetDetailPage() {
           </div>
         )}
 
-        <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
           <table className="w-full border-collapse text-[13px]">
             <thead>
               <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -412,7 +414,7 @@ function SummaryCard({
   emphasize?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-4">
+    <div className="rounded-lg border border-border bg-surface p-4 shadow-card">
       <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
         {label}
       </div>
