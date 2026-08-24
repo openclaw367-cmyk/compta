@@ -154,7 +154,7 @@ export function ResultatFiscalPage() {
           Aucun exercice — créez-en un dans « Exercices » pour calculer un résultat fiscal.
         </div>
       ) : (
-        <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
+        <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5 shadow-card">
           <div className="flex flex-wrap items-center gap-4">
             <p className="text-[13px] text-ink-muted">
               Exercice sélectionné :{' '}
@@ -288,7 +288,7 @@ function ResultatComptableSection({ montant }: { montant: string }) {
         title="Résultat comptable"
         description="Report du compte de résultat (bénéfice WA ou perte WS) — lecture directe, non modifiable."
       />
-      <div className="flex items-center justify-between rounded-lg border border-border bg-surface p-5">
+      <div className="flex items-center justify-between rounded-lg border border-border bg-surface p-5 shadow-card">
         <div className="flex items-center gap-2">
           <Badge tone="computed">Calculé</Badge>
           <span className="text-[13px] text-ink-muted">
@@ -337,7 +337,7 @@ function ReintegrationsSection({
         description="Comptable → fiscal : ce qui est comptabilisé en charge mais non déductible fiscalement."
       />
 
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <tbody>
             <tr className="border-b border-border">
@@ -431,7 +431,7 @@ function ResultatFiscalTotal({ montant }: { montant: string }) {
   const isDeficit = montant.trim().startsWith('-');
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex items-center justify-between rounded-lg border border-border bg-bg p-5">
+      <div className="flex items-center justify-between rounded-lg border-2 border-accent-soft bg-surface p-5 shadow-elevated">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
             III. Résultat fiscal
@@ -578,7 +578,7 @@ function DeclaredWorksheet({
           Aucune ligne déclarée.
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
           <table className="w-full border-collapse text-[13px]">
             <thead>
               <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
