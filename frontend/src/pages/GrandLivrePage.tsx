@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useJournals, useTrialBalance } from '../api/queries';
 import { TrialBalanceTable } from '../components/ledger/TrialBalanceTable';
 import { useAppContext } from '../context/appContextStore';
@@ -10,6 +11,8 @@ export function GrandLivrePage() {
   const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
   const journalsQuery = useJournals();
   const journals = journalsQuery.data ?? NO_JOURNALS;
+  const [searchParams] = useSearchParams();
+  const deepLinkedAccountId = searchParams.get('compte');
 
   const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
@@ -96,6 +99,7 @@ export function GrandLivrePage() {
           periodStart={periodStart || undefined}
           periodEnd={periodEnd || undefined}
           journals={journals}
+          initialExpandedAccountId={deepLinkedAccountId}
         />
       ) : null}
     </div>

@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { Journal, TrialBalanceResponse } from '../../api/types';
 import { formatMoneyFr, isZeroMoney } from '../../lib/money';
 import { AccountLedgerDrilldown } from './AccountLedgerDrilldown';
@@ -9,14 +9,31 @@ export function TrialBalanceTable({
   periodStart,
   periodEnd,
   journals,
+  initialExpandedAccountId,
 }: {
   data: TrialBalanceResponse;
   fiscalYearId: string;
   periodStart?: string;
   periodEnd?: string;
   journals: Journal[];
+  /** Pre-expands (and scrolls to) a specific account row — the mechanism
+   * behind `/grand-livre?compte=<accountId>` deep links from other
+   * screens (e.g. the dashboard's comptes-courants tiles). Pure
+   * navigation: this only changes which already-fetched row starts
+   * expanded, never what's fetched or computed. */
+  initialExpandedAccountId?: string | null;
 }) {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(initialExpandedAccountId ?? null);
+  const hasScrolled = useRef(false);
+
+  useEffect(() => {
+    if (!initialExpandedAccountId || hasScrolled.current) return;
+    const row = document.getElementById(`compte-${initialExpandedAccountId}`);
+    if (row) {
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      hasScrolled.current = true;
+    }
+  }, [initialExpandedAccountId, data]);
 
   if (data.lines.length === 0) {
     return (
@@ -43,9 +60,10 @@ export function TrialBalanceTable({
             return (
               <Fragment key={line.accountId}>
                 <tr
+                  id={`compte-${line.accountId}`}
                   onClick={() => setExpandedId(isExpanded ? null : line.accountId)}
                   className={[
-                    'cursor-pointer border-b border-border last:border-b-0',
+                    'cursor-pointer border-b border-border last:border-b-0 scroll-mt-4',
                     isExpanded ? 'bg-accent-soft' : 'hover:bg-bg',
                   ].join(' ')}
                 >

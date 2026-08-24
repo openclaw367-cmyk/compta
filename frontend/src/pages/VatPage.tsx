@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
+  useAccounts,
   useComputeVatDeclaration,
   useCreateVatRate,
   useEcritures,
@@ -115,9 +117,20 @@ function sortByFormOrder(lines: Ca3RateLine[]): Ca3RateLine[] {
 function DeclarationSection() {
   const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
   const ecrituresQuery = useEcritures();
+  const accountsQuery = useAccounts();
   const computeDeclaration = useComputeVatDeclaration();
 
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
+  // Ligne 19/20 are each fed by exactly one hardcoded PCG account (see
+  // ca3-declaration.ts's DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT/
+  // DEDUCTIBLE_AUTRES_ACCOUNT) — a real, clean 1:1 mapping the app
+  // already knows, so resolving the account's id client-side (from the
+  // already-fetched accounts list) to deep-link into the grand livre is
+  // pure navigation, not a new computation.
+  const immobilisationsAccountId = accountsQuery.data?.find(
+    (a) => a.number === '445662',
+  )?.id;
+  const autresAccountId = accountsQuery.data?.find((a) => a.number === '445660')?.id;
 
   const [mode, setMode] = useState<PeriodMode>('month');
   const [periodKey, setPeriodKey] = useState<string | null>(null);
@@ -271,12 +284,27 @@ function DeclarationSection() {
         </div>
       )}
 
-      {declaration && <DeclarationResult declaration={declaration} />}
+      {declaration && (
+        <DeclarationResult
+          declaration={declaration}
+          immobilisationsAccountId={immobilisationsAccountId}
+          autresAccountId={autresAccountId}
+        />
+      )}
     </section>
   );
 }
 
-function DeclarationResult({ declaration }: { declaration: Ca3Declaration }) {
+function DeclarationResult({
+  declaration,
+  immobilisationsAccountId,
+  autresAccountId,
+}: {
+  declaration: Ca3Declaration;
+  immobilisationsAccountId: string | undefined;
+  autresAccountId: string | undefined;
+}) {
+  const navigate = useNavigate();
   const collectee = sortByFormOrder(declaration.collecteeByRate);
   const isCredit = declaration.ligne25 !== null;
 
@@ -330,7 +358,18 @@ function DeclarationResult({ declaration }: { declaration: Ca3Declaration }) {
             </tr>
           </thead>
           <tbody>
-            <tr className="border-b border-border">
+            <tr
+              onClick={
+                immobilisationsAccountId
+                  ? () => navigate(`/grand-livre?compte=${immobilisationsAccountId}`)
+                  : undefined
+              }
+              className={[
+                'border-b border-border',
+                immobilisationsAccountId ? 'cursor-pointer hover:bg-bg' : '',
+              ].join(' ')}
+              title={immobilisationsAccountId ? 'Voir le compte 445662 dans le grand livre' : undefined}
+            >
               <td className="px-4 py-2.5 text-ink">
                 <span className="mr-2 font-medium tabular-nums text-ink-faint">19</span>
                 Biens constituant des immobilisations
@@ -339,7 +378,16 @@ function DeclarationResult({ declaration }: { declaration: Ca3Declaration }) {
                 {formatMoneyFr(declaration.ligne19)}
               </td>
             </tr>
-            <tr className="border-b border-border">
+            <tr
+              onClick={
+                autresAccountId ? () => navigate(`/grand-livre?compte=${autresAccountId}`) : undefined
+              }
+              className={[
+                'border-b border-border',
+                autresAccountId ? 'cursor-pointer hover:bg-bg' : '',
+              ].join(' ')}
+              title={autresAccountId ? 'Voir le compte 445660 dans le grand livre' : undefined}
+            >
               <td className="px-4 py-2.5 text-ink">
                 <span className="mr-2 font-medium tabular-nums text-ink-faint">20</span>
                 Autres biens et services

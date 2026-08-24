@@ -1,5 +1,5 @@
-import { Link } from 'react-router-dom';
-import { useCompany, useDashboardSummary } from '../api/queries';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAccounts, useCompany, useDashboardSummary } from '../api/queries';
 import { useAppContext } from '../context/appContextStore';
 import type {
   DashboardAssocieBalance,
@@ -33,6 +33,12 @@ export function DashboardPage() {
   const { fiscalYearId } = useAppContext();
   const companyQuery = useCompany();
   const summaryQuery = useDashboardSummary(fiscalYearId);
+  // Already-fetched elsewhere in the app (AccountsJournalsPage, the
+  // journal grid) — reused here only to resolve an accountNumber to its
+  // id client-side, so a recent-entry row can deep-link into the grand
+  // livre. No new backend call or aggregation.
+  const accountsQuery = useAccounts();
+  const accountIdByNumber = new Map((accountsQuery.data ?? []).map((a) => [a.number, a.id]));
 
   if (summaryQuery.isLoading) {
     return (
@@ -91,7 +97,10 @@ export function DashboardPage() {
             resultatNet={summary.resultatNet}
           />
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <RecentBankEntriesSection entries={summary.recentBankEntries} />
+            <RecentBankEntriesSection
+              entries={summary.recentBankEntries}
+              accountIdByNumber={accountIdByNumber}
+            />
             <ComptesCourantsSection lines={summary.comptesCourantsAssocies} />
           </div>
         </>
@@ -112,21 +121,25 @@ function HeadlineRow({ summary }: { summary: DashboardSummaryAvailable }) {
         value={summary.tresorerie}
         caption="Disponibilités — bilan, ligne CF"
         negative={isNegativeMoney(summary.tresorerie)}
+        to="/grand-livre"
       />
       <HeadlineCard
         label="Chiffre d'affaires"
         value={summary.chiffreAffaires}
         caption={`Exercice ${summary.fiscalYear.label}`}
+        to="/liasse"
       />
       <HeadlineCard
         label="À payer"
         value={summary.dettesFournisseurs}
         caption="Dettes fournisseurs — bilan, ligne DX"
+        to="/grand-livre"
       />
       <HeadlineCard
         label="Encours client"
         value={summary.encoursClient}
         caption="Créances clients, montant brut — 2057 Cadre A, ligne BX"
+        to="/grand-livre"
       />
     </div>
   );
@@ -137,14 +150,19 @@ function HeadlineCard({
   value,
   caption,
   negative,
+  to,
 }: {
   label: string;
   value: string;
   caption: string;
   negative?: boolean;
+  to: string;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-5">
+    <Link
+      to={to}
+      className="block rounded-lg border border-border bg-surface p-5 transition-colors hover:border-accent-soft hover:bg-accent-soft/30"
+    >
       <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
         {label}
       </div>
@@ -157,7 +175,7 @@ function HeadlineCard({
         {formatMoneyFr(value)}
       </div>
       <div className="mt-1 text-[11.5px] text-ink-muted">{caption}</div>
-    </div>
+    </Link>
   );
 }
 
@@ -185,7 +203,10 @@ const CHART_BAR_MAX_HEIGHT = 120;
 function CaHistoryChart({ points }: { points: DashboardCaHistoryPoint[] }) {
   if (points.length === 0) {
     return (
-      <div className="flex h-full flex-col gap-4 rounded-lg border border-border bg-surface p-5">
+      <Link
+        to="/liasse"
+        className="flex h-full flex-col gap-4 rounded-lg border border-border bg-surface p-5 transition-colors hover:border-accent-soft"
+      >
         <SectionTitle
           title="Chiffre d'affaires"
           description="Évolution par exercice, du plus ancien au plus récent."
@@ -193,7 +214,7 @@ function CaHistoryChart({ points }: { points: DashboardCaHistoryPoint[] }) {
         <div className="flex flex-1 items-center justify-center text-[12.5px] text-ink-faint">
           Aucun exercice n'a pu être calculé pour cette évolution.
         </div>
-      </div>
+      </Link>
     );
   }
 
@@ -207,7 +228,10 @@ function CaHistoryChart({ points }: { points: DashboardCaHistoryPoint[] }) {
   const deltaNegative = delta !== null && isNegativeMoney(delta);
 
   return (
-    <div className="flex h-full flex-col gap-4 rounded-lg border border-border bg-surface p-5">
+    <Link
+      to="/liasse"
+      className="flex h-full flex-col gap-4 rounded-lg border border-border bg-surface p-5 transition-colors hover:border-accent-soft"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <SectionTitle
           title="Chiffre d'affaires"
@@ -253,7 +277,7 @@ function CaHistoryChart({ points }: { points: DashboardCaHistoryPoint[] }) {
           );
         })}
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -269,7 +293,10 @@ function MargeEbeCard({ ebe, margeEbe }: { ebe: string; margeEbe: string | null 
   const negative = isNegativeMoney(ebe);
   const widthPct = margeEbe === null ? 0 : Math.max(Math.min(Number(margeEbe), 100), 0);
   return (
-    <div className="flex h-full flex-col gap-3 rounded-lg border border-border bg-surface p-5">
+    <Link
+      to="/analyse-financiere"
+      className="flex h-full flex-col gap-3 rounded-lg border border-border bg-surface p-5 transition-colors hover:border-accent-soft"
+    >
       <SectionTitle
         title="EBE"
         description="Excédent brut d'exploitation — la rentabilité opérationnelle, avant amortissements et éléments financiers/exceptionnels."
@@ -293,7 +320,7 @@ function MargeEbeCard({ ebe, margeEbe }: { ebe: string; margeEbe: string | null 
           {formatPercent(margeEbe)} du chiffre d'affaires
         </div>
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -316,7 +343,10 @@ function RevenusDepensesChart({
   const resultatNegative = isNegativeMoney(resultatNet);
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-5">
+    <Link
+      to="/liasse"
+      className="block rounded-lg border border-border bg-surface p-5 transition-colors hover:border-accent-soft"
+    >
       <SectionTitle
         title="Revenus et dépenses"
         description="Total des produits et des charges de l'exercice, tous types confondus (exploitation, financier, exceptionnel)."
@@ -350,7 +380,7 @@ function RevenusDepensesChart({
           </div>
         </div>
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -359,12 +389,19 @@ function RevenusDepensesChart({
 // server-side (LedgerService.recentEntriesForClass()).
 // ---------------------------------------------------------------------------
 
-function RecentBankEntriesSection({ entries }: { entries: DashboardRecentEntry[] }) {
+function RecentBankEntriesSection({
+  entries,
+  accountIdByNumber,
+}: {
+  entries: DashboardRecentEntry[];
+  accountIdByNumber: Map<string, string>;
+}) {
+  const navigate = useNavigate();
   return (
     <div className="rounded-lg border border-border bg-surface p-5">
       <SectionTitle
         title="Mouvements de trésorerie récents"
-        description="Dernières écritures sur les comptes de classe 5 (banque, caisse)."
+        description="Dernières écritures sur les comptes de classe 5 (banque, caisse) — cliquez une ligne pour son compte dans le grand livre."
       />
       {entries.length === 0 ? (
         <p className="mt-4 text-[12.5px] text-ink-faint">Aucun mouvement pour cet exercice.</p>
@@ -381,10 +418,18 @@ function RecentBankEntriesSection({ entries }: { entries: DashboardRecentEntry[]
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => (
+              {entries.map((entry) => {
+                const accountId = accountIdByNumber.get(entry.accountNumber);
+                return (
                 <tr
                   key={entry.ecritureId + entry.accountNumber + entry.debit + entry.credit}
-                  className="border-b border-border last:border-b-0"
+                  onClick={
+                    accountId ? () => navigate(`/grand-livre?compte=${accountId}`) : undefined
+                  }
+                  className={[
+                    'border-b border-border last:border-b-0',
+                    accountId ? 'cursor-pointer hover:bg-bg' : '',
+                  ].join(' ')}
                 >
                   <td className="py-2 pr-3 whitespace-nowrap tabular-nums text-ink-muted">
                     {formatDateFr(entry.ecritureDate)}
@@ -411,7 +456,8 @@ function RecentBankEntriesSection({ entries }: { entries: DashboardRecentEntry[]
                     {entry.credit === '0.00' ? '' : formatMoneyFr(entry.credit)}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -446,9 +492,10 @@ function ComptesCourantsSection({ lines }: { lines: DashboardAssocieBalance[] })
           {lines.map((line) => {
             const negative = isNegativeMoney(line.balance);
             return (
-              <div
+              <Link
                 key={line.accountId}
-                className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5"
+                to={`/grand-livre?compte=${line.accountId}`}
+                className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5 transition-colors hover:border-accent-soft hover:bg-accent-soft/30"
               >
                 <div>
                   <div className="text-[13px] font-medium text-ink">
@@ -476,7 +523,7 @@ function ComptesCourantsSection({ lines }: { lines: DashboardAssocieBalance[] })
                         : "dû par l'associé"}
                   </div>
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>
