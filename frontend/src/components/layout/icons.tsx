@@ -202,3 +202,22 @@ export function IconMonitor(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function IconWallet(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h10a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 15 15H5a1.5 1.5 0 0 1-1.5-1.5Z" />
+      <path d="M3.5 8.5h13" />
+      <circle cx="13.2" cy="11.5" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function IconTrendUp(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3.5 13.5 8 9l3 3 5.5-5.5" />
+      <path d="M13 6h3.5v3.5" />
+    </svg>
+  );
+}

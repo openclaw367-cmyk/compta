@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import { useCompany, useDashboardSummary } from '../api/queries';
 import { useAppContext } from '../context/appContextStore';
 import type {
@@ -17,6 +18,9 @@ import {
   moneyRatio,
   subtractMoneyStrings,
 } from '../lib/money';
+import { IconDocument, IconTrendUp, IconWallet } from '../components/layout/icons';
+
+type IconComponent = (props: { className?: string }) => ReactNode;
 
 /**
  * The landing screen — see CLAUDE.md "Dashboard". Every figure rendered
@@ -35,20 +39,25 @@ export function DashboardPage() {
   const summaryQuery = useDashboardSummary(fiscalYearId);
 
   if (summaryQuery.isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center text-[13px] text-ink-faint">
-        Chargement…
-      </div>
-    );
+    return <DashboardSkeleton />;
   }
 
   if (summaryQuery.isError || !summaryQuery.data) {
     const err = summaryQuery.error;
     return (
       <div className="mx-auto max-w-2xl px-8 py-8">
-        <div className="rounded-lg border border-negative bg-negative-soft p-5 text-[13px] text-negative">
-          Impossible de charger le tableau de bord
-          {err instanceof ApiError ? ` : ${err.details.join(' ')}` : '.'}
+        <div className="flex items-start justify-between gap-4 rounded-lg border border-negative bg-negative-soft p-5 text-[13px] text-negative">
+          <span>
+            Impossible de charger le tableau de bord
+            {err instanceof ApiError ? ` : ${err.details.join(' ')}` : '.'}
+          </span>
+          <button
+            type="button"
+            onClick={() => void summaryQuery.refetch()}
+            className="shrink-0 rounded-md border border-negative px-3 py-1.5 text-[12.5px] font-medium text-negative transition-colors hover:bg-negative hover:text-white"
+          >
+            Réessayer
+          </button>
         </div>
       </div>
     );
@@ -101,6 +110,46 @@ export function DashboardPage() {
 }
 
 // ---------------------------------------------------------------------------
+// Loading skeleton — mirrors the real layout's shape (headline row, chart
+// + EBE, revenus/dépenses, two bottom cards) so the page doesn't jump
+// around once data arrives, and reads as "working" rather than "stuck"
+// on what's usually the very first thing a user sees each session.
+// ---------------------------------------------------------------------------
+
+function SkeletonBlock({ className }: { className: string }) {
+  return <div className={['animate-pulse rounded-md bg-border', className].join(' ')} />;
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="mx-auto flex max-w-6xl flex-col gap-8 px-8 py-8">
+      <header className="flex flex-col gap-2">
+        <SkeletonBlock className="h-6 w-48" />
+        <SkeletonBlock className="h-3.5 w-64" />
+      </header>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
+            <SkeletonBlock className="h-3 w-20" />
+            <SkeletonBlock className="h-7 w-28" />
+            <SkeletonBlock className="h-3 w-32" />
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <SkeletonBlock className="h-52 lg:col-span-2" />
+        <SkeletonBlock className="h-52" />
+      </div>
+      <SkeletonBlock className="h-32" />
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <SkeletonBlock className="h-64" />
+        <SkeletonBlock className="h-64" />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Headline cards
 // ---------------------------------------------------------------------------
 
@@ -113,28 +162,42 @@ function HeadlineRow({ summary }: { summary: DashboardSummaryAvailable }) {
         caption="Disponibilités — bilan, ligne CF"
         negative={isNegativeMoney(summary.tresorerie)}
         to="/grand-livre"
+        Icon={IconWallet}
+        tone="accent"
       />
       <HeadlineCard
         label="Chiffre d'affaires"
         value={summary.chiffreAffaires}
         caption={`Exercice ${summary.fiscalYear.label}`}
         to="/liasse"
+        Icon={IconTrendUp}
+        tone="positive"
       />
       <HeadlineCard
         label="À payer"
         value={summary.dettesFournisseurs}
         caption="Dettes fournisseurs — bilan, ligne DX"
         to="/grand-livre"
+        Icon={IconDocument}
+        tone="warning"
       />
       <HeadlineCard
         label="Encours client"
         value={summary.encoursClient}
         caption="Créances clients, montant brut — 2057 Cadre A, ligne BX"
         to="/grand-livre"
+        Icon={IconDocument}
+        tone="accent"
       />
     </div>
   );
 }
+
+const TONE_BADGE: Record<'accent' | 'positive' | 'warning', string> = {
+  accent: 'bg-accent-soft text-accent',
+  positive: 'bg-positive-soft text-positive',
+  warning: 'bg-warning-soft text-warning',
+};
 
 function HeadlineCard({
   label,
@@ -142,24 +205,38 @@ function HeadlineCard({
   caption,
   negative,
   to,
+  Icon,
+  tone,
 }: {
   label: string;
   value: string;
   caption: string;
   negative?: boolean;
   to: string;
+  Icon: IconComponent;
+  tone: 'accent' | 'positive' | 'warning';
 }) {
   return (
     <Link
       to={to}
-      className="block rounded-lg border border-border bg-surface p-5 transition-colors hover:border-accent-soft hover:bg-accent-soft/30"
+      className="group block rounded-lg border border-border bg-surface p-5 shadow-card transition-colors hover:border-accent-soft hover:bg-accent-soft/30"
     >
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-        {label}
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+          {label}
+        </div>
+        <div
+          className={[
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-transform group-hover:scale-105',
+            TONE_BADGE[tone],
+          ].join(' ')}
+        >
+          <Icon className="h-[15px] w-[15px]" />
+        </div>
       </div>
       <div
         className={[
-          'mt-1.5 text-[26px] font-semibold tabular-nums',
+          'mt-2 text-[26px] font-semibold tabular-nums',
           negative ? 'text-negative' : 'text-ink',
         ].join(' ')}
       >
@@ -196,7 +273,7 @@ function CaHistoryChart({ points }: { points: DashboardCaHistoryPoint[] }) {
     return (
       <Link
         to="/liasse"
-        className="flex h-full flex-col gap-4 rounded-lg border border-border bg-surface p-5 transition-colors hover:border-accent-soft"
+        className="flex h-full flex-col gap-4 rounded-lg border border-border bg-surface p-5 shadow-card transition-colors hover:border-accent-soft"
       >
         <SectionTitle
           title="Chiffre d'affaires"
@@ -221,7 +298,7 @@ function CaHistoryChart({ points }: { points: DashboardCaHistoryPoint[] }) {
   return (
     <Link
       to="/liasse"
-      className="flex h-full flex-col gap-4 rounded-lg border border-border bg-surface p-5 transition-colors hover:border-accent-soft"
+      className="flex h-full flex-col gap-4 rounded-lg border border-border bg-surface p-5 shadow-card transition-colors hover:border-accent-soft"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <SectionTitle
@@ -286,7 +363,7 @@ function MargeEbeCard({ ebe, margeEbe }: { ebe: string; margeEbe: string | null 
   return (
     <Link
       to="/analyse-financiere"
-      className="flex h-full flex-col gap-3 rounded-lg border border-border bg-surface p-5 transition-colors hover:border-accent-soft"
+      className="flex h-full flex-col gap-3 rounded-lg border border-border bg-surface p-5 shadow-card transition-colors hover:border-accent-soft"
     >
       <SectionTitle
         title="EBE"
@@ -336,7 +413,7 @@ function RevenusDepensesChart({
   return (
     <Link
       to="/liasse"
-      className="block rounded-lg border border-border bg-surface p-5 transition-colors hover:border-accent-soft"
+      className="block rounded-lg border border-border bg-surface p-5 shadow-card transition-colors hover:border-accent-soft"
     >
       <SectionTitle
         title="Revenus et dépenses"
@@ -383,7 +460,7 @@ function RevenusDepensesChart({
 function RecentBankEntriesSection({ entries }: { entries: DashboardRecentEntry[] }) {
   const navigate = useNavigate();
   return (
-    <div className="rounded-lg border border-border bg-surface p-5">
+    <div className="rounded-lg border border-border bg-surface p-5 shadow-card">
       <SectionTitle
         title="Mouvements de trésorerie récents"
         description="Dernières écritures sur les comptes de classe 5 (banque, caisse) — cliquez une ligne pour l'ouvrir dans le journal."
@@ -454,7 +531,7 @@ function RecentBankEntriesSection({ entries }: { entries: DashboardRecentEntry[]
 
 function ComptesCourantsSection({ lines }: { lines: DashboardAssocieBalance[] }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-5">
+    <div className="rounded-lg border border-border bg-surface p-5 shadow-card">
       <SectionTitle
         title="Comptes courants d'associés"
         description="Solde de chaque associé — négatif si la société lui doit (avance en compte courant), positif s'il doit à la société."
