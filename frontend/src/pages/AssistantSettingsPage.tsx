@@ -107,7 +107,7 @@ export function AssistantSettingsPage() {
         {(['CLAUDE', 'DEEPSEEK'] as const).map((provider) => {
           const cred = configured.get(provider);
           return (
-            <div key={provider} className="rounded-lg border border-border bg-surface p-4">
+            <div key={provider} className="rounded-lg border border-border bg-surface p-4 shadow-card">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-[14px] font-medium text-ink">
@@ -188,7 +188,7 @@ function ConsentDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="cloud-consent-title"
-        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-surface p-5 shadow-xl"
+        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-surface p-5 shadow-elevated"
         onClick={(e) => e.stopPropagation()}
       >
         {step === 'consent' ? (
