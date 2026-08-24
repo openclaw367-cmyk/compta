@@ -141,7 +141,7 @@ export function EcrituresList({
           Aucun résultat pour ces filtres.
         </div>
       ) : (
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
       <table className="w-full border-collapse text-[13px]">
         <thead>
           <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">

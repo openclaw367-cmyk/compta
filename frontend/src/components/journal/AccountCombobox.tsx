@@ -166,19 +166,19 @@ export const AccountCombobox = forwardRef<HTMLInputElement, AccountComboboxProps
           onKeyDown={handleKeyDown}
         />
         {isOpen && creating && (
-          <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-ink-faint shadow-lg">
+          <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-ink-faint shadow-elevated">
             Création…
           </div>
         )}
         {isOpen && !creating && accounts.length === 0 && !showCreateOption && (
-          <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-ink-faint shadow-lg">
+          <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-ink-faint shadow-elevated">
             Aucun compte disponible.
           </div>
         )}
         {isOpen && !creating && (matches.length > 0 || showCreateOption) && (
           <ul
             role="listbox"
-            className="absolute left-0 top-full z-20 mt-1 max-h-64 w-80 overflow-y-auto rounded-md border border-border bg-surface py-1 shadow-lg"
+            className="absolute left-0 top-full z-20 mt-1 max-h-64 w-80 overflow-y-auto rounded-md border border-border bg-surface py-1 shadow-elevated"
           >
             {matches.map((account, index) => (
               <li
@@ -220,7 +220,7 @@ export const AccountCombobox = forwardRef<HTMLInputElement, AccountComboboxProps
           </ul>
         )}
         {createError && (
-          <div className="absolute left-0 top-full z-20 mt-1 w-72 rounded-md border border-negative-soft bg-negative-soft px-3 py-2 text-[12.5px] text-negative shadow-lg">
+          <div className="absolute left-0 top-full z-20 mt-1 w-72 rounded-md border border-negative-soft bg-negative-soft px-3 py-2 text-[12.5px] text-negative shadow-elevated">
             {createError}
           </div>
         )}

@@ -168,6 +168,27 @@ export function EcritureEditor({
     libelle.trim() !== '' &&
     ecritureDate !== '';
 
+  // Named so the disabled "Enregistrer" button never leaves the user
+  // guessing — the balance indicator alone only covers one of several
+  // reasons the button can be disabled. Only shown once the form has
+  // actually been touched, so a fresh blank entry doesn't open with a
+  // wall of "required" complaints.
+  const hasStarted = nonEmptyRows.length > 0 || libelle.trim() !== '' || pieceRef.trim() !== '';
+  const disabledReason =
+    readOnly || canSubmit || !hasStarted
+      ? null
+      : nonEmptyRows.length < 2
+        ? 'Ajoutez au moins deux lignes (une au débit, une au crédit).'
+        : !allRowsValid
+          ? 'Chaque ligne doit avoir un compte, un montant au débit ou au crédit (jamais les deux), et un tiers si le compte en exige un.'
+          : !balanced || isZeroMoney(totals.debit)
+            ? null // the balance indicator already names this
+            : libelle.trim() === ''
+              ? 'Le libellé est requis.'
+              : ecritureDate === ''
+                ? 'La date est requise.'
+                : null;
+
   function updateRow(index: number, patch: Partial<DraftLigne>) {
     setLignes((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   }
@@ -232,8 +253,18 @@ export function EcritureEditor({
     }
   }
 
+  function handleContainerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && canSubmit && !isSaving) {
+      event.preventDefault();
+      void handleSubmit();
+    }
+  }
+
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-sm">
+    <div
+      onKeyDown={handleContainerKeyDown}
+      className="overflow-hidden rounded-lg border border-border bg-surface shadow-elevated"
+    >
       <div className="flex flex-wrap items-end gap-4 border-b border-border px-5 py-4">
         <Field label="Date">
           <input
@@ -463,6 +494,9 @@ export function EcritureEditor({
           </span>
         </div>
         <BalanceIndicator totalDebit={totals.debit} totalCredit={totals.credit} />
+        {disabledReason && (
+          <span className="text-[12px] text-ink-faint">{disabledReason}</span>
+        )}
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
@@ -476,6 +510,7 @@ export function EcritureEditor({
               type="button"
               disabled={!canSubmit || isSaving}
               onClick={handleSubmit}
+              title="Ctrl/Cmd + Entrée"
               className="rounded-md bg-accent px-4 py-1.5 text-[13px] font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
             >
               {isSaving ? 'Enregistrement…' : 'Enregistrer le brouillon'}
