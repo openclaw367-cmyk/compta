@@ -151,6 +151,59 @@ const TABLEAU_2056_SECTIONS: { title: string; totalCode: 'totalReglementees' | '
   },
 ];
 
+/**
+ * Filters a movement table's fixed CERFA sub-sections (2054/2055/2056) by
+ * row label — pure client-side display filtering over the already-fetched
+ * lignes, same discipline as the journal/grand-livre/tiers filters. A
+ * sub-section with zero matching codes is dropped entirely rather than
+ * shown with an empty body and a subtotal nothing visible justifies.
+ */
+function filterSectionsByLabel<T extends { label: string }, S extends { title: string; codes: string[] }>(
+  sections: S[],
+  byCode: Map<string, T>,
+  needle: string,
+): S[] {
+  if (needle === '') return sections;
+  return sections
+    .map((section) => ({
+      ...section,
+      codes: section.codes.filter((code) => byCode.get(code)?.label.toLowerCase().includes(needle)),
+    }))
+    .filter((section) => section.codes.length > 0);
+}
+
+/** The search box + reset button shared by 2054/2055/2056/2057's tables. */
+function AnnexeSearchBar({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-64 rounded-md border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+      />
+      {value.trim() !== '' && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          className="rounded-md px-2.5 py-1.5 text-[12.5px] font-medium text-ink-muted hover:bg-bg"
+        >
+          Réinitialiser
+        </button>
+      )}
+    </div>
+  );
+}
+
 const REGIME_LABEL: Record<'REEL_NORMAL' | 'REEL_SIMPLIFIE', string> = {
   REEL_NORMAL: 'réel normal (2050/2052)',
   REEL_SIMPLIFIE: 'réel simplifié (2033-A/2033-B)',
@@ -1029,16 +1082,27 @@ function TableauxArticulationBanner({
 
 function Tableau2054Section({ tableau2054 }: { tableau2054: Tableau2054 }) {
   const byCode = new Map(tableau2054.lignes.map((l) => [l.code, l]));
+  const [search, setSearch] = useState('');
+  const needle = search.trim().toLowerCase();
+  const sections = filterSectionsByLabel(TABLEAU_2054_SECTIONS, byCode, needle);
 
   return (
     <section className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-[14px] font-semibold text-ink">2054 — Immobilisations</h2>
-        <p className="mt-0.5 text-[12.5px] text-ink-muted">
-          Mouvements de l'exercice sur la valeur brute des immobilisations.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 className="text-[14px] font-semibold text-ink">2054 — Immobilisations</h2>
+          <p className="mt-0.5 text-[12.5px] text-ink-muted">
+            Mouvements de l'exercice sur la valeur brute des immobilisations.
+          </p>
+        </div>
+        <AnnexeSearchBar value={search} onChange={setSearch} placeholder="Rechercher une ligne…" />
       </div>
 
+      {needle !== '' && sections.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border px-5 py-10 text-center text-[13px] text-ink-faint">
+          Aucune ligne ne correspond à « {search} ».
+        </div>
+      ) : (
       <div className="overflow-hidden rounded-lg border border-border bg-surface">
         <table className="w-full border-collapse text-[13px]">
           <thead>
@@ -1051,7 +1115,7 @@ function Tableau2054Section({ tableau2054 }: { tableau2054: Tableau2054 }) {
             </tr>
           </thead>
           <tbody>
-            {TABLEAU_2054_SECTIONS.map((section) => (
+            {sections.map((section) => (
               <SectionRows key={section.title} title={section.title} colSpan={5}>
                 {section.codes.map((code) => {
                   const ligne = byCode.get(code);
@@ -1072,6 +1136,7 @@ function Tableau2054Section({ tableau2054 }: { tableau2054: Tableau2054 }) {
           </tbody>
         </table>
       </div>
+      )}
 
       <p className="text-[12px] text-ink-faint">
         La colonne Cessions reflète les immobilisations cédées au cours de l'exercice (voir « Cession
@@ -1104,16 +1169,27 @@ function Tableau2054Row({ ligne }: { ligne: Tableau2054Ligne }) {
 
 function Tableau2055Section({ tableau2055 }: { tableau2055: Tableau2055 }) {
   const byCode = new Map(tableau2055.lignes.map((l) => [l.code, l]));
+  const [search, setSearch] = useState('');
+  const needle = search.trim().toLowerCase();
+  const sections = filterSectionsByLabel(TABLEAU_2055_SECTIONS, byCode, needle);
 
   return (
     <section className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-[14px] font-semibold text-ink">2055 — Amortissements</h2>
-        <p className="mt-0.5 text-[12.5px] text-ink-muted">
-          Mouvements de l'exercice sur les amortissements techniques.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 className="text-[14px] font-semibold text-ink">2055 — Amortissements</h2>
+          <p className="mt-0.5 text-[12.5px] text-ink-muted">
+            Mouvements de l'exercice sur les amortissements techniques.
+          </p>
+        </div>
+        <AnnexeSearchBar value={search} onChange={setSearch} placeholder="Rechercher une ligne…" />
       </div>
 
+      {needle !== '' && sections.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border px-5 py-10 text-center text-[13px] text-ink-faint">
+          Aucune ligne ne correspond à « {search} ».
+        </div>
+      ) : (
       <div className="overflow-hidden rounded-lg border border-border bg-surface">
         <table className="w-full border-collapse text-[13px]">
           <thead>
@@ -1126,7 +1202,7 @@ function Tableau2055Section({ tableau2055 }: { tableau2055: Tableau2055 }) {
             </tr>
           </thead>
           <tbody>
-            {TABLEAU_2055_SECTIONS.map((section) => (
+            {sections.map((section) => (
               <SectionRows key={section.title} title={section.title} colSpan={5}>
                 {section.codes.map((code) => {
                   const ligne = byCode.get(code);
@@ -1147,6 +1223,7 @@ function Tableau2055Section({ tableau2055 }: { tableau2055: Tableau2055 }) {
           </tbody>
         </table>
       </div>
+      )}
 
       <p className="text-[12px] text-ink-faint">
         La colonne Reprises reflète les amortissements cumulés des immobilisations cédées au cours
@@ -1262,16 +1339,27 @@ function Tableau2056ArticulationBanner({
 
 function Tableau2056Section({ tableau2056 }: { tableau2056: Tableau2056 }) {
   const byCode = new Map(tableau2056.lignes.map((l) => [l.code, l]));
+  const [search, setSearch] = useState('');
+  const needle = search.trim().toLowerCase();
+  const sections = filterSectionsByLabel(TABLEAU_2056_SECTIONS, byCode, needle);
 
   return (
     <section className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-[14px] font-semibold text-ink">2056 — Provisions</h2>
-        <p className="mt-0.5 text-[12.5px] text-ink-muted">
-          Mouvements de l'exercice sur les provisions inscrites au bilan.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 className="text-[14px] font-semibold text-ink">2056 — Provisions</h2>
+          <p className="mt-0.5 text-[12.5px] text-ink-muted">
+            Mouvements de l'exercice sur les provisions inscrites au bilan.
+          </p>
+        </div>
+        <AnnexeSearchBar value={search} onChange={setSearch} placeholder="Rechercher une ligne…" />
       </div>
 
+      {needle !== '' && sections.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border px-5 py-10 text-center text-[13px] text-ink-faint">
+          Aucune ligne ne correspond à « {search} ».
+        </div>
+      ) : (
       <div className="overflow-hidden rounded-lg border border-border bg-surface">
         <table className="w-full border-collapse text-[13px]">
           <thead>
@@ -1284,7 +1372,7 @@ function Tableau2056Section({ tableau2056 }: { tableau2056: Tableau2056 }) {
             </tr>
           </thead>
           <tbody>
-            {TABLEAU_2056_SECTIONS.map((section) => (
+            {sections.map((section) => (
               <SectionRows key={section.title} title={section.title} colSpan={5}>
                 {section.codes.map((code) => {
                   const ligne = byCode.get(code);
@@ -1314,6 +1402,7 @@ function Tableau2056Section({ tableau2056 }: { tableau2056: Tableau2056 }) {
           </tbody>
         </table>
       </div>
+      )}
 
       <p className="text-[12px] text-ink-faint">
         La ventilation « dont dotations et reprises d'exploitation / financières / exceptionnelles »
@@ -1435,17 +1524,34 @@ function Tableau2057ArticulationBanner({
 }
 
 function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
+  const [search, setSearch] = useState('');
+  const needle = search.trim().toLowerCase();
+  const matches = (ligne: { code: string; label: string }) =>
+    needle === '' ||
+    ligne.label.toLowerCase().includes(needle) ||
+    ligne.code.toLowerCase().includes(needle);
+  const cadreA = tableau2057.cadreA.filter(matches);
+  const cadreB = tableau2057.cadreB.filter(matches);
+
   return (
     <section className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-[14px] font-semibold text-ink">
-          2057 — État des créances et des dettes
-        </h2>
-        <p className="mt-0.5 text-[12.5px] text-ink-muted">
-          Montant brut et échéance par nature à la clôture de l'exercice.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 className="text-[14px] font-semibold text-ink">
+            2057 — État des créances et des dettes
+          </h2>
+          <p className="mt-0.5 text-[12.5px] text-ink-muted">
+            Montant brut et échéance par nature à la clôture de l'exercice.
+          </p>
+        </div>
+        <AnnexeSearchBar value={search} onChange={setSearch} placeholder="Rechercher une ligne…" />
       </div>
 
+      {needle !== '' && cadreA.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border px-5 py-10 text-center text-[13px] text-ink-faint">
+          Aucune ligne du Cadre A ne correspond à « {search} ».
+        </div>
+      ) : (
       <div className="overflow-hidden rounded-lg border border-border bg-surface">
         <table className="w-full border-collapse text-[13px]">
           <thead>
@@ -1457,7 +1563,7 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
             </tr>
           </thead>
           <tbody>
-            {tableau2057.cadreA.map((ligne) => (
+            {cadreA.map((ligne) => (
               <Tableau2057CadreARow key={ligne.code} ligne={ligne} />
             ))}
             <tr className="bg-bg">
@@ -1471,7 +1577,13 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
           </tbody>
         </table>
       </div>
+      )}
 
+      {needle !== '' && cadreB.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border px-5 py-10 text-center text-[13px] text-ink-faint">
+          Aucune ligne du Cadre B ne correspond à « {search} ».
+        </div>
+      ) : (
       <div className="overflow-hidden rounded-lg border border-border bg-surface">
         <table className="w-full border-collapse text-[13px]">
           <thead>
@@ -1484,7 +1596,7 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
             </tr>
           </thead>
           <tbody>
-            {tableau2057.cadreB.map((ligne) => (
+            {cadreB.map((ligne) => (
               <Tableau2057CadreBRow key={ligne.code} ligne={ligne} />
             ))}
             <tr className="bg-bg">
@@ -1499,6 +1611,7 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
           </tbody>
         </table>
       </div>
+      )}
 
       <p className="text-[12px] text-ink-faint">{tableau2057.note}</p>
       <p className="text-[12px] text-ink-faint">{tableau2057.maturityNote}</p>
