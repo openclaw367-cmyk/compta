@@ -943,6 +943,8 @@ export interface DashboardAssocieBalance {
 
 export interface DashboardRecentEntry {
   ecritureId: string;
+  /** The écriture's own journal — lets the dashboard deep-link straight to this line's écriture in the journal grid. */
+  journalId: string;
   ecritureDate: string;
   libelle: string;
   accountNumber: string;

@@ -431,6 +431,7 @@ describe('DashboardService', () => {
     recentEntriesForClass.mockResolvedValue([
       {
         ecritureId: 'e-1',
+        journalId: 'journal-bq',
         ecritureDate: '2026-03-01',
         libelle: 'Virement client',
         accountNumber: '512000',

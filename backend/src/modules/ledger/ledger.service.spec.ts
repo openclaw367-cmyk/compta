@@ -171,6 +171,7 @@ describe('LedgerService', () => {
           compte: account512,
           ecriture: {
             id: 'ecr-2',
+            journalId: 'journal-bq',
             ecritureDate: new Date('2026-03-10'),
             libelle: 'Virement client',
             validatedAt: null,
@@ -182,6 +183,7 @@ describe('LedgerService', () => {
           compte: account512,
           ecriture: {
             id: 'ecr-1',
+            journalId: 'journal-bq',
             ecritureDate: new Date('2026-03-01'),
             libelle: 'Prélèvement',
             validatedAt: new Date('2026-03-02'),
@@ -204,6 +206,7 @@ describe('LedgerService', () => {
       expect(result).toEqual([
         {
           ecritureId: 'ecr-2',
+          journalId: 'journal-bq',
           ecritureDate: '2026-03-10',
           libelle: 'Virement client',
           accountNumber: '512000',
@@ -214,6 +217,7 @@ describe('LedgerService', () => {
         },
         {
           ecritureId: 'ecr-1',
+          journalId: 'journal-bq',
           ecritureDate: '2026-03-01',
           libelle: 'Prélèvement',
           accountNumber: '512000',

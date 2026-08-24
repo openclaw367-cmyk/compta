@@ -17,6 +17,10 @@ import { AccountLedgerResponseDto } from './dto/account-ledger-response.dto';
  */
 export interface RecentEntryLine {
   ecritureId: string;
+  /** The écriture's own journal — lets a caller deep-link straight to this
+   * line's écriture in the journal grid (which selects by journal), not
+   * just its account. Additive: carries an identifier, computes nothing. */
+  journalId: string;
   ecritureDate: string;
   libelle: string;
   accountNumber: string;
@@ -187,6 +191,7 @@ export class LedgerService {
 
     return lignes.map((ligne) => ({
       ecritureId: ligne.ecriture.id,
+      journalId: ligne.ecriture.journalId,
       ecritureDate: ligne.ecriture.ecritureDate.toISOString().slice(0, 10),
       libelle: ligne.ecriture.libelle,
       accountNumber: ligne.compte.number,

@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { useAccounts, useCompany, useDashboardSummary } from '../api/queries';
+import { useCompany, useDashboardSummary } from '../api/queries';
 import { useAppContext } from '../context/appContextStore';
 import type {
   DashboardAssocieBalance,
@@ -33,12 +33,6 @@ export function DashboardPage() {
   const { fiscalYearId } = useAppContext();
   const companyQuery = useCompany();
   const summaryQuery = useDashboardSummary(fiscalYearId);
-  // Already-fetched elsewhere in the app (AccountsJournalsPage, the
-  // journal grid) — reused here only to resolve an accountNumber to its
-  // id client-side, so a recent-entry row can deep-link into the grand
-  // livre. No new backend call or aggregation.
-  const accountsQuery = useAccounts();
-  const accountIdByNumber = new Map((accountsQuery.data ?? []).map((a) => [a.number, a.id]));
 
   if (summaryQuery.isLoading) {
     return (
@@ -97,10 +91,7 @@ export function DashboardPage() {
             resultatNet={summary.resultatNet}
           />
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <RecentBankEntriesSection
-              entries={summary.recentBankEntries}
-              accountIdByNumber={accountIdByNumber}
-            />
+            <RecentBankEntriesSection entries={summary.recentBankEntries} />
             <ComptesCourantsSection lines={summary.comptesCourantsAssocies} />
           </div>
         </>
@@ -389,19 +380,13 @@ function RevenusDepensesChart({
 // server-side (LedgerService.recentEntriesForClass()).
 // ---------------------------------------------------------------------------
 
-function RecentBankEntriesSection({
-  entries,
-  accountIdByNumber,
-}: {
-  entries: DashboardRecentEntry[];
-  accountIdByNumber: Map<string, string>;
-}) {
+function RecentBankEntriesSection({ entries }: { entries: DashboardRecentEntry[] }) {
   const navigate = useNavigate();
   return (
     <div className="rounded-lg border border-border bg-surface p-5">
       <SectionTitle
         title="Mouvements de trésorerie récents"
-        description="Dernières écritures sur les comptes de classe 5 (banque, caisse) — cliquez une ligne pour son compte dans le grand livre."
+        description="Dernières écritures sur les comptes de classe 5 (banque, caisse) — cliquez une ligne pour l'ouvrir dans le journal."
       />
       {entries.length === 0 ? (
         <p className="mt-4 text-[12.5px] text-ink-faint">Aucun mouvement pour cet exercice.</p>
@@ -418,18 +403,13 @@ function RecentBankEntriesSection({
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => {
-                const accountId = accountIdByNumber.get(entry.accountNumber);
-                return (
+              {entries.map((entry) => (
                 <tr
                   key={entry.ecritureId + entry.accountNumber + entry.debit + entry.credit}
-                  onClick={
-                    accountId ? () => navigate(`/grand-livre?compte=${accountId}`) : undefined
+                  onClick={() =>
+                    navigate(`/ecritures?journal=${entry.journalId}&ecriture=${entry.ecritureId}`)
                   }
-                  className={[
-                    'border-b border-border last:border-b-0',
-                    accountId ? 'cursor-pointer hover:bg-bg' : '',
-                  ].join(' ')}
+                  className="cursor-pointer border-b border-border last:border-b-0 hover:bg-bg"
                 >
                   <td className="py-2 pr-3 whitespace-nowrap tabular-nums text-ink-muted">
                     {formatDateFr(entry.ecritureDate)}
@@ -456,8 +436,7 @@ function RecentBankEntriesSection({
                     {entry.credit === '0.00' ? '' : formatMoneyFr(entry.credit)}
                   </td>
                 </tr>
-                );
-              })}
+              ))}
             </tbody>
           </table>
         </div>

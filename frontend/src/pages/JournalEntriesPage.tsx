@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { Ecriture } from '../api/types';
 import {
   useAccounts,
@@ -37,14 +38,34 @@ export function JournalEntriesPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionWarnings, setActionWarnings] = useState<string[] | null>(null);
+  const [searchParams] = useSearchParams();
+  const deepLinkedJournalId = searchParams.get('journal');
+  const deepLinkedEcritureId = searchParams.get('ecriture');
+  const hasOpenedDeepLink = useRef(false);
 
   const journals = journalsQuery.data ?? NO_JOURNALS;
   const accounts = accountsQuery.data ?? NO_ACCOUNTS;
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
 
   useEffect(() => {
-    if (!journalId && journals.length > 0) setJournalId(journals[0].id);
-  }, [journalId, journals]);
+    if (journalId) return;
+    // The dashboard's recent-entries deep link supplies its journal
+    // directly (DashboardRecentEntry.journalId) — selecting it doesn't
+    // need to wait for the écritures list to load first. Falls back to
+    // resolving it from the écriture itself if only `ecriture` is given.
+    if (deepLinkedJournalId) {
+      setJournalId(deepLinkedJournalId);
+      return;
+    }
+    if (deepLinkedEcritureId) {
+      const target = ecritures.find((e) => e.id === deepLinkedEcritureId);
+      if (target) {
+        setJournalId(target.journalId);
+        return;
+      }
+    }
+    if (journals.length > 0) setJournalId(journals[0].id);
+  }, [journalId, journals, deepLinkedJournalId, deepLinkedEcritureId, ecritures]);
 
   // Closing over the editor when the global fiscal year changes avoids
   // leaving a "Nouvelle écriture" form open against a year that's no
@@ -52,6 +73,20 @@ export function JournalEntriesPage() {
   useEffect(() => {
     setEditor({ mode: 'closed' });
   }, [fiscalYearId]);
+
+  // Deep link from the dashboard's recent-entries row — opens the
+  // editor on that exact écriture once it's loaded and its journal is
+  // selected. `hasOpenedDeepLink` keeps this a one-time action so
+  // closing the editor afterward (e.g. to validate a different entry)
+  // never snaps back open.
+  useEffect(() => {
+    if (!deepLinkedEcritureId || hasOpenedDeepLink.current) return;
+    const target = ecritures.find((e) => e.id === deepLinkedEcritureId);
+    if (target && journalId === target.journalId) {
+      setEditor({ mode: 'edit', ecriture: target });
+      hasOpenedDeepLink.current = true;
+    }
+  }, [deepLinkedEcritureId, ecritures, journalId]);
 
   const scopedEcritures = useMemo(
     () =>
