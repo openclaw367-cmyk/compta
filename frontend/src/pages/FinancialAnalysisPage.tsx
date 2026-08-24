@@ -86,7 +86,7 @@ export function FinancialAnalysisPage() {
           Aucun exercice — créez-en un dans « Exercices » pour calculer une analyse.
         </div>
       ) : (
-        <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
+        <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5 shadow-card">
           <div className="flex flex-wrap items-center gap-4">
             <p className="text-[13px] text-ink-muted">
               Exercice sélectionné :{' '}
@@ -186,7 +186,7 @@ function TotalRow({ label, caption, value }: { label: string; caption?: string; 
 
 function Table({ header, children }: { header: string; children: ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface">
+    <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
       <table className="w-full border-collapse text-[13px]">
         <thead>
           <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
