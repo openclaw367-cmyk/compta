@@ -3,6 +3,7 @@ import { useAccounts, useCreateAccount, useCreateJournal, useJournals } from '..
 import type { CreateAccountDto, CreateJournalDto } from '../api/dto';
 import { ApiError } from '../api/client';
 import type { Journal } from '../api/types';
+import { SettingsBackLink } from '../components/layout/SettingsBackLink';
 
 const NO_JOURNALS: never[] = [];
 const NO_ACCOUNTS: never[] = [];
@@ -30,6 +31,7 @@ const PCG_CLASS_LABEL: Record<number, string> = {
 export function AccountsJournalsPage() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-8 px-8 py-8">
+      <SettingsBackLink />
       <header>
         <h1 className="text-[20px] font-semibold tracking-tight text-ink">Comptes & journaux</h1>
         <p className="mt-0.5 text-[13px] text-ink-muted">

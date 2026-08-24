@@ -19,6 +19,7 @@ import { FinancialAnalysisPage } from './pages/FinancialAnalysisPage';
 import { ResultatFiscalPage } from './pages/ResultatFiscalPage';
 import { AssistantPage } from './pages/AssistantPage';
 import { AssistantSettingsPage } from './pages/AssistantSettingsPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 export default function App() {
   return (
@@ -43,6 +44,7 @@ export default function App() {
           <Route path="/resultat-fiscal" element={<ResultatFiscalPage />} />
           <Route path="/assistant" element={<AssistantPage />} />
           <Route path="/assistant/parametres" element={<AssistantSettingsPage />} />
+          <Route path="/parametres" element={<SettingsPage />} />
         </Routes>
       </AppShell>
     </AppProvider>

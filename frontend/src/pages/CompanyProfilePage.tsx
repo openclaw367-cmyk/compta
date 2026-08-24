@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useCompany, useUpdateCompany } from '../api/queries';
+import { SettingsBackLink } from '../components/layout/SettingsBackLink';
 import type { UpdateCompanyDto } from '../api/dto';
 import { ApiError } from '../api/client';
 import type { Company } from '../api/types';
@@ -106,6 +107,7 @@ export function CompanyProfilePage() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5 px-8 py-8">
+      <SettingsBackLink />
       <header className="flex flex-wrap items-center gap-4">
         <div>
           <h1 className="text-[20px] font-semibold tracking-tight text-ink">Société</h1>

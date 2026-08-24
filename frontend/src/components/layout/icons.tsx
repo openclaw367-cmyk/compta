@@ -167,3 +167,12 @@ export function IconScale(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function IconSettings(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="10" cy="10" r="2.25" />
+      <path d="M10 4.2v1.4M10 14.4v1.4M15.8 10h-1.4M5.6 10H4.2M13.9 6.1l-1 1M7.1 12.9l-1 1M13.9 13.9l-1-1M7.1 7.1l-1-1" />
+    </svg>
+  );
+}
