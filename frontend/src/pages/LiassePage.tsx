@@ -268,7 +268,7 @@ export function LiassePage() {
           Aucun exercice — créez-en un dans « Exercices » pour générer une liasse.
         </div>
       ) : (
-        <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
+        <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5 shadow-card">
           <div className="flex flex-wrap items-center gap-4">
             <p className="text-[13px] text-ink-muted">
               Exercice sélectionné :{' '}
@@ -487,7 +487,7 @@ function BilanSection({ bilan }: { bilan: Bilan2050 }) {
     <section className="flex flex-col gap-4">
       <h2 className="text-[14px] font-semibold text-ink">Bilan</h2>
 
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -526,7 +526,7 @@ function BilanSection({ bilan }: { bilan: Bilan2050 }) {
         </table>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -647,7 +647,7 @@ function Bilan2033ASection({ bilan }: { bilan: Bilan2033A }) {
     <section className="flex flex-col gap-4">
       <h2 className="text-[14px] font-semibold text-ink">Bilan simplifié — 2033-A</h2>
 
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -686,7 +686,7 @@ function Bilan2033ASection({ bilan }: { bilan: Bilan2033A }) {
         </table>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -790,7 +790,7 @@ function CompteResultat2033BSection({ compteResultat }: { compteResultat: Compte
     <section className="flex flex-col gap-4">
       <h2 className="text-[14px] font-semibold text-ink">Compte de résultat simplifié — 2033-B</h2>
 
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -876,7 +876,7 @@ function CompteResultatSection({ compteResultat }: { compteResultat: CompteResul
     <section className="flex flex-col gap-4">
       <h2 className="text-[14px] font-semibold text-ink">Compte de résultat</h2>
 
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -914,7 +914,7 @@ function CompteResultatSection({ compteResultat }: { compteResultat: CompteResul
         </table>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -1103,7 +1103,7 @@ function Tableau2054Section({ tableau2054 }: { tableau2054: Tableau2054 }) {
           Aucune ligne ne correspond à « {search} ».
         </div>
       ) : (
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -1190,7 +1190,7 @@ function Tableau2055Section({ tableau2055 }: { tableau2055: Tableau2055 }) {
           Aucune ligne ne correspond à « {search} ».
         </div>
       ) : (
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -1360,7 +1360,7 @@ function Tableau2056Section({ tableau2056 }: { tableau2056: Tableau2056 }) {
           Aucune ligne ne correspond à « {search} ».
         </div>
       ) : (
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -1552,7 +1552,7 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
           Aucune ligne du Cadre A ne correspond à « {search} ».
         </div>
       ) : (
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -1584,7 +1584,7 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
           Aucune ligne du Cadre B ne correspond à « {search} ».
         </div>
       ) : (
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -1684,7 +1684,7 @@ function Tableau2059Section({ tableau2059 }: { tableau2059: Tableau2059A }) {
 
       {hasDisposals ? (
         <>
-          <div className="overflow-hidden rounded-lg border border-border bg-surface">
+          <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
             <table className="w-full border-collapse text-[13px]">
               <thead>
                 <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -1719,7 +1719,7 @@ function Tableau2059Section({ tableau2059 }: { tableau2059: Tableau2059A }) {
             </table>
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-border bg-surface">
+          <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
             <table className="w-full border-collapse text-[13px]">
               <thead>
                 <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -1772,7 +1772,7 @@ function Tableau2059Section({ tableau2059 }: { tableau2059: Tableau2059A }) {
         </>
       ) : null}
 
-      <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
+      <div className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5 shadow-card">
         <p className="text-[13px] text-ink-muted">{tableau2059.note}</p>
         {hasDisposals && (
           <div className="flex flex-wrap gap-8 border-t border-border pt-4">
