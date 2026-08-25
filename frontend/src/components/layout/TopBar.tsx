@@ -1,8 +1,8 @@
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAppContext } from '../../context/appContextStore';
 import { usePreferences, type ThemePreference } from '../../context/preferencesStore';
 import { labelForPath } from '../../lib/navigation';
-import { IconMonitor, IconMoon, IconSun } from './icons';
+import { IconMonitor, IconMoon, IconPlus, IconSun } from './icons';
 
 const THEME_OPTIONS: { value: ThemePreference; label: string; Icon: typeof IconSun }[] = [
   { value: 'light', label: 'Thème clair', Icon: IconSun },
@@ -87,6 +87,15 @@ export function TopBar() {
           <span className="shrink-0 text-[13px] font-medium text-ink">{currentCompany.name}</span>
         )
       )}
+
+      <Link
+        to="/parametres/nouvelle-societe"
+        title="Nouvelle société"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border bg-bg text-ink-faint transition-colors hover:border-accent hover:text-accent"
+      >
+        <IconPlus width={13} height={13} />
+        <span className="sr-only">Nouvelle société</span>
+      </Link>
 
       <div
         role="radiogroup"

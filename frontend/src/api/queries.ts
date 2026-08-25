@@ -32,6 +32,7 @@ import type {
   CessionFixedAssetDto,
   ComputeResultatFiscalDto,
   CreateAccountDto,
+  CreateCompanyDto,
   CreateEcritureDto,
   CreateFiscalYearDto,
   CreateFixedAssetDto,
@@ -240,6 +241,24 @@ export function useUpdateCompany() {
     mutationFn: (dto: UpdateCompanyDto) => api.patch<Company>('/companies/current', dto),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['company'] });
+    },
+  });
+}
+
+/**
+ * Creates a new tenant, scaffolded (chart of accounts + journals) by
+ * CompaniesService.create() — see that method's own doc comment. Not
+ * scoped to the current company (this is how a NEW one comes into
+ * existence); invalidates the picker's own list
+ * (AppProvider.tsx's `['app-companies']` query) so the new company shows
+ * up there immediately, same as any other write invalidating its list.
+ */
+export function useCreateCompany() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateCompanyDto) => api.post<Company>('/companies', dto),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['app-companies'] });
     },
   });
 }

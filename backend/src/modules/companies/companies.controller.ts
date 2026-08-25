@@ -13,7 +13,9 @@ export class CompaniesController {
 
   @ApiOperation({
     summary:
-      'Create a tenant (dossier). Not tenant-scoped — this is how a tenant comes into existence.',
+      'Create a tenant (dossier), scaffolded with the standard chart of accounts and the five ' +
+      'standard journals — immediately usable, not a bare row. Not tenant-scoped — this is how ' +
+      'a tenant comes into existence.',
   })
   @Post()
   create(@Body() dto: CreateCompanyDto) {

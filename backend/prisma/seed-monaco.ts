@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { JOURNALS, PCG_ACCOUNTS } from './pcg-accounts';
+import { JOURNALS, PCG_ACCOUNTS } from '../src/common/pcg/pcg-accounts';
 
 const prisma = new PrismaClient();
 

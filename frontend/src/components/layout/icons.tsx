@@ -221,3 +221,12 @@ export function IconTrendUp(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function IconPlus(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M10 4v12" />
+      <path d="M4 10h12" />
+    </svg>
+  );
+}

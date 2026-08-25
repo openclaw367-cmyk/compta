@@ -14,6 +14,7 @@ import {
   IconMonitor,
   IconMoon,
   IconPercent,
+  IconPlus,
   IconSun,
 } from '../components/layout/icons';
 
@@ -141,6 +142,12 @@ export function SettingsPage() {
                 ? `${credentials.length} fournisseur${credentials.length > 1 ? 's' : ''} cloud configuré${credentials.length > 1 ? 's' : ''}`
                 : 'Modèle local, propositions cloud (Claude, DeepSeek)'
             }
+          />
+          <SettingsCard
+            to="/parametres/nouvelle-societe"
+            Icon={IconPlus}
+            title="Nouvelle société"
+            description="Créer un nouveau dossier — plan comptable et journaux pré-configurés"
           />
         </div>
       </SettingsSection>

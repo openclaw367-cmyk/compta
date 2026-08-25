@@ -7,15 +7,25 @@ import { JournalType } from '@prisma/client';
  * full official nomenclature, which runs to several hundred entries;
  * additional accounts can be created through the accounts API as needed.
  *
- * Shared between seed.ts (FR demo company) and seed-monaco.ts (MC demo
- * company) unchanged — including the three VAT accounts (445660, 445662,
- * 445710). Per the confirmed account model (see
+ * The single source of truth for "what a company starts with" — used by
+ * both `prisma/seed.ts`/`seed-monaco.ts` (the demo companies) AND
+ * `CompaniesService.create()` (any real company created through the app).
+ * Lives under `src/common/` rather than `prisma/` specifically so the
+ * live app can import it without reaching outside its own source root —
+ * `prisma/seed-sample.ts` already imports the other direction (script →
+ * `src/`), so this mirrors an established pattern, not a new one.
+ *
+ * Shared unchanged between FR and MC companies — including the three VAT
+ * accounts (445660, 445662, 445710). Per the confirmed account model (see
  * specs/vat-monaco-implementation-spec.md §5): Monaco's ligne 44/45
  * labels are verbatim identical to France's ligne 19/20, and accounts are
  * already company-scoped, so a Monaco company reuses the same numbers and
  * labels rather than a parallel-but-different numbering scheme. If a
  * genuine Monaco-specific account is ever needed (e.g. for "TMP" — see
- * the spec's open items), add it in seed-monaco.ts, not here.
+ * the spec's open items), add it there, not here. Jurisdiction otherwise
+ * has no effect on scaffolding at all — it only selects which VAT
+ * declaration computation applies later, at declaration time (see
+ * VatService.computeDeclaration()).
  */
 export const PCG_ACCOUNTS: readonly { number: string; label: string }[] = [
   // Classe 1 — Comptes de capitaux
