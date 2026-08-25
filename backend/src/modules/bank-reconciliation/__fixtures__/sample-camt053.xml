@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Hand-built, spec-compliant camt.053.001.02 sample (ISO 20022 Bank-to-
+  Customer Statement) — NOT a real bank export. See CLAUDE.md "Bank
+  reconciliation": no real CAMT.053 file was available when this parser
+  was built, so this fixture stands in, flagged honestly as unverified
+  against an actual bank export until one becomes available. Structure
+  follows the ISO 20022 camt.053.001.02 schema exactly (Document >
+  BkToCstmrStmt > Stmt > Acct/Bal/Ntry), deliberately covering three
+  different depths of label extraction (RmtInf/Ustrd, AddtlTxInf,
+  Ntry-level AddtlNtryInf) so the parser's fallback chain has real cases
+  to prove itself against.
+-->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt>
+    <GrpHdr>
+      <MsgId>MSG-2026-03-STMT</MsgId>
+      <CreDtTm>2026-04-01T08:00:00</CreDtTm>
+    </GrpHdr>
+    <Stmt>
+      <Id>STMT-2026-03</Id>
+      <ElctrncSeqNb>1</ElctrncSeqNb>
+      <CreDtTm>2026-04-01T08:00:00</CreDtTm>
+      <Acct>
+        <Id>
+          <IBAN>FR7630001007941234567890185</IBAN>
+        </Id>
+        <Ccy>EUR</Ccy>
+      </Acct>
+      <Bal>
+        <Tp>
+          <CdOrPrtry>
+            <Cd>OPBD</Cd>
+          </CdOrPrtry>
+        </Tp>
+        <Amt Ccy="EUR">5000.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt>
+          <Dt>2026-03-01</Dt>
+        </Dt>
+      </Bal>
+      <Bal>
+        <Tp>
+          <CdOrPrtry>
+            <Cd>CLBD</Cd>
+          </CdOrPrtry>
+        </Tp>
+        <Amt Ccy="EUR">7974.50</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt>
+          <Dt>2026-03-31</Dt>
+        </Dt>
+      </Bal>
+      <Ntry>
+        <Amt Ccy="EUR">1200.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt>
+          <Dt>2026-03-05</Dt>
+        </BookgDt>
+        <ValDt>
+          <Dt>2026-03-05</Dt>
+        </ValDt>
+        <AcctSvcrRef>REF001</AcctSvcrRef>
+        <NtryDtls>
+          <TxDtls>
+            <RmtInf>
+              <Ustrd>VIR CLIENT LEROY FACTURE SAMPLE-VE-0001</Ustrd>
+            </RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">450.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt>
+          <Dt>2026-03-08</Dt>
+        </BookgDt>
+        <ValDt>
+          <Dt>2026-03-08</Dt>
+        </ValDt>
+        <AcctSvcrRef>REF002</AcctSvcrRef>
+        <NtryDtls>
+          <TxDtls>
+            <RmtInf>
+              <Ustrd>PRLV EDF FACTURE ELECTRICITE</Ustrd>
+            </RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">100.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt>
+          <Dt>2026-03-12</Dt>
+        </BookgDt>
+        <ValDt>
+          <Dt>2026-03-12</Dt>
+        </ValDt>
+        <AcctSvcrRef>REF003</AcctSvcrRef>
+        <NtryDtls>
+          <TxDtls>
+            <AddtlTxInf>FRAIS DE TENUE DE COMPTE</AddtlTxInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">2400.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt>
+          <Dt>2026-03-15</Dt>
+        </BookgDt>
+        <ValDt>
+          <Dt>2026-03-15</Dt>
+        </ValDt>
+        <AcctSvcrRef>REF004</AcctSvcrRef>
+        <NtryDtls>
+          <TxDtls>
+            <RmtInf>
+              <Ustrd>VIR CLIENT LEROY REGLEMENT FACTURE SAMPLE-VE-0001</Ustrd>
+            </RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="EUR">75.50</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt>
+          <Dt>2026-03-20</Dt>
+        </BookgDt>
+        <ValDt>
+          <Dt>2026-03-20</Dt>
+        </ValDt>
+        <AcctSvcrRef>REF005</AcctSvcrRef>
+        <AddtlNtryInf>COMMISSION CARTE BANCAIRE</AddtlNtryInf>
+      </Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>

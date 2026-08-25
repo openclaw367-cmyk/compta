@@ -1047,3 +1047,87 @@ export interface DashboardSummaryUnavailable {
 }
 
 export type DashboardSummary = DashboardSummaryAvailable | DashboardSummaryUnavailable;
+
+/**
+ * Bank reconciliation — see CLAUDE.md "Bank reconciliation". A real,
+ * named bank account linked to one 512/514/516/517-family PCG account.
+ */
+export interface BankAccount {
+  id: string;
+  companyId: string;
+  compteId: string;
+  label: string;
+  iban: string | null;
+  currency: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Response for POST /bank-reconciliation/statements/preview — no persistence. */
+export interface StatementPreviewLine {
+  bookingDate: string;
+  valueDate: string | null;
+  /** Signed API-string — positive = inflow, negative = outflow. */
+  amount: string;
+  label: string;
+  bankReference: string | null;
+  isDuplicate: boolean;
+}
+
+export interface StatementPreviewResponse {
+  iban: string | null;
+  periodStart: string;
+  periodEnd: string;
+  openingBalance: string;
+  closingBalance: string;
+  lines: StatementPreviewLine[];
+}
+
+export interface BankStatementImport {
+  id: string;
+  companyId: string;
+  bankAccountId: string;
+  fileName: string;
+  periodStart: string;
+  periodEnd: string;
+  openingBalance: string;
+  closingBalance: string;
+  importedAt: string;
+}
+
+export type MatchConfidence = 'HIGH' | 'AMBIGUOUS' | 'NO_CANDIDATE';
+
+export interface MatchCandidate {
+  ecritureLigneId: string;
+  ecritureId: string;
+  ecritureNum: string | null;
+  ecritureDate: string;
+  libelle: string;
+  amount: string;
+  dateDistanceDays: number;
+  labelSimilarity: number;
+}
+
+/** GET /bank-reconciliation/accounts/:id/proposals — recomputed fresh every call, never persisted. */
+export interface StatementLineMatchProposal {
+  statementLineId: string;
+  confidence: MatchConfidence;
+  candidates: MatchCandidate[];
+}
+
+export type BankStatementLineStatus = 'UNMATCHED' | 'CONFIRMED' | 'IGNORED';
+
+export interface BankStatementLine {
+  id: string;
+  companyId: string;
+  importId: string;
+  bankAccountId: string;
+  bookingDate: string;
+  valueDate: string | null;
+  amount: string;
+  label: string;
+  bankReference: string | null;
+  status: BankStatementLineStatus;
+  matchedLigneId: string | null;
+  ignoredReason: string | null;
+}

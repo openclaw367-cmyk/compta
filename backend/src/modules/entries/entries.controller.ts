@@ -14,6 +14,7 @@ import { CurrentCompany } from '../../common/tenant/current-company.decorator';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { EntriesService } from './entries.service';
 import { CreateEcritureDto } from './dto/create-ecriture.dto';
+import { SetLettrageDto } from './dto/set-lettrage.dto';
 
 @ApiTags('entries')
 @ApiHeader({
@@ -81,5 +82,23 @@ export class EntriesController {
   @Post(':id/reverse')
   reverse(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
     return this.entriesService.reverse(company, id);
+  }
+
+  @ApiOperation({
+    summary: 'Set or clear lettrage/dateLettrage on one line — allowed on a validated line too.',
+    description:
+      'The one write path that bypasses the validated-écriture immutability rule, deliberately — ' +
+      'see CLAUDE.md "Bank reconciliation": lettrage is reconciliation metadata, not part of an ' +
+      "entry's balance/compliance content. Omit lettrage (or send null) to clear it. A validated " +
+      "line's change is logged (LettrageAuditLog); a draft line's is not, same as before.",
+  })
+  @ApiParam({ name: 'id' })
+  @Patch('lignes/:id/lettrage')
+  setLettrage(
+    @CurrentCompany() company: CompanyContext,
+    @Param('id') id: string,
+    @Body() dto: SetLettrageDto,
+  ) {
+    return this.entriesService.setLettrage(company, id, dto.lettrage ?? null);
   }
 }

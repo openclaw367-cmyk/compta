@@ -40,7 +40,15 @@ function makePrismaMock() {
       })),
       delete: jest.fn(),
     },
-    ecritureLigne: { deleteMany: jest.fn() },
+    ecritureLigne: {
+      deleteMany: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn((args: { where: { id: string }; data: unknown }) => ({
+        id: args.where.id,
+        ...(args.data as object),
+      })),
+    },
+    lettrageAuditLog: { create: jest.fn() },
     vatRate: { findMany: jest.fn().mockResolvedValue([]) },
     account: { findMany: jest.fn().mockResolvedValue([]) },
     fixedAsset: { findMany: jest.fn().mockResolvedValue([]) },
@@ -232,6 +240,76 @@ describe('EntriesService', () => {
     ]);
     const ecritures = await service.findAll(company);
     expect(ecritures.map((e) => e.documentCount)).toEqual([0, 3]);
+  });
+
+  describe('setLettrage', () => {
+    it('allowed on a DRAFT line — sets lettrage/dateLettrage, no audit log written', async () => {
+      prisma.ecritureLigne.findFirst.mockResolvedValueOnce({
+        id: 'ligne-1',
+        ecriture: { validatedAt: null },
+      });
+      const result = await service.setLettrage(company, 'ligne-1', 'A1');
+      expect(result.lettrage).toBe('A1');
+      expect(prisma.ecritureLigne.update).toHaveBeenCalledWith({
+        where: { id: 'ligne-1' },
+        data: { lettrage: 'A1', dateLettrage: expect.any(Date) },
+      });
+      expect(prisma.lettrageAuditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('allowed on an ALREADY-VALIDATED line — the one write path that bypasses assertDraft()', async () => {
+      prisma.ecritureLigne.findFirst.mockResolvedValueOnce({
+        id: 'ligne-1',
+        ecriture: { validatedAt: new Date() },
+      });
+      const result = await service.setLettrage(company, 'ligne-1', 'A1');
+      expect(result.lettrage).toBe('A1');
+    });
+
+    it('writes exactly one LettrageAuditLog SET row when the line belongs to a validated écriture', async () => {
+      prisma.ecritureLigne.findFirst.mockResolvedValueOnce({
+        id: 'ligne-1',
+        ecriture: { validatedAt: new Date() },
+      });
+      await service.setLettrage(company, 'ligne-1', 'A1');
+      expect(prisma.lettrageAuditLog.create).toHaveBeenCalledTimes(1);
+      expect(prisma.lettrageAuditLog.create).toHaveBeenCalledWith({
+        data: {
+          companyId: 'company-1',
+          ecritureLigneId: 'ligne-1',
+          action: 'SET',
+          lettrage: 'A1',
+        },
+      });
+    });
+
+    it('clearing (null) on a validated line sets both fields to null and logs CLEARED', async () => {
+      prisma.ecritureLigne.findFirst.mockResolvedValueOnce({
+        id: 'ligne-1',
+        ecriture: { validatedAt: new Date() },
+      });
+      await service.setLettrage(company, 'ligne-1', null);
+      expect(prisma.ecritureLigne.update).toHaveBeenCalledWith({
+        where: { id: 'ligne-1' },
+        data: { lettrage: null, dateLettrage: null },
+      });
+      expect(prisma.lettrageAuditLog.create).toHaveBeenCalledWith({
+        data: {
+          companyId: 'company-1',
+          ecritureLigneId: 'ligne-1',
+          action: 'CLEARED',
+          lettrage: null,
+        },
+      });
+    });
+
+    it('throws NotFoundException for a ligne id that does not belong to this company', async () => {
+      prisma.ecritureLigne.findFirst.mockResolvedValueOnce(null);
+      await expect(service.setLettrage(company, 'ligne-x', 'A1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(prisma.ecritureLigne.update).not.toHaveBeenCalled();
+    });
   });
 
   it('reversal swaps debit and credit on every line', async () => {

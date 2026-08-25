@@ -15,6 +15,7 @@ import {
   IconSettings,
   IconUpload,
   IconUsers,
+  IconWallet,
 } from '../components/layout/icons';
 
 export interface NavItem {
@@ -44,6 +45,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { to: '/ecritures', label: 'Écritures', Icon: IconGrid },
       { to: '/grand-livre', label: 'Grand livre', Icon: IconLedger },
+      { to: '/rapprochement-bancaire', label: 'Rapprochement bancaire', Icon: IconWallet },
       { to: '/tiers', label: 'Tiers', Icon: IconUsers },
       { to: '/immobilisations', label: 'Immobilisations', Icon: IconBox },
       { to: '/exercices', label: 'Exercices', Icon: IconCalendar },

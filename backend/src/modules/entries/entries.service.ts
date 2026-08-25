@@ -4,15 +4,21 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Ecriture } from '@prisma/client';
+import { Ecriture, EcritureLigne, LettrageAuditAction } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { assertFiscalYearOpen } from '../../common/ledger/assert-fiscal-year-open';
 import { CreateEcritureDto } from './dto/create-ecriture.dto';
 import { EntryValidationService } from './entry-validation.service';
 
-/** Response shape for create()/update() — the écriture plus any non-blocking compliance warnings. */
-export type EcritureWriteResult = Ecriture & { warnings: string[] };
+/**
+ * Response shape for create()/update() — the écriture plus its own
+ * lines (both queries always `include: { lignes: true }`, so this was
+ * always true at runtime; declared explicitly now that a second caller
+ * — BankReconciliationService — needs to read `.lignes` too) and any
+ * non-blocking compliance warnings.
+ */
+export type EcritureWriteResult = Ecriture & { lignes: EcritureLigne[]; warnings: string[] };
 
 /**
  * Response shape for findAll()/findOne() — the écriture plus how many
@@ -221,6 +227,60 @@ export class EntriesService {
         },
       },
       include: { lignes: true },
+    });
+  }
+
+  /**
+   * Sets or clears `lettrage`/`dateLettrage` on one line — the ONE
+   * write path in this service that deliberately bypasses assertDraft(),
+   * on both draft AND already-validated lines. See CLAUDE.md "Bank
+   * reconciliation": lettrage is reconciliation metadata, not part of
+   * an entry's balance/compliance content — Rule 3's immutability
+   * governs corrections to an entry's own content, and lettrage isn't
+   * one. Nothing else on the line (debit/credit/compteId/...) is
+   * touched here, ever.
+   *
+   * Only a validated line's change is audited (LettrageAuditLog) — a
+   * draft's lettrage is freely editable via the ordinary create/update
+   * path already, exactly as before this method existed, so auditing it
+   * here too would just be noise. `lettrage: null` clears both fields
+   * (the undo path — e.g. reversing a mistaken bank-reconciliation
+   * match); a non-null value sets `dateLettrage` to now, same "DateLet
+   * is never left blank once EcritureLet is set" pairing this app's own
+   * seed data already establishes by convention.
+   */
+  async setLettrage(
+    company: CompanyContext,
+    ligneId: string,
+    lettrage: string | null,
+  ): Promise<EcritureLigne> {
+    const existing = await this.prisma.ecritureLigne.findFirst({
+      where: { id: ligneId, companyId: company.companyId },
+      include: { ecriture: { select: { validatedAt: true } } },
+    });
+    if (!existing) {
+      throw new NotFoundException(`Écriture ligne ${ligneId} not found`);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.ecritureLigne.update({
+        where: { id: ligneId },
+        data: {
+          lettrage: lettrage ?? null,
+          dateLettrage: lettrage ? new Date() : null,
+        },
+      });
+      if (existing.ecriture.validatedAt) {
+        await tx.lettrageAuditLog.create({
+          data: {
+            companyId: company.companyId,
+            ecritureLigneId: ligneId,
+            action: lettrage ? LettrageAuditAction.SET : LettrageAuditAction.CLEARED,
+            lettrage,
+          },
+        });
+      }
+      return updated;
     });
   }
 

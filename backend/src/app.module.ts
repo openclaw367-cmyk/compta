@@ -42,6 +42,10 @@ import { DashboardController } from './modules/dashboard/dashboard.controller';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { EcritureDocumentsController } from './modules/documents/ecriture-documents.controller';
 import { DocumentExtractionController } from './modules/documents/document-extraction.controller';
+import { BankAccountsModule } from './modules/bank-accounts/bank-accounts.module';
+import { BankAccountsController } from './modules/bank-accounts/bank-accounts.controller';
+import { BankReconciliationModule } from './modules/bank-reconciliation/bank-reconciliation.module';
+import { BankReconciliationController } from './modules/bank-reconciliation/bank-reconciliation.controller';
 import { DevModule } from './modules/dev/dev.module';
 import { DevController } from './modules/dev/dev.controller';
 
@@ -75,6 +79,8 @@ const isProduction = process.env.NODE_ENV === 'production';
     CloudCredentialsModule,
     DashboardModule,
     DocumentsModule,
+    BankAccountsModule,
+    BankReconciliationModule,
     ...(isProduction ? [] : [DevModule]),
   ],
 })
@@ -117,6 +123,8 @@ export class AppModule implements NestModule {
         DashboardController,
         EcritureDocumentsController,
         DocumentExtractionController,
+        BankAccountsController,
+        BankReconciliationController,
         ...(isProduction ? [] : [DevController]),
       );
   }

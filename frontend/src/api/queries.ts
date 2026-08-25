@@ -3,6 +3,9 @@ import { api } from './client';
 import type {
   Account,
   AccountLedgerResponse,
+  BankAccount,
+  BankStatementImport,
+  BankStatementLine,
   Ca3Declaration,
   CashFlowStatement,
   CessionResult,
@@ -29,6 +32,8 @@ import type {
   LiasseAnyResult,
   LocalModelAvailability,
   ResultatFiscalResult,
+  StatementLineMatchProposal,
+  StatementPreviewResponse,
   TrialBalanceResponse,
   VatRate,
 } from './types';
@@ -36,6 +41,7 @@ import type {
   CessionFixedAssetDto,
   ComputeResultatFiscalDto,
   CreateAccountDto,
+  CreateBankAccountDto,
   CreateCompanyDto,
   CreateEcritureDto,
   CreateFiscalYearDto,
@@ -821,5 +827,131 @@ export function useDashboardSummary(fiscalYearId?: string | null) {
       api.get<DashboardSummary>(
         `/dashboard/summary${fiscalYearId ? `?fiscalYearId=${encodeURIComponent(fiscalYearId)}` : ''}`,
       ),
+  });
+}
+
+/**
+ * Bank reconciliation — see CLAUDE.md "Bank reconciliation". Statement
+ * import follows ImportExcelPage's own preview-then-confirm shape
+ * (usePreviewImport/useConfirmImport). Match proposals are never
+ * persisted server-side (recomputed fresh every call), so
+ * useReconciliationProposals is a plain query, invalidated by every
+ * mutation below that changes what's still UNMATCHED.
+ */
+export function useBankAccounts() {
+  return useQuery({
+    queryKey: ['bank-accounts'],
+    queryFn: () => api.get<BankAccount[]>('/bank-accounts'),
+  });
+}
+
+export function useCreateBankAccount() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateBankAccountDto) => api.post<BankAccount>('/bank-accounts', dto),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['bank-accounts'] });
+    },
+  });
+}
+
+function statementFormData(bankAccountId: string, file: File): FormData {
+  const formData = new FormData();
+  formData.append('bankAccountId', bankAccountId);
+  formData.append('file', file);
+  return formData;
+}
+
+/** Pure read — writes nothing server-side, safe to call as often as needed. */
+export function usePreviewStatement() {
+  return useMutation({
+    mutationFn: ({ bankAccountId, file }: { bankAccountId: string; file: File }) =>
+      api.postForm<StatementPreviewResponse>(
+        '/bank-reconciliation/statements/preview',
+        statementFormData(bankAccountId, file),
+      ),
+  });
+}
+
+function invalidateReconciliation(
+  queryClient: ReturnType<typeof useQueryClient>,
+  bankAccountId: string,
+): void {
+  void queryClient.invalidateQueries({ queryKey: ['bank-statement-lines', bankAccountId] });
+  void queryClient.invalidateQueries({ queryKey: ['bank-reconciliation-proposals', bankAccountId] });
+  void queryClient.invalidateQueries({ queryKey: ['ecritures'] });
+}
+
+/** The real commit — re-submits the same file previewed a moment earlier. */
+export function useConfirmStatementImport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ bankAccountId, file }: { bankAccountId: string; file: File }) =>
+      api.postForm<BankStatementImport>(
+        '/bank-reconciliation/statements',
+        statementFormData(bankAccountId, file),
+      ),
+    onSuccess: (_data, { bankAccountId }) => invalidateReconciliation(queryClient, bankAccountId),
+  });
+}
+
+export function useStatementLines(bankAccountId: string | null) {
+  return useQuery({
+    queryKey: ['bank-statement-lines', bankAccountId],
+    queryFn: () =>
+      api.get<BankStatementLine[]>(`/bank-reconciliation/accounts/${bankAccountId}/statement-lines`),
+    enabled: Boolean(bankAccountId),
+  });
+}
+
+export function useReconciliationProposals(bankAccountId: string | null) {
+  return useQuery({
+    queryKey: ['bank-reconciliation-proposals', bankAccountId],
+    queryFn: () =>
+      api.get<StatementLineMatchProposal[]>(
+        `/bank-reconciliation/accounts/${bankAccountId}/proposals`,
+      ),
+    enabled: Boolean(bankAccountId),
+  });
+}
+
+export function useConfirmMatch(bankAccountId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ statementLineId, ecritureLigneId }: { statementLineId: string; ecritureLigneId: string }) =>
+      api.post<void>(`/bank-reconciliation/statement-lines/${statementLineId}/confirm-match`, {
+        ecritureLigneId,
+      }),
+    onSuccess: () => invalidateReconciliation(queryClient, bankAccountId),
+  });
+}
+
+export function useClearMatch(bankAccountId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (statementLineId: string) =>
+      api.post<void>(`/bank-reconciliation/statement-lines/${statementLineId}/clear-match`, {}),
+    onSuccess: () => invalidateReconciliation(queryClient, bankAccountId),
+  });
+}
+
+export function useIgnoreStatementLine(bankAccountId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ statementLineId, reason }: { statementLineId: string; reason?: string }) =>
+      api.post<void>(`/bank-reconciliation/statement-lines/${statementLineId}/ignore`, { reason }),
+    onSuccess: () => invalidateReconciliation(queryClient, bankAccountId),
+  });
+}
+
+export function useCreateEcritureFromStatementLine(bankAccountId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ statementLineId, dto }: { statementLineId: string; dto: CreateEcritureDto }) =>
+      api.post<EcritureWriteResult>(
+        `/bank-reconciliation/statement-lines/${statementLineId}/create-ecriture`,
+        dto,
+      ),
+    onSuccess: () => invalidateReconciliation(queryClient, bankAccountId),
   });
 }

@@ -1,0 +1,13 @@
+import { Module } from '@nestjs/common';
+import { EntriesModule } from '../entries/entries.module';
+import { BankReconciliationController } from './bank-reconciliation.controller';
+import { BankStatementImportService } from './bank-statement-import.service';
+import { BankReconciliationService } from './bank-reconciliation.service';
+import { Camt053ParserService } from './camt053-parser.service';
+
+@Module({
+  imports: [EntriesModule],
+  controllers: [BankReconciliationController],
+  providers: [Camt053ParserService, BankStatementImportService, BankReconciliationService],
+})
+export class BankReconciliationModule {}

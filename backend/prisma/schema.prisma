@@ -146,6 +146,10 @@ model Company {
   cloudModelCredentials CloudModelCredential[]
   ecritureDocuments     EcritureDocument[]
   ecritureDocumentLogs  EcritureDocumentAuditLog[]
+  bankAccounts          BankAccount[]
+  bankStatementImports  BankStatementImport[]
+  bankStatementLines    BankStatementLine[]
+  lettrageAuditLogs     LettrageAuditLog[]
 }
 
 /// Exercice comptable. Ecritures are validated (locked) relative to a
@@ -198,6 +202,8 @@ model Account {
   fixedAssetsAsAsset        FixedAsset[] @relation("FixedAssetAccount")
   fixedAssetsAsDepreciation FixedAsset[] @relation("FixedAssetDepreciationAccount")
   fixedAssetsAsExpense      FixedAsset[] @relation("FixedAssetExpenseAccount")
+
+  bankAccount BankAccount?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -327,6 +333,11 @@ model EcritureLigne {
   dateEcheance DateTime?
 
   createdAt DateTime @default(now())
+
+  /// The bank-statement line this ligne was reconciled against, if any —
+  /// see CLAUDE.md "Bank reconciliation". Optional: most lignes are never
+  /// bank-matched (only ones on a 512/514-family account typically are).
+  bankStatementMatch BankStatementLine?
 
   @@index([companyId, ecritureId])
   @@index([companyId, compteId])
@@ -585,7 +596,7 @@ model EcritureDocument {
   /// delete with a document already attached), matching the same
   /// "best-effort cleanup" discipline as deleteFileQuietly() elsewhere in
   /// this file's own service.
-  ecriture Ecriture @relation(fields: [ecritureId], references: [id], onDelete: Cascade)
+  ecriture   Ecriture @relation(fields: [ecritureId], references: [id], onDelete: Cascade)
 
   /// Original filename, for display only — never used to build the disk path.
   fileName    String
@@ -615,4 +626,128 @@ model EcritureDocumentAuditLog {
   occurredAt DateTime            @default(now())
 
   @@index([companyId, ecritureId])
+}
+
+/// A real, named bank account (see CLAUDE.md "Bank reconciliation"),
+/// linked to exactly one 512/514-family PCG account. Before this model,
+/// "the company's bank account" was implicit — whichever 512/514 Account
+/// existed — which doesn't scale to a company with more than one real
+/// account. One BankAccount per Account (@@unique) — the PCG account is
+/// still the ledger's own source of truth for balances; this model only
+/// adds the real-world identity (IBAN, label) statement import needs to
+/// target.
+model BankAccount {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+  compteId  String  @unique
+  compte    Account @relation(fields: [compteId], references: [id])
+
+  label    String
+  iban     String?
+  currency String  @default("EUR")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  imports BankStatementImport[]
+  lines   BankStatementLine[]
+
+  @@index([companyId])
+}
+
+/// One imported bank statement (CAMT.053 for v1 — see CLAUDE.md "Bank
+/// reconciliation"). Deliberately mirrors ImportBatch's own role for
+/// Excel import: a persisted record of the import itself, separate from
+/// the individual statement lines it produced.
+model BankStatementImport {
+  id            String      @id @default(cuid())
+  companyId     String
+  company       Company     @relation(fields: [companyId], references: [id])
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id])
+
+  fileName       String
+  periodStart    DateTime
+  periodEnd      DateTime
+  openingBalance Decimal  @db.Decimal(15, 2)
+  closingBalance Decimal  @db.Decimal(15, 2)
+  importedAt     DateTime @default(now())
+
+  lines BankStatementLine[]
+
+  @@index([companyId, bankAccountId])
+}
+
+/// Which reconciliation state a BankStatementLine is in. UNMATCHED is
+/// the only mutable-forward state — CONFIRMED can revert to UNMATCHED
+/// via the explicit "clear match" action (never silently), IGNORED is a
+/// deliberate terminal choice with its own optional reason.
+enum BankStatementLineStatus {
+  UNMATCHED
+  CONFIRMED
+  IGNORED
+}
+
+/// One parsed transaction line from an imported statement. `amount` is
+/// SIGNED (positive = inflow, negative = outflow) — deliberately NOT the
+/// always-positive debit/credit pair EcritureLigne uses, because a
+/// statement line represents exactly one transaction, not a
+/// multi-account split; following the bank's own natural representation
+/// here is clearer than forcing EcritureLigne's convention onto a
+/// different kind of object. Match PROPOSALS are never persisted (see
+/// matching-engine.ts's own doc comment — recomputed fresh every time,
+/// same "never persists" discipline as propose_ecriture) — only a
+/// CONFIRMED match's result is, via `matchedLigneId`.
+model BankStatementLine {
+  id            String              @id @default(cuid())
+  companyId     String
+  company       Company             @relation(fields: [companyId], references: [id])
+  importId      String
+  import        BankStatementImport @relation(fields: [importId], references: [id])
+  bankAccountId String
+  bankAccount   BankAccount         @relation(fields: [bankAccountId], references: [id])
+
+  bookingDate   DateTime
+  valueDate     DateTime?
+  amount        Decimal   @db.Decimal(15, 2)
+  label         String
+  /// The bank's own transaction reference (CAMT AcctSvcrRef) — used to
+  /// detect a re-imported statement's already-known lines at preview
+  /// time, never silently re-imported as a duplicate.
+  bankReference String?
+
+  status BankStatementLineStatus @default(UNMATCHED)
+
+  matchedLigneId String?        @unique
+  matchedLigne   EcritureLigne? @relation(fields: [matchedLigneId], references: [id])
+  ignoredReason  String?
+
+  @@index([companyId, bankAccountId, status])
+}
+
+/// Which lettrage action a LettrageAuditLog row records.
+enum LettrageAuditAction {
+  SET
+  CLEARED
+}
+
+/// Append-only log of every lettrage set/clear on an ALREADY-VALIDATED
+/// écriture line — see CLAUDE.md "Bank reconciliation" for why this is
+/// allowed at all (lettrage is reconciliation metadata, not part of an
+/// entry's balance/compliance content, so it doesn't go through
+/// assertDraft()) and why it's logged (the same audit discipline as
+/// EcritureDocumentAuditLog — no "who", this app has no auth model).
+/// A draft line's lettrage is NOT logged here — it's freely editable
+/// like every other field on a draft, same as before this feature.
+model LettrageAuditLog {
+  id              String              @id @default(cuid())
+  companyId       String
+  company         Company             @relation(fields: [companyId], references: [id])
+  ecritureLigneId String
+  action          LettrageAuditAction
+  lettrage        String?
+  occurredAt      DateTime            @default(now())
+
+  @@index([companyId, ecritureLigneId])
 }
