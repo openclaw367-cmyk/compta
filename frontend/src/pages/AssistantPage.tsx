@@ -24,6 +24,7 @@ import type {
 } from '../api/types';
 import { ApiError } from '../api/client';
 import { formatMoneyFr, isZeroMoney, normalizeMoneyInput, sanitizeAmountBuffer } from '../lib/money';
+import { EngineBadge } from '../components/journal/EngineBadge';
 
 const PROVIDER_LABELS: Record<CloudProvider, string> = { CLAUDE: 'Claude', DEEPSEEK: 'DeepSeek' };
 
@@ -416,36 +417,6 @@ function MessageRow({ message }: { message: ChatMessage }) {
         </div>
       )}
     </div>
-  );
-}
-
-/**
- * The always-visible local/cloud indicator — see CLAUDE.md "AI chatbot
- * cloud tier". Every ASSISTANT/TOOL message carries a real, persisted
- * `engine` (see the ChatEngine doc comment in api/types.ts); today that's
- * always LOCAL, since no cloud engine is wired into the orchestrator yet
- * — this renders honestly rather than decoratively: it shows exactly what
- * `message.engine` says, nothing implied or guessed.
- */
-function EngineBadge({
-  engine,
-  cloudProvider,
-}: {
-  engine: ChatEngine;
-  cloudProvider: CloudProvider | null;
-}) {
-  if (engine === 'CLOUD' && cloudProvider) {
-    const label = cloudProvider === 'CLAUDE' ? 'Claude' : 'DeepSeek';
-    return (
-      <span className="inline-flex w-fit items-center gap-1 rounded-full bg-warning-soft px-2 py-0.5 text-[10.5px] font-medium text-warning">
-        ☁️ {label}
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex w-fit items-center gap-1 rounded-full bg-positive-soft px-2 py-0.5 text-[10.5px] font-medium text-positive">
-      🔒 Local
-    </span>
   );
 }
 

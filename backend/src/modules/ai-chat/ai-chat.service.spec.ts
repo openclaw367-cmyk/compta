@@ -5,7 +5,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { ChatModelPort } from './chat-model/chat-model.port';
 import { ChatOrchestratorService } from './chat-orchestrator.service';
-import { InvoiceExtractionService } from './invoice-extraction.service';
+import { InvoiceExtractionService } from '../invoice-extraction/invoice-extraction.service';
 import { CloudCredentialsService } from '../cloud-credentials/cloud-credentials.service';
 import { CloudProposeToolsService } from './tools/cloud-propose-tools.service';
 

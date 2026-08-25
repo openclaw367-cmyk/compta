@@ -230,3 +230,11 @@ export function IconPlus(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+export function IconPaperclip(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M13.5 6.5 8 12a2.5 2.5 0 0 0 3.5 3.5l5-5a4 4 0 0 0-5.5-5.5l-5.5 5.5a5.5 5.5 0 0 0 7.5 7.5" />
+    </svg>
+  );
+}

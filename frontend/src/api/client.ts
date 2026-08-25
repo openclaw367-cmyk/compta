@@ -97,6 +97,25 @@ async function requestFile(path: string): Promise<DownloadableFile> {
   return { filename, content };
 }
 
+/**
+ * For the document viewer (see CLAUDE.md "Supporting-document
+ * attachments") — a binary GET that can't go through request() (not
+ * JSON) and can't be a plain `<img src="...">`/`<embed src="...">`
+ * either, since the file route requires the x-company-id header a raw
+ * element src can't attach. The caller turns the Blob into an object URL
+ * (and revokes it on close).
+ */
+async function requestBlob(path: string): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: companyHeaders(),
+  });
+  if (!response.ok) {
+    const body: unknown = await response.json();
+    throw new ApiError(body as ApiErrorBody);
+  }
+  return response.blob();
+}
+
 export const api = {
   get: <T>(path: string): Promise<T> => request<T>(path),
   post: <T>(path: string, data: unknown): Promise<T> =>
@@ -106,5 +125,8 @@ export const api = {
   delete: <T>(path: string): Promise<T> => request<T>(path, { method: 'DELETE' }),
   postForm: <T>(path: string, formData: FormData): Promise<T> =>
     request<T>(path, { method: 'POST', body: formData }),
+  putForm: <T>(path: string, formData: FormData): Promise<T> =>
+    request<T>(path, { method: 'PUT', body: formData }),
   getFile: (path: string): Promise<DownloadableFile> => requestFile(path),
+  getBlob: (path: string): Promise<Blob> => requestBlob(path),
 };

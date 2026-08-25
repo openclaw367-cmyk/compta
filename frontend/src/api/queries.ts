@@ -14,8 +14,12 @@ import type {
   Company,
   DashboardSummary,
   DepreciationEntry,
+  DocumentAccountSuggestion,
   Ecriture,
+  EcritureDocument,
+  EcritureDocumentAuditEntry,
   EcritureWriteResult,
+  ExtractedInvoiceFacts,
   FinancialAnalysisResult,
   FiscalYear,
   FixedAsset,
@@ -354,6 +358,116 @@ export function useReverseEcriture() {
   return useMutation({
     mutationFn: (id: string) => api.post<Ecriture>(`/entries/${id}/reverse`, {}),
     onSuccess: () => invalidateEcrituresAndLedger(queryClient),
+  });
+}
+
+/**
+ * Supporting-document attachments — see CLAUDE.md "Supporting-document
+ * attachments". Allowed regardless of the entry's validated/draft status
+ * (the backend never gates on it); every mutation invalidates ['ecritures']
+ * so EcrituresList's paperclip/count indicator stays in sync, plus this
+ * entry's own documents/audit-log queries.
+ */
+export function useEcritureDocuments(ecritureId: string | null) {
+  return useQuery({
+    queryKey: ['ecriture-documents', ecritureId],
+    queryFn: () => api.get<EcritureDocument[]>(`/entries/${ecritureId}/documents`),
+    enabled: Boolean(ecritureId),
+  });
+}
+
+export function useEcritureDocumentAuditLog(ecritureId: string | null) {
+  return useQuery({
+    queryKey: ['ecriture-document-audit-log', ecritureId],
+    queryFn: () =>
+      api.get<EcritureDocumentAuditEntry[]>(`/entries/${ecritureId}/documents/audit-log`),
+    enabled: Boolean(ecritureId),
+  });
+}
+
+function invalidateDocuments(
+  queryClient: ReturnType<typeof useQueryClient>,
+  ecritureId: string,
+): void {
+  void queryClient.invalidateQueries({ queryKey: ['ecritures'] });
+  void queryClient.invalidateQueries({ queryKey: ['ecriture-documents', ecritureId] });
+  void queryClient.invalidateQueries({ queryKey: ['ecriture-document-audit-log', ecritureId] });
+}
+
+export function useAttachDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ecritureId, file }: { ecritureId: string; file: File }) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return api.postForm<EcritureDocument>(`/entries/${ecritureId}/documents`, formData);
+    },
+    onSuccess: (_data, { ecritureId }) => invalidateDocuments(queryClient, ecritureId),
+  });
+}
+
+export function useReplaceDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      ecritureId,
+      documentId,
+      file,
+    }: {
+      ecritureId: string;
+      documentId: string;
+      file: File;
+    }) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return api.putForm<EcritureDocument>(
+        `/entries/${ecritureId}/documents/${documentId}`,
+        formData,
+      );
+    },
+    onSuccess: (_data, { ecritureId }) => invalidateDocuments(queryClient, ecritureId),
+  });
+}
+
+export function useRemoveDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ecritureId, documentId }: { ecritureId: string; documentId: string }) =>
+      api.delete<void>(`/entries/${ecritureId}/documents/${documentId}`),
+    onSuccess: (_data, { ecritureId }) => invalidateDocuments(queryClient, ecritureId),
+  });
+}
+
+/**
+ * Deterministic extraction, no persistence, no écriture id required — see
+ * CLAUDE.md "Supporting-document attachments — Part 2". What makes
+ * attaching a file WHILE creating a new draft (before it has an id) work.
+ */
+export function useExtractDocument() {
+  return useMutation({
+    mutationFn: (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return api.postForm<ExtractedInvoiceFacts>('/documents/extract', formData);
+    },
+  });
+}
+
+/**
+ * The "Comptable IA" toggle's explicit action (see CLAUDE.md "Supporting-
+ * document attachments — Part 3") — one cloud turn, gated on a configured
+ * credential, reusing propose_ecriture's own review discipline. Never
+ * invalidates anything itself: the suggestion only merges into
+ * EcritureEditor's own draft state on confirm, it never writes.
+ */
+export function useSuggestAccounts() {
+  return useMutation({
+    mutationFn: ({ file, cloudProvider }: { file: File; cloudProvider: CloudProvider }) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('cloudProvider', cloudProvider);
+      return api.postForm<DocumentAccountSuggestion>('/documents/suggest-accounts', formData);
+    },
   });
 }
 

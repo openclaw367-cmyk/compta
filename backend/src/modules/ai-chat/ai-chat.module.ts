@@ -12,13 +12,13 @@ import { ResultatFiscalModule } from '../resultat-fiscal/resultat-fiscal.module'
 import { DepreciationModule } from '../depreciation/depreciation.module';
 import { EntriesModule } from '../entries/entries.module';
 import { CloudCredentialsModule } from '../cloud-credentials/cloud-credentials.module';
+import { InvoiceExtractionModule } from '../invoice-extraction/invoice-extraction.module';
 import { ChatModelModule } from './chat-model/chat-model.module';
 import { ReadToolsService } from './tools/read-tools.service';
 import { ProposeToolsService } from './tools/propose-tools.service';
 import { CloudProposeToolsService } from './tools/cloud-propose-tools.service';
 import { ChatContextService } from './chat-context.service';
 import { ChatOrchestratorService } from './chat-orchestrator.service';
-import { InvoiceExtractionService } from './invoice-extraction.service';
 import { AiChatService } from './ai-chat.service';
 import { AiChatController } from './ai-chat.controller';
 
@@ -56,6 +56,15 @@ import { AiChatController } from './ai-chat.controller';
  * fetch (see that file), which calls `CompaniesService.findCurrent()`
  * only — `updateCurrent()` exists on that class but nothing in this
  * module ever calls it.
+ * `InvoiceExtractionModule` supplies `InvoiceExtractionService` (moved out
+ * of this module, see that module's own doc comment) — this module no
+ * longer provides it directly.
+ * `ChatOrchestratorService`/`CloudProposeToolsService` are exported so
+ * `DocumentsModule` (see CLAUDE.md "Supporting-document attachments") can
+ * run its own one-shot cloud "suggest accounts" turn through the SAME
+ * orchestrator/tool-registry the assistant's own cloud tier uses, rather
+ * than a parallel implementation — the only two providers anything
+ * outside this module has ever needed.
  */
 @Module({
   imports: [
@@ -72,6 +81,7 @@ import { AiChatController } from './ai-chat.controller';
     DepreciationModule,
     EntriesModule,
     CloudCredentialsModule,
+    InvoiceExtractionModule,
     ChatModelModule,
   ],
   controllers: [AiChatController],
@@ -81,8 +91,8 @@ import { AiChatController } from './ai-chat.controller';
     CloudProposeToolsService,
     ChatContextService,
     ChatOrchestratorService,
-    InvoiceExtractionService,
     AiChatService,
   ],
+  exports: [ChatOrchestratorService, CloudProposeToolsService],
 })
 export class AiChatModule {}

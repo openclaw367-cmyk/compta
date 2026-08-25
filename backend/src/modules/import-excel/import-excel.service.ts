@@ -31,11 +31,14 @@ const REQUIRED_COLUMNS = [
  * formula result, ...), not just primitives — a blind `String(cell.value)`
  * risks silently producing "[object Object]". This only trusts the shapes
  * we actually expect from an accounting import sheet. Exported for reuse
- * by the AI chatbot's invoice extraction (see
- * ../ai-chat/invoice-extraction.service.ts) — the same cell-reading
- * primitive, not a parallel reimplementation, per CLAUDE.md "AI chatbot
- * Phase 2 — invoice extraction": "reuse the Excel-import module's
- * parsing, don't reinvent extraction."
+ * by the shared invoice extraction service (see
+ * ../invoice-extraction/invoice-extraction.service.ts, moved out of
+ * ai-chat so both the assistant and the journal-entry attach/prefill flow
+ * can import it without a circular module dependency — see CLAUDE.md
+ * "Supporting-document attachments") — the same cell-reading primitive,
+ * not a parallel reimplementation, per CLAUDE.md "AI chatbot Phase 2 —
+ * invoice extraction": "reuse the Excel-import module's parsing, don't
+ * reinvent extraction."
  */
 export function cellValueToString(value: unknown): string {
   if (value === null || value === undefined) return '';

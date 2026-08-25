@@ -144,6 +144,8 @@ model Company {
   chatSessions          ChatSession[]
   chatMessages          ChatMessage[]
   cloudModelCredentials CloudModelCredential[]
+  ecritureDocuments     EcritureDocument[]
+  ecritureDocumentLogs  EcritureDocumentAuditLog[]
 }
 
 /// Exercice comptable. Ecritures are validated (locked) relative to a
@@ -264,7 +266,8 @@ model Ecriture {
   importBatchId String?
   importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id])
 
-  lignes EcritureLigne[]
+  lignes    EcritureLigne[]
+  documents EcritureDocument[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -540,4 +543,76 @@ model CloudModelCredential {
   /// accumulating stale ones.
   @@unique([companyId, provider])
   @@index([companyId])
+}
+
+/// Which document-attachment action an EcritureDocumentAuditLog row
+/// records — see CLAUDE.md "Supporting-document attachments" (or the
+/// implementation spec, if one exists) for why attach/replace/remove are
+/// always allowed, even on an already-validated (immutable) écriture: a
+/// document is metadata about an entry, never part of its balance, so it
+/// never goes through assertDraft()/assertFiscalYearOpen() — this log is
+/// what closes the resulting audit gap instead.
+enum DocumentAuditAction {
+  ATTACHED
+  REPLACED
+  REMOVED
+}
+
+/// A justificatif (invoice/receipt, PDF or image) attached to an
+/// écriture. Pure metadata — never read by any balance/total/compliance
+/// computation anywhere in this app. The file itself lives on local disk
+/// under DOCUMENT_STORAGE_DIR/{companyId}/{this.id}.{ext}, never in this
+/// table and never in any cloud storage — this app's own "local-first,
+/// no cloud by default" stance (chat history, local-model inference)
+/// applies to documents too. `storagePath` is relative to
+/// DOCUMENT_STORAGE_DIR and built entirely from server-generated ids
+/// (never the original filename), so there's no path-traversal surface
+/// from a hostile upload name.
+model EcritureDocument {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id])
+  ecritureId String
+  /// onDelete: Cascade — EntriesService.remove() (drafts only, per the
+  /// ledger-integrity rules) doesn't know about attached documents at all
+  /// by design (see CLAUDE.md "Supporting-document attachments" for why
+  /// EcritureDocumentsService is intentionally NOT a dependency of
+  /// EntriesModule — the reverse direction would create a circular module
+  /// dependency via AiChatModule). Without this, deleting a draft that
+  /// happens to have a document attached would throw a raw foreign-key
+  /// violation instead of a clean 500. The DB rows cascade cleanly; the
+  /// on-disk file is a best-effort orphan in this rare path (a draft
+  /// delete with a document already attached), matching the same
+  /// "best-effort cleanup" discipline as deleteFileQuietly() elsewhere in
+  /// this file's own service.
+  ecriture Ecriture @relation(fields: [ecritureId], references: [id], onDelete: Cascade)
+
+  /// Original filename, for display only — never used to build the disk path.
+  fileName    String
+  mimeType    String
+  sizeBytes   Int
+  storagePath String
+
+  uploadedAt DateTime @default(now())
+
+  @@index([companyId, ecritureId])
+}
+
+/// Append-only log of every attach/replace/remove on an écriture's
+/// documents — deliberately a SEPARATE table from EcritureDocument
+/// itself, so history survives even after the document row a REMOVED
+/// entry refers to is gone. `fileName` is a snapshot at the time of the
+/// action, not a live reference. There is no "who" column: this app has
+/// no authentication/user-identity model anywhere, so this log honestly
+/// records only when and what, never a fabricated actor.
+model EcritureDocumentAuditLog {
+  id         String              @id @default(cuid())
+  companyId  String
+  company    Company             @relation(fields: [companyId], references: [id])
+  ecritureId String
+  action     DocumentAuditAction
+  fileName   String
+  occurredAt DateTime            @default(now())
+
+  @@index([companyId, ecritureId])
 }

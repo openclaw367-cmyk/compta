@@ -15,6 +15,23 @@ import { EntryValidationService } from './entry-validation.service';
 export type EcritureWriteResult = Ecriture & { warnings: string[] };
 
 /**
+ * Response shape for findAll()/findOne() — the écriture plus how many
+ * documents (justificatifs) are attached, for EcrituresList's paperclip
+ * indicator (see CLAUDE.md "Supporting-document attachments"). A pure
+ * metadata count, not a balance — reshaped from Prisma's `_count.documents`
+ * into a flat field so the API response doesn't leak Prisma's own
+ * `_count` wrapper shape.
+ */
+export type EcritureWithDocumentCount = Ecriture & { documentCount: number };
+
+function withDocumentCount<T extends { _count: { documents: number } }>(
+  ecriture: T,
+): Omit<T, '_count'> & { documentCount: number } {
+  const { _count, ...rest } = ecriture;
+  return { ...rest, documentCount: _count.documents };
+}
+
+/**
  * Écritures (journal entries). Implements CLAUDE.md "Ledger integrity":
  * balance-on-write, sequential gapless numbering assigned at validation,
  * and immutability once validated (corrections via a reversing entry).
@@ -55,23 +72,24 @@ export class EntriesService {
     return { ...ecriture, warnings };
   }
 
-  findAll(company: CompanyContext): Promise<Ecriture[]> {
-    return this.prisma.ecriture.findMany({
+  async findAll(company: CompanyContext): Promise<EcritureWithDocumentCount[]> {
+    const ecritures = await this.prisma.ecriture.findMany({
       where: { companyId: company.companyId },
-      include: { lignes: true },
+      include: { lignes: true, _count: { select: { documents: true } } },
       orderBy: [{ ecritureNum: 'asc' }, { createdAt: 'asc' }],
     });
+    return ecritures.map(withDocumentCount);
   }
 
-  async findOne(company: CompanyContext, id: string): Promise<Ecriture> {
+  async findOne(company: CompanyContext, id: string): Promise<EcritureWithDocumentCount> {
     const ecriture = await this.prisma.ecriture.findFirst({
       where: { id, companyId: company.companyId },
-      include: { lignes: true },
+      include: { lignes: true, _count: { select: { documents: true } } },
     });
     if (!ecriture) {
       throw new NotFoundException(`Écriture ${id} not found`);
     }
-    return ecriture;
+    return withDocumentCount(ecriture);
   }
 
   /** Full replace of a draft écriture's header and lines. Rejects validated entries. */
@@ -80,8 +98,7 @@ export class EntriesService {
     id: string,
     dto: CreateEcritureDto,
   ): Promise<EcritureWriteResult> {
-    const existing = await this.findOne(company, id);
-    this.assertDraft(existing);
+    await this.assertEditable(company, id);
 
     const lignesData = this.validation.buildBalancedLignes(company, dto.lignes);
     await this.validation.assertReferencesBelongToCompany(company, dto.journalId, dto.fiscalYearId);
@@ -118,8 +135,7 @@ export class EntriesService {
    * would always trip the EcritureLigne_ecritureId_fkey constraint.
    */
   async remove(company: CompanyContext, id: string): Promise<void> {
-    const existing = await this.findOne(company, id);
-    this.assertDraft(existing);
+    await this.assertEditable(company, id);
     await this.prisma.$transaction(async (tx) => {
       await tx.ecritureLigne.deleteMany({ where: { ecritureId: id } });
       await tx.ecriture.delete({ where: { id } });
@@ -214,5 +230,23 @@ export class EntriesService {
         'Validated écritures are immutable. Post a reversing entry instead of editing or deleting.',
       );
     }
+  }
+
+  /**
+   * update()/remove()'s own lookup-and-guard — deliberately a lean
+   * `{ validatedAt: true }` select rather than reusing the public
+   * findOne() (which now also computes `documentCount` for the read
+   * path). Neither of those callers cares about attached documents, so
+   * they shouldn't need a mocked `_count` just to exercise a guard check.
+   */
+  private async assertEditable(company: CompanyContext, id: string): Promise<void> {
+    const ecriture = await this.prisma.ecriture.findFirst({
+      where: { id, companyId: company.companyId },
+      select: { validatedAt: true },
+    });
+    if (!ecriture) {
+      throw new NotFoundException(`Écriture ${id} not found`);
+    }
+    this.assertDraft(ecriture);
   }
 }

@@ -132,6 +132,62 @@ export interface Ecriture {
   createdAt: string;
   updatedAt: string;
   lignes: EcritureLigne[];
+  /** How many documents (justificatifs) are attached — see EcrituresList's paperclip indicator. */
+  documentCount: number;
+}
+
+/**
+ * A justificatif attached to an écriture — see CLAUDE.md "Supporting-
+ * document attachments". Metadata only; the file itself is fetched
+ * separately via api.getBlob() against the /file route (never a plain
+ * <img src>, since that route requires the x-company-id header).
+ */
+export interface EcritureDocument {
+  id: string;
+  companyId: string;
+  ecritureId: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  storagePath: string;
+  uploadedAt: string;
+}
+
+export type DocumentAuditAction = 'ATTACHED' | 'REPLACED' | 'REMOVED';
+
+/**
+ * One row of an écriture's document attach/replace/remove history — no
+ * "who", since this app has no authentication/user-identity model to
+ * honestly attribute one (see CLAUDE.md).
+ */
+export interface EcritureDocumentAuditEntry {
+  id: string;
+  action: DocumentAuditAction;
+  fileName: string;
+  occurredAt: string;
+}
+
+/**
+ * Response for POST /documents/extract — deterministic parsing only, same
+ * "found and parsed, or simply absent — never guessed" discipline as the
+ * assistant's own extract_invoice_facts (InvoiceExtractionService is
+ * reused verbatim, not reimplemented — see CLAUDE.md).
+ */
+export interface ExtractedInvoiceField {
+  value: string;
+  source: 'parsed';
+}
+
+export interface ExtractedInvoiceFacts {
+  fileName: string;
+  fields: {
+    montantTtc?: ExtractedInvoiceField;
+    montantHt?: ExtractedInvoiceField;
+    montantTva?: ExtractedInvoiceField;
+    numeroFacture?: ExtractedInvoiceField;
+    dateFacture?: ExtractedInvoiceField;
+  };
+  rawText: string;
 }
 
 /**
@@ -915,6 +971,19 @@ export interface ProposedEcriture {
   warnings: string[];
   /** Judgment calls the model made — surfaced, never silently decided. */
   assumptions: string[];
+}
+
+/**
+ * Response for POST /documents/suggest-accounts — the "Comptable IA"
+ * toggle's own explicit action (see CLAUDE.md "Supporting-document
+ * attachments — Part 3"). Reuses the SAME ProposedEcriture shape
+ * propose_ecriture already returns — one review discipline, not a
+ * parallel one. `proposal` merges into EcritureEditor's own draft lines
+ * on confirm; it never posts by itself.
+ */
+export interface DocumentAccountSuggestion {
+  proposal: ProposedEcriture | null;
+  message: string | null;
 }
 
 /**

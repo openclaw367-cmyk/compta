@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { Account, Ecriture } from '../../api/types';
 import { addMoneyStrings, compareMoneyStrings, formatMoneyFr } from '../../lib/money';
 import { StatusBadge } from './StatusBadge';
+import { DocumentIndicator } from './DocumentViewer';
 
 function totalOf(ecriture: Ecriture): string {
   return ecriture.lignes.reduce((sum, ligne) => addMoneyStrings(sum, ligne.debit), '0.00');
@@ -182,7 +183,15 @@ export function EcrituresList({
                 <td className="px-4 py-2.5 tabular-nums text-ink">
                   {formatDate(ecriture.ecritureDate)}
                 </td>
-                <td className="px-4 py-2.5 text-ink-muted">{ecriture.pieceRef ?? '—'}</td>
+                <td className="px-4 py-2.5 text-ink-muted">
+                  <div className="flex items-center gap-1.5">
+                    <span>{ecriture.pieceRef ?? '—'}</span>
+                    <DocumentIndicator
+                      ecritureId={ecriture.id}
+                      documentCount={ecriture.documentCount}
+                    />
+                  </div>
+                </td>
                 <td className="max-w-xs truncate px-4 py-2.5 text-ink">{ecriture.libelle}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums font-medium text-ink">
                   {formatMoneyFr(totalOf(ecriture))}

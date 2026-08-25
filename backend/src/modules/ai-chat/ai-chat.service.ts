@@ -14,7 +14,8 @@ import { CHAT_MODEL_PORT, ChatModelPort } from './chat-model/chat-model.port';
 import { ChatModelMessage, ChatModelAvailability } from './chat-model/chat-model.types';
 import { CLOUD_MODEL_NAMES, createCloudModelAdapter } from './chat-model/cloud-model-registry';
 import { ChatOrchestratorService, OrchestratedMessage } from './chat-orchestrator.service';
-import { InvoiceExtractionService } from './invoice-extraction.service';
+import { InvoiceExtractionService } from '../invoice-extraction/invoice-extraction.service';
+import { buildInvoiceExtractionPrelude } from './invoice-extraction-prelude';
 import { CloudCredentialsService } from '../cloud-credentials/cloud-credentials.service';
 import { CloudProposeToolsService } from './tools/cloud-propose-tools.service';
 import { decideCloudThread } from './cloud-thread-gate';
@@ -172,7 +173,7 @@ export class AiChatService {
       createdRows.push(row);
     } else {
       const history: ChatModelMessage[] = session.messages.map(toChatModelMessage);
-      const filePrelude = await this.extractFilePrelude(files);
+      const filePrelude = await buildInvoiceExtractionPrelude(files, this.invoiceExtraction);
       // A local model can fail mid-turn (timeout, the daemon dropping
       // connection) on real hardware — observed live during Phase 1
       // verification, not a hypothetical. This must degrade the same
@@ -294,7 +295,7 @@ export class AiChatService {
     const createdRows: ChatMessage[] = [userRow];
 
     const history: ChatModelMessage[] = session.messages.map(toChatModelMessage);
-    const filePrelude = await this.extractFilePrelude(files);
+    const filePrelude = await buildInvoiceExtractionPrelude(files, this.invoiceExtraction);
     let produced: OrchestratedMessage[];
     try {
       produced = await this.orchestrator.runTurn(company, history, content, filePrelude, {
@@ -347,47 +348,6 @@ export class AiChatService {
     });
 
     return createdRows;
-  }
-
-  /**
-   * Deterministic extraction happens HERE — eagerly, before the model
-   * turn starts, never as something the model triggers itself. Each
-   * file becomes a synthesized assistant-tool-call + tool-result pair
-   * (as `extract_invoice_facts`) so it renders through the EXACT SAME
-   * trace UI a model-initiated tool call would, with zero new frontend
-   * code — see AssistantPage.tsx's generic ToolResultTrace. A file this
-   * app can't parse (wrong type, corrupt) becomes a `{ error }` result
-   * for that one file, same non-blocking pattern as every other tool
-   * failure — it never aborts the whole message.
-   */
-  private async extractFilePrelude(files: Express.Multer.File[]): Promise<OrchestratedMessage[]> {
-    const prelude: OrchestratedMessage[] = [];
-    for (const file of files) {
-      const callId = `extract-${randomUUID()}`;
-      prelude.push({
-        role: 'assistant',
-        content: '',
-        toolCalls: [
-          { id: callId, name: 'extract_invoice_facts', arguments: { fileName: file.originalname } },
-        ],
-      });
-      let resultContent: string;
-      try {
-        const facts = await this.invoiceExtraction.extract(file);
-        resultContent = JSON.stringify(facts);
-      } catch (err) {
-        resultContent = JSON.stringify({
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-      prelude.push({
-        role: 'tool',
-        content: resultContent,
-        toolName: 'extract_invoice_facts',
-        toolCallId: callId,
-      });
-    }
-    return prelude;
   }
 }
 

@@ -33,6 +33,7 @@ function makePrismaMock() {
         ...(args.data as object),
       })),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn((args: { where: { id: string }; data: unknown }) => ({
         id: args.where.id,
         ...(args.data as object),
@@ -210,6 +211,27 @@ describe('EntriesService', () => {
     await expect(service.update(company, 'ecriture-1', baseDto())).rejects.toThrow(
       ConflictException,
     );
+  });
+
+  it('findOne() reshapes _count.documents into a flat documentCount, never leaking _count', async () => {
+    prisma.ecriture.findFirst.mockResolvedValueOnce({
+      id: 'ecriture-1',
+      validatedAt: null,
+      lignes: [],
+      _count: { documents: 2 },
+    });
+    const ecriture = await service.findOne(company, 'ecriture-1');
+    expect(ecriture.documentCount).toBe(2);
+    expect(ecriture).not.toHaveProperty('_count');
+  });
+
+  it('findAll() reshapes documentCount for every entry independently', async () => {
+    prisma.ecriture.findMany.mockResolvedValueOnce([
+      { id: 'ecriture-1', lignes: [], _count: { documents: 0 } },
+      { id: 'ecriture-2', lignes: [], _count: { documents: 3 } },
+    ]);
+    const ecritures = await service.findAll(company);
+    expect(ecritures.map((e) => e.documentCount)).toEqual([0, 3]);
   });
 
   it('reversal swaps debit and credit on every line', async () => {

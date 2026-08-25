@@ -39,6 +39,9 @@ import { CloudCredentialsModule } from './modules/cloud-credentials/cloud-creden
 import { CloudCredentialsController } from './modules/cloud-credentials/cloud-credentials.controller';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { DashboardController } from './modules/dashboard/dashboard.controller';
+import { DocumentsModule } from './modules/documents/documents.module';
+import { EcritureDocumentsController } from './modules/documents/ecriture-documents.controller';
+import { DocumentExtractionController } from './modules/documents/document-extraction.controller';
 import { DevModule } from './modules/dev/dev.module';
 import { DevController } from './modules/dev/dev.controller';
 
@@ -71,6 +74,7 @@ const isProduction = process.env.NODE_ENV === 'production';
     AiChatModule,
     CloudCredentialsModule,
     DashboardModule,
+    DocumentsModule,
     ...(isProduction ? [] : [DevModule]),
   ],
 })
@@ -111,6 +115,8 @@ export class AppModule implements NestModule {
         AiChatController,
         CloudCredentialsController,
         DashboardController,
+        EcritureDocumentsController,
+        DocumentExtractionController,
         ...(isProduction ? [] : [DevController]),
       );
   }

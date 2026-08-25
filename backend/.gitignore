@@ -3,6 +3,10 @@
 /node_modules
 /coverage
 
+# attached écriture documents (local disk storage — see CLAUDE.md
+# "Supporting-document attachments" and DOCUMENT_STORAGE_DIR in .env.example)
+/storage
+
 # env
 .env
 .env.local
