@@ -10,6 +10,7 @@ import {
   IconGrid,
   IconHome,
   IconLedger,
+  IconPaperclip,
   IconPercent,
   IconScale,
   IconSettings,
@@ -44,6 +45,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: 'Comptabilité',
     items: [
       { to: '/ecritures', label: 'Écritures', Icon: IconGrid },
+      { to: '/factures/lot', label: 'Revue de factures', Icon: IconPaperclip },
       { to: '/grand-livre', label: 'Grand livre', Icon: IconLedger },
       { to: '/rapprochement-bancaire', label: 'Rapprochement bancaire', Icon: IconWallet },
       { to: '/tiers', label: 'Tiers', Icon: IconUsers },

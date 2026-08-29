@@ -5,6 +5,7 @@ import { PreferencesProvider } from './context/PreferencesProvider';
 import { usePreferences } from './context/preferencesStore';
 import { DashboardPage } from './pages/DashboardPage';
 import { JournalEntriesPage } from './pages/JournalEntriesPage';
+import { BatchInvoiceQueuePage } from './pages/BatchInvoiceQueuePage';
 import { FiscalYearsPage } from './pages/FiscalYearsPage';
 import { CompanyProfilePage } from './pages/CompanyProfilePage';
 import { AccountsJournalsPage } from './pages/AccountsJournalsPage';
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="/" element={<HomeRedirect />} />
             <Route path="/tableau-de-bord" element={<DashboardPage />} />
             <Route path="/ecritures" element={<JournalEntriesPage />} />
+            <Route path="/factures/lot" element={<BatchInvoiceQueuePage />} />
             <Route path="/exercices" element={<FiscalYearsPage />} />
             <Route path="/tiers" element={<TiersPage />} />
             <Route path="/comptes" element={<AccountsJournalsPage />} />

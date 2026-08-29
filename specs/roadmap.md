@@ -53,7 +53,7 @@ reordered):
 
 1. **Bank reconciliation — Layer 1a (local statement import + matching engine)** — SHIPPED 2026-08-25
 2. **Bank reconciliation — Layer 1b (live aggregator connectivity)** — SHIPPED 2026-08-29, with a pre-ship blocker (real Bridge sandbox verification still needed)
-3. **Batch invoice review queue** — no technical dependency on 1/2; reuses document attachment + `InvoiceExtractionService` + `propose_ecriture`, all already shipped. Could run in parallel with or before bank-rec if priorities shift; sequenced here per discussion, not because it's blocked.
+3. **Batch invoice review queue** — SHIPPED 2026-08-29. No technical dependency on 1/2; reused document attachment + `InvoiceExtractionService` + `propose_ecriture`'s validation gate, all already shipped — no new backend code needed at all.
 4. **Traceability drill-down** — no dependency on 1–3; already has its own detailed spec (folded in below); benefits from document attachments (shipped) for the "→ justificatif" extension.
 5. **Anomaly surfacing** — benefits from bank-rec (lettrage/matching data) and drill-down (to explain *why* something's flagged) existing first, though not hard-blocked by either.
 6. **Recurring entries / templates** — no dependency on anything above. Genuinely independent; flagged as the lowest-complexity gated item on this list, worth considering as a filler/quick-win if a later item stalls on a decision.
@@ -236,15 +236,38 @@ performed. OFX/QIF/CSV remain unbuilt.
 
 ---
 
-## 2. Batch invoice review queue
+## 2. Batch invoice review queue — SHIPPED (2026-08-29)
+
+Built and verified live: `frontend/src/pages/BatchInvoiceQueuePage.tsx`
+(route `/factures/lot`) + one small, additive `initialFile?: File` prop
+on `EcritureEditor.tsx`. **No new backend code was needed** — confirmed
+by research before design, then confirmed live: `/documents/extract`
+and `/documents/suggest-accounts` already operate one-file-per-call,
+which is exactly the shape that sidesteps the known multi-invoice
+chaining reliability gap (see CLAUDE.md "AI chatbot Phase 2") — a queue
+calling them independently per invoice never assembles the multi-file
+prelude that gap depends on. Both decisions below resolved to the
+recommended option: local-first baseline with cloud suggestion optional
+per item; client-side-only queue state, nothing persisted until each
+item's own confirm click. Live verification (two real Phase-2 fixture
+invoices, real browser, real backend) confirmed independent per-item
+extraction with zero cross-contamination, a real draft écriture created
+with its file attached on confirm, and a clean "Ignorée" skip path with
+no écriture created — see CLAUDE.md "Batch invoice review queue" for
+the full design and verification record.
 
 **Classification: GATED at the seam.** The queue UI itself (a stack of
 draft proposals to page through) is presentation-shaped, but every
 individual draft it produces must still pass through the exact same
-`propose_ecriture` confirmation gate a single manual proposal does — it
+`propose_ecriture`-equivalent confirmation gate (`EntryValidationService`,
+via the ordinary `POST /entries`) a single manual proposal does — it
 must **not** auto-post, no matter how "obviously correct" a batch
 result looks. That seam is the gated part; nothing about batching
-changes it.
+changed it. No bulk-confirm was built this pass, deliberately — see
+CLAUDE.md for why the bank-rec Layer 1a precedent doesn't map cleanly
+here.
+
+### Original scope note, below
 
 - **What it is**: drop a folder of invoices in → get back a reviewable
   stack of proposed drafts (one per invoice), each still requiring

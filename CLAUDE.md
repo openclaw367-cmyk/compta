@@ -2928,6 +2928,115 @@ written.
   updated to mark this shipped-with-caveats, matching Layer 1a's own
   "shipped, pre-ship blocker still open" framing.
 
+## Batch invoice review queue
+
+`frontend/src/pages/BatchInvoiceQueuePage.tsx` (route `/factures/lot`,
+as of 2026-08-29) lets a bookkeeper drop several invoices at once and
+get back one reviewable draft per invoice, each still requiring its own
+individual confirmation. Per `specs/roadmap.md` §2 ("GATED at the
+seam"), this was designed and approved via plan mode before any code
+was written — and confirmed, by research before design, to be an
+assembly of already-shipped pieces rather than new domain logic.
+
+- **The headline finding this design pass confirmed, not assumed: no
+  new backend code was needed at all.** `POST /documents/extract` and
+  `POST /documents/suggest-accounts` already operate on exactly one file
+  per call — `DocumentSuggestionService.suggest()` already builds a
+  single-file `[file]` prelude, never `files[]`. That is precisely the
+  shape that sidesteps this app's own documented multi-invoice chaining
+  reliability gap (see "AI chatbot Phase 2" above: the model mishandles
+  account resolution when handed *multiple files in one chat turn*). A
+  queue that calls `extract()`/`suggest()` independently per invoice
+  never assembles a multi-file prelude, so it never reaches that failure
+  mode — by construction, confirmed live (below), not asserted from
+  reading the code alone.
+- **Two decisions, both resolved via `AskUserQuestion` before design,
+  both to the recommended option**: (1) every item always gets the free,
+  deterministic `InvoiceExtractionService` prefill with no cloud
+  dependency; the "Comptable IA" cloud suggestion stays optional and
+  per-item — the exact separation `EcritureEditor.tsx` already had, not
+  a new pattern; (2) **client-side only** — files stay as in-memory
+  `File` objects in the page's own React state, and nothing is
+  persisted server-side until each item's own confirm click creates a
+  real écriture. Closing the tab mid-review loses only genuinely
+  unconfirmed items — same "propose, never persist" discipline as every
+  other proposal flow in this app (`propose_ecriture`, bank-rec's match
+  proposals). This is also a structural fit, not just a style choice:
+  `EcritureDocument.ecritureId` is a required, non-nullable FK — there
+  is nowhere to durably stage an "uploaded but not yet an écriture"
+  invoice without a real schema change, which stayed out of scope.
+- **The one frontend code change to an already-shipped component**:
+  `EcritureEditor.tsx` gained a small, additive `initialFile?: File`
+  prop. On mount, if present, it runs the EXACT SAME
+  `handleFileSelected()` path a manual "Joindre un document" pick
+  already triggers — not a second code path. Every existing caller
+  (`JournalEntriesPage`'s own "+ Nouvelle écriture" flow) simply doesn't
+  pass it, confirmed unaffected by `tsc`/`eslint`/`vite build` staying
+  clean and by the full backend suite (560 tests — untouched, since this
+  pass changed no backend file) staying green.
+- **List+detail layout, one `EcritureEditor` mounted at a time, keyed
+  per item** (`key={item.id}`, the same idiom `JournalEntriesPage.tsx`
+  already uses for its own new/edit editor) — a left rail shows every
+  queued file with a status badge (`En attente`/`Enregistrée`/`Ignorée`),
+  the main panel renders the currently-selected item's full editor.
+  **Extraction is lazy, not eager-on-drop, deliberately**: since only
+  the selected item is mounted, a large drop never fires N simultaneous
+  extraction calls — the rail therefore shows filename + status only,
+  never a preview of amounts (those aren't known until an item is
+  actually opened). Re-selecting an already-opened-but-unsaved item
+  resets its editor state (a fresh mount re-runs extraction from
+  scratch) — a stated simplification, not a bug, consistent with
+  "nothing durable until that item's own confirm."
+- **No bulk/automatic confirmation this pass, by design, not by
+  omission.** Every item requires its own explicit "Enregistrer" click
+  — the same button `EcritureEditor` already has. Bank-rec Layer 1a's
+  own "Confirmer tout" bulk action for its HIGH-confidence tier was
+  considered as a precedent and doesn't map cleanly here: an item is
+  only safely bulk-confirmable if a cloud suggestion was ALSO fetched,
+  applied, and warning-free, and cloud suggestion is opt-in per decision
+  1 above — inventing a new "safe to bulk-confirm" heuristic wasn't
+  warranted, and the roadmap's own wording for this specific feature
+  reads more cautious ("must not auto-post, no matter how 'obviously
+  correct' a batch result looks"). Worth reconsidering later if real
+  usage shows the per-item click is the actual bottleneck.
+- **Journal/fiscal-year defaults**: `journalId` fixed to the company's
+  `ACHATS`-type journal (this is an invoice-review queue, not a general
+  bulk-entry tool — a scoping note, not a limitation to work around).
+  `fiscalYearId` reuses the app-wide selection from `useAppContext()`
+  (`AppContextValue.fiscalYearId`, the same TopBar-driven context every
+  other écriture-creation surface already defaults to) — simpler and
+  more consistent than the per-item invoice-date-matching originally
+  sketched in the design pass; discovered mid-build as the better,
+  already-existing reuse point rather than inventing new matching logic
+  no other écriture-creation flow in this app has.
+- **Accepted file types match `EcritureEditor`'s own existing attach
+  input exactly** (`.pdf,.jpg,.jpeg,.png`) — not widened to `.xlsx`/
+  `.xls` even though `InvoiceExtractionService` can parse those too,
+  since the already-shipped single-item flow doesn't offer them either;
+  staying consistent with that reviewed set rather than independently
+  deciding to widen it here.
+- **Verified live, real browser, real backend, no substitutes.**
+  Uploaded the two real Phase-2 fixture invoices
+  (`backend/src/modules/ai-chat/__fixtures__/test-invoice.pdf` and
+  `test-invoice-laptop.pdf`) into the running app: both queued, the
+  first auto-selected and its own independent extraction rendered
+  correctly (`N° facture INV-2026-0042`, `15/03/2026`, `TTC 120,00 € ·
+  HT 100,00 € · TVA 20,00 €`); filled and confirmed it (607000/512000,
+  120,00 €), confirmed via a direct API read that a real, unvalidated
+  draft écriture was created with `pieceRef: "INV-2026-0042"` (from
+  clicking the extracted field's own "Insérer" button) and the original
+  PDF genuinely attached as an `EcritureDocument`; the rail correctly
+  marked it "Enregistrée" and auto-advanced to the second item, whose
+  own independent extraction showed completely different values (`N°
+  facture INV-2026-0077`, `10/04/2026`, `TTC 1 200,00 € · HT 1 000,00 €
+  · TVA 200,00 €`) — zero cross-contamination between items, the actual
+  proof the multi-invoice chaining gap doesn't apply here; clicked
+  "Annuler" on the second item, confirmed it was marked "Ignorée" with
+  no écriture created, and confirmed the empty-state message renders
+  once nothing is left `En attente`. Test écriture deleted afterward
+  (a draft — ordinary `DELETE /entries/:id`, cascading its attached
+  document), confirmed gone via a follow-up read.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't

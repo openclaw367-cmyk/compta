@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import type {
@@ -146,6 +146,7 @@ export function EcritureEditor({
   fiscalYearId,
   accounts,
   existing,
+  initialFile,
   onSaved,
   onCancel,
 }: {
@@ -153,6 +154,18 @@ export function EcritureEditor({
   fiscalYearId: string;
   accounts: Account[];
   existing: Ecriture | null;
+  /**
+   * Pre-seeds the attach-at-creation flow with a file the CALLER already
+   * has (e.g. BatchInvoiceQueuePage.tsx, one file per queued invoice) —
+   * additive only, small and optional. Runs the EXACT SAME
+   * handleFileSelected() path a manual "Joindre un document" pick
+   * already triggers (see the effect below), not a second code path.
+   * Omitted by every other caller (e.g. JournalEntriesPage's own "+
+   * Nouvelle écriture" flow) — zero behavior change there. Ignored when
+   * `existing` is set, same "new entries only" scoping the rest of this
+   * attach flow already has.
+   */
+  initialFile?: File;
   onSaved: (warnings: string[]) => void;
   onCancel: () => void;
 }) {
@@ -299,6 +312,18 @@ export function EcritureEditor({
       // save; there's just nothing to prefill from.
     }
   }
+
+  // initialFile runs through the EXACT SAME handleFileSelected() path a
+  // manual "Joindre un document" pick already triggers — see this prop's
+  // own doc comment. Fires once per mounted instance (BatchInvoiceQueuePage
+  // mounts a fresh EcritureEditor per queued file, so "once per mount" is
+  // "once per file," not a re-run on every render).
+  useEffect(() => {
+    if (initialFile && !existing) {
+      void handleFileSelected(initialFile);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFile]);
 
   async function handleSuggestAccounts(provider: CloudProvider) {
     if (!attachedFile) return;
