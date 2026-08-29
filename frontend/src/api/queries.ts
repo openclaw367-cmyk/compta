@@ -4,6 +4,7 @@ import type {
   Account,
   AccountLedgerResponse,
   BankAccount,
+  BankAggregatorLinkSummary,
   BankStatementImport,
   BankStatementLine,
   Ca3Declaration,
@@ -953,5 +954,64 @@ export function useCreateEcritureFromStatementLine(bankAccountId: string) {
         dto,
       ),
     onSuccess: () => invalidateReconciliation(queryClient, bankAccountId),
+  });
+}
+
+/**
+ * Bank reconciliation — Layer 1b, live aggregator connectivity. See
+ * CLAUDE.md "Bank reconciliation — Layer 1b". `useBankAggregatorLinks()`
+ * is company-wide (a small list, one row per linked `BankAccount`) so
+ * every consumer can key off `bankAccountId` client-side, same shape as
+ * `useCloudCredentials()`. `syncNow` and `revoke` invalidate the same
+ * reconciliation queries a manual statement import already invalidates
+ * — a sync/revoke can change what's UNMATCHED/CONFIRMED exactly like a
+ * manual import can.
+ */
+export function useBankAggregatorLinks() {
+  return useQuery({
+    queryKey: ['bank-aggregator-links'],
+    queryFn: () => api.get<BankAggregatorLinkSummary[]>('/bank-aggregator/links'),
+  });
+}
+
+export function useCreateConnectSession(bankAccountId: string) {
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ connectUrl: string }>(`/bank-aggregator/links/${bankAccountId}/connect-session`, {}),
+  });
+}
+
+export function useConfirmLink(bankAccountId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (callbackPayload: Record<string, unknown>) =>
+      api.post<BankAggregatorLinkSummary>(`/bank-aggregator/links/${bankAccountId}/confirm`, {
+        callbackPayload,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['bank-aggregator-links'] });
+    },
+  });
+}
+
+export function useSyncNow(bankAccountId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ importedLines: number }>(`/bank-aggregator/links/${bankAccountId}/sync`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['bank-aggregator-links'] });
+      invalidateReconciliation(queryClient, bankAccountId);
+    },
+  });
+}
+
+export function useRevokeLink(bankAccountId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete<void>(`/bank-aggregator/links/${bankAccountId}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['bank-aggregator-links'] });
+    },
   });
 }

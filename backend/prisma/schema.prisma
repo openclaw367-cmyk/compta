@@ -150,6 +150,7 @@ model Company {
   bankStatementImports  BankStatementImport[]
   bankStatementLines    BankStatementLine[]
   lettrageAuditLogs     LettrageAuditLog[]
+  bankAggregatorLinks   BankAggregatorLink[]
 }
 
 /// Exercice comptable. Ecritures are validated (locked) relative to a
@@ -650,9 +651,81 @@ model BankAccount {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  imports BankStatementImport[]
-  lines   BankStatementLine[]
+  imports        BankStatementImport[]
+  lines          BankStatementLine[]
+  aggregatorLink BankAggregatorLink?
 
+  @@index([companyId])
+}
+
+/// Which live bank-aggregator this app talks to — see CLAUDE.md "Bank
+/// reconciliation — Layer 1b". Bridge only for v1; the enum exists
+/// (rather than a bare string) so a second provider (e.g. Powens) is a
+/// new case, not a schema change, matching CloudModelProvider's own
+/// growth pattern.
+enum BankAggregatorProvider {
+  BRIDGE
+}
+
+/// ACTIVE is the only state new syncs run against. REVOKED means
+/// BankAggregatorPort.revoke() has already been called against the
+/// provider (see bank-aggregator-link.service.ts) — the row is kept,
+/// not deleted, as a historical record that a live link once existed
+/// here, same "don't delete, mark" instinct as BankStatementLineStatus.
+/// ERROR is set when a sync call fails in a way that likely means the
+/// link itself needs re-authorizing (e.g. the bank revoked consent on
+/// its own side), distinct from an ordinary transient network error.
+enum BankAggregatorLinkStatus {
+  ACTIVE
+  REVOKED
+  ERROR
+}
+
+/// A live, provider-managed connection to one real bank account,
+/// replacing manual CAMT.053 upload as this BankAccount's statement
+/// source — see CLAUDE.md "Bank reconciliation — Layer 1b". Deliberately
+/// keyed to an existing BankAccount (1a), not a new parallel "account"
+/// concept: a live link only changes HOW that account's
+/// BankStatementLine rows arrive (via BankAggregatorLinkService.syncNow(),
+/// which still calls the same BankStatementImportService persistence
+/// path 1a's manual upload already uses), never what happens once they
+/// do — the matching engine and review UI are completely unaware this
+/// model exists.
+///
+/// `encryptedAccessToken` is ciphertext (AES-256-GCM, via the SAME
+/// CredentialEncryptionService/CLOUD_CREDENTIAL_ENCRYPTION_KEY the cloud
+/// AI tier's CloudModelCredential already uses — reused verbatim, not a
+/// parallel encryption scheme, per this feature's own design pass). This
+/// is Bridge's own per-connection access token (obtained via its Connect
+/// flow), NOT this deployment's app-level Bridge client_id/client_secret
+/// — those live in backend/.env only, never in this table, since they're
+/// this app's own registered identity with Bridge, shared across every
+/// company, not a per-company secret.
+model BankAggregatorLink {
+  id            String      @id @default(cuid())
+  companyId     String
+  company       Company     @relation(fields: [companyId], references: [id])
+  bankAccountId String      @unique
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id])
+
+  provider             BankAggregatorProvider
+  /// The provider's own id for this bank connection (Bridge calls this
+  /// an "Item").
+  externalItemId       String
+  encryptedAccessToken String
+  /// Never a real API-key-style hint ("sk-...ab12") — a bank connection
+  /// has no key to mask this way. Holds a short, human-meaningful label
+  /// instead (e.g. the linked bank's own name, if the provider returns
+  /// one), purely for display.
+  maskedAccessToken    String
+
+  status       BankAggregatorLinkStatus @default(ACTIVE)
+  lastSyncedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, provider, externalItemId])
   @@index([companyId])
 }
 

@@ -11,10 +11,12 @@ import type { CreateEcritureDto, CreateTiersDto } from '../api/dto';
 import {
   useAccounts,
   useBankAccounts,
+  useBankAggregatorLinks,
   useClearMatch,
   useConfirmMatch,
   useConfirmStatementImport,
   useCreateBankAccount,
+  useCreateConnectSession,
   useCreateEcritureFromStatementLine,
   useCreateTiers,
   useFiscalYears,
@@ -22,7 +24,9 @@ import {
   useJournals,
   usePreviewStatement,
   useReconciliationProposals,
+  useRevokeLink,
   useStatementLines,
+  useSyncNow,
 } from '../api/queries';
 import { ApiError } from '../api/client';
 import { formatMoneyFr, isNegativeMoney } from '../lib/money';
@@ -72,6 +76,7 @@ export function BankReconciliationPage() {
 
       {selected && (
         <>
+          <AggregatorSection bankAccount={selected} />
           <StatementImportSection bankAccount={selected} />
           <ReconciliationReview bankAccount={selected} />
         </>
@@ -198,6 +203,230 @@ function BankAccountPicker({
           {error && <span className="text-[12px] text-negative">{error}</span>}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Live bank-aggregator connectivity (Layer 1b — see CLAUDE.md "Bank
+ * reconciliation — Layer 1b"). Deliberately does NOT retire manual
+ * CAMT.053 import (StatementImportSection, below) — a BankAccount can
+ * have a manual-only history, a live link, or both.
+ *
+ * The "confirm" half of the Connect flow is honestly NOT wired here:
+ * Bridge's real callback mechanism (redirect vs. postMessage) is an
+ * unconfirmed placeholder in the backend adapter (see
+ * `bridge-aggregator.adapter.ts`'s own doc comment) — faking a confirm
+ * button with a made-up payload shape would silently create a wrong
+ * link rather than honestly show "not yet wired," so this only opens
+ * the Connect session; sync/revoke are fully real and wired, since they
+ * don't depend on that unconfirmed shape.
+ */
+function AggregatorSection({ bankAccount }: { bankAccount: BankAccount }) {
+  const linksQuery = useBankAggregatorLinks();
+  const [showConsent, setShowConsent] = useState(false);
+  const syncNow = useSyncNow(bankAccount.id);
+  const revokeLink = useRevokeLink(bankAccount.id);
+  const [error, setError] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+
+  const link = (linksQuery.data ?? []).find((l) => l.bankAccountId === bankAccount.id) ?? null;
+
+  async function handleSync() {
+    setError(null);
+    setSyncResult(null);
+    try {
+      const result = await syncNow.mutateAsync();
+      setSyncResult(
+        result.importedLines > 0
+          ? `${result.importedLines} nouvelle(s) ligne(s) importée(s).`
+          : 'Aucune nouvelle transaction.',
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.details.join(' ') : 'La synchronisation a échoué.');
+    }
+  }
+
+  async function handleRevoke() {
+    setError(null);
+    try {
+      await revokeLink.mutateAsync();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.details.join(' ') : 'La déconnexion a échoué.');
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-surface p-4 shadow-card">
+      <h2 className="text-[14px] font-semibold text-ink">Connexion bancaire en direct</h2>
+      {link ? (
+        <div className="mt-2.5 flex flex-wrap items-center gap-3 text-[12.5px]">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 font-medium text-accent">
+            🔗 Bridge
+          </span>
+          <span className="text-ink-muted">{link.maskedAccessToken}</span>
+          <span className="text-ink-faint">
+            {link.lastSyncedAt
+              ? `Dernière synchro : ${formatDate(link.lastSyncedAt)}`
+              : 'Jamais synchronisé'}
+          </span>
+          <button
+            type="button"
+            disabled={syncNow.isPending || link.status !== 'ACTIVE'}
+            onClick={() => void handleSync()}
+            className="rounded-md border border-border px-3 py-1.5 text-[12.5px] font-medium text-ink-muted hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {syncNow.isPending ? 'Synchronisation…' : 'Synchroniser maintenant'}
+          </button>
+          <button
+            type="button"
+            disabled={revokeLink.isPending}
+            onClick={() => void handleRevoke()}
+            className="rounded-md px-2.5 py-1.5 text-[12.5px] font-medium text-ink-faint hover:bg-bg hover:text-negative disabled:opacity-50"
+          >
+            Déconnecter
+          </button>
+        </div>
+      ) : (
+        <div className="mt-2.5">
+          <p className="text-[12.5px] text-ink-muted">
+            Synchronise automatiquement les relevés de ce compte via Bridge, au lieu d'un import
+            manuel — voir « Importer un relevé » ci-dessous, qui reste disponible dans tous les cas.
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowConsent(true)}
+            className="mt-2 rounded-md border border-dashed border-border px-3 py-1.5 text-[12.5px] font-medium text-ink-muted hover:border-accent hover:text-accent"
+          >
+            ☁️ Connecter via Bridge…
+          </button>
+        </div>
+      )}
+      {error && <p className="mt-2 text-[12.5px] text-negative">{error}</p>}
+      {syncResult && <p className="mt-2 text-[12.5px] text-positive">{syncResult}</p>}
+
+      {showConsent && (
+        <AggregatorConsentDialog bankAccount={bankAccount} onClose={() => setShowConsent(false)} />
+      )}
+    </div>
+  );
+}
+
+function AggregatorConsentDialog({
+  bankAccount,
+  onClose,
+}: {
+  bankAccount: BankAccount;
+  onClose: () => void;
+}) {
+  const createSession = useCreateConnectSession(bankAccount.id);
+  const [checked, setChecked] = useState(false);
+  const [step, setStep] = useState<'consent' | 'connect'>('consent');
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleConnect() {
+    setError(null);
+    try {
+      const { connectUrl } = await createSession.mutateAsync();
+      window.open(connectUrl, '_blank', 'noopener,noreferrer');
+      setStep('connect');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.details.join(' ') : 'La connexion a échoué.');
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      role="presentation"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bridge-consent-title"
+        className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-lg border border-border bg-surface p-5 shadow-elevated"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {step === 'consent' ? (
+          <>
+            <h2 id="bridge-consent-title" className="text-[15px] font-semibold text-ink">
+              Connecter « {bankAccount.label} » via Bridge ?
+            </h2>
+            <div className="mt-3 flex flex-col gap-3 text-[12.5px] leading-relaxed text-ink-muted">
+              <p>
+                En vous connectant, vous autoriserez Bridge (agrégateur bancaire agréé DSP2/ACPR) à
+                accéder en lecture seule aux relevés de ce compte auprès de votre banque, puis à les
+                transmettre à cette application pour alimenter le rapprochement bancaire — exactement
+                les mêmes données qu'un import manuel de relevé, mais synchronisées automatiquement.
+                Cette application ne peut jamais initier de virement ni modifier votre compte.
+              </p>
+              <p className="italic text-warning">
+                ⚠️ Contrairement au volet « assistant IA cloud », les conditions exactes de résidence
+                des données et la politique de confidentialité de Bridge n'ont pas été vérifiées de
+                façon indépendante dans cette version — consultez sa politique de confidentialité
+                avant d'activer.
+              </p>
+            </div>
+            <a
+              href="https://www.bridgeapi.io"
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-block text-[12px] text-accent hover:text-accent-hover"
+            >
+              Site de Bridge ↗
+            </a>
+            <label className="mt-4 flex items-start gap-2 rounded-md bg-warning-soft p-2.5 text-[12.5px] text-warning">
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={(e) => setChecked(e.target.checked)}
+                className="mt-0.5 shrink-0"
+              />
+              <span className="italic">
+                J'ai compris que les relevés de ce compte seront transmis à Bridge puis à cette
+                application, et j'accepte de me connecter.
+              </span>
+            </label>
+            {error && <div className="mt-2 text-[12px] text-negative">{error}</div>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md border border-border px-3.5 py-2 text-[12.5px] text-ink-muted hover:bg-bg"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={!checked || createSession.isPending}
+                onClick={() => void handleConnect()}
+                className="rounded-md bg-accent px-3.5 py-2 text-[12.5px] font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
+              >
+                {createSession.isPending ? 'Ouverture…' : 'Se connecter à ma banque via Bridge'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2 className="text-[15px] font-semibold text-ink">Connexion en cours</h2>
+            <p className="mt-2 text-[12.5px] leading-relaxed text-ink-muted">
+              Terminez la connexion à votre banque dans l'onglet qui vient de s'ouvrir. Cette étape
+              n'est pas encore automatiquement finalisée dans cette version — voir CLAUDE.md « Bank
+              reconciliation — Layer 1b » pour l'état exact de cette limitation.
+            </p>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md border border-border px-3.5 py-2 text-[12.5px] text-ink-muted hover:bg-bg"
+              >
+                Fermer
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

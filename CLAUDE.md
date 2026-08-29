@@ -274,8 +274,8 @@ enforced by code review:
    row, not just `POST /entries/:id/reverse` directly. Draft (unvalidated)
    entries, e.g. freshly imported from Excel, may still be edited before
    validation. **One deliberate, narrow exception**:
-   `EntriesService.setLettrage()` — see "Bank reconciliation" below. It
-   exists precisely because this rule is otherwise absolute; don't widen
+   `EntriesService.setLettrage()` — see "Bank reconciliation — Layer 1a"
+   below. It exists precisely because this rule is otherwise absolute; don't widen
    it or treat it as precedent for any other field.
 4. **One posting side per line.** A journal entry line has either a debit
    or a credit amount, never both, and the amount is always positive.
@@ -2732,6 +2732,162 @@ code was written.
   bank-aggregator connectivity — Plaid/Bridge/Budget Insight-style),
   and the pre-ship real-CAMT.053-export verification flagged above. See
   `specs/roadmap.md` for how this fits the rest of the roadmap.
+
+## Bank reconciliation — Layer 1b (live aggregator connectivity)
+
+`src/modules/bank-aggregator/` (as of 2026-08-29) replaces manual
+CAMT.053 upload with a live, provider-synced statement source — see
+`specs/roadmap.md`'s own "Layer 1b" section for the design pass this
+was built from (two rounds of research, four `AskUserQuestion`
+decisions, all resolved to the recommended option). Built the same
+review-first-then-build discipline as every other GATED feature: a
+design was reviewed and approved via plan mode before any code was
+written.
+
+- **Four decisions, all confirmed before design**: **polling, not
+  webhooks**, for v1 (Bridge's own recommended pattern needs Bridge's
+  servers to reach this app's backend, which has no public deployment
+  story today — polling is user-triggered only, no scheduler);
+  **Monaco-jurisdiction companies explicitly deferred**
+  (`NotImplementedException`, same discipline as every other
+  unverified Monaco rule — neither Bridge's nor Powens' Monaco
+  coverage could be confirmed, and Monaco's own legal relationship to
+  PSD2 is itself unsettled in what was found); **Bridge as the one
+  reference aggregator** this pass builds a concrete adapter for
+  (public docs gave a real, citable shape — Bearer auth, a
+  `Bridge-Version` header, an Item→Account→Transaction hierarchy);
+  **credential encryption reuses `CredentialEncryptionService`
+  verbatim** (same AES-256-GCM, same accepted threat model already
+  documented for the cloud AI tier — "defends against a leaked DB
+  backup... not full machine access").
+- **`BankAggregatorPort`** (`bank-aggregator.port.ts`) mirrors
+  `ChatModelPort`'s own role exactly: one interface
+  (`createConnectSession`/`confirmLink`/`fetchTransactions`/`revoke`),
+  `BridgeAggregatorAdapter` the only implementation this pass ships,
+  `createBankAggregatorAdapter()` (`bank-aggregator-registry.ts`) the
+  one place that switches on `BankAggregatorProvider` — adding Powens
+  later means a new adapter class plus one case there, never a change
+  to `BankAggregatorLinkService`. `fetchTransactions()` deliberately
+  returns the exact same `ParsedStatement` shape
+  `camt053-parser.service.ts` already exports — the seam that makes "a
+  live sync feeds the same pipeline a CAMT.053 upload does" literally
+  true, not aspirational: both land in the same `BankStatementLine`
+  rows via `BankStatementImportService.persistParsedStatement()` (new
+  — extracted from `confirmImport()`'s own persistence body, zero
+  duplicated logic, dedup free either way since both sources populate
+  the same `bankReference` field `assertNoDuplicates()` already keys
+  off), so the matching engine and review UI needed ZERO changes.
+- **⚠️ `BridgeAggregatorAdapter` is a PAPER DESIGN, not verified
+  against the real Bridge API — this is a pre-ship blocker, stated up
+  front, not discovered later.** Built from `docs.bridgeapi.io`'s
+  public pages only; every endpoint path, request/response field name,
+  and the Connect-session/token-exchange flow are placeholders,
+  flagged explicitly in the adapter's own doc comment and inline
+  `PLACEHOLDER` comments at each call site. Getting real Bridge sandbox
+  credentials (an actual account/contract with Bridge) is required
+  before this reaches a real user's real bank connection — same
+  "verified against a real sample, not just a hand-built one" bar this
+  project already held for `InvoiceExtractionService`'s PDF fixtures,
+  the FEC export's Test Compta Demat run, and Layer 1a's own
+  CAMT.053-fixture caveat above.
+- **Money-safety boundary, matching the CAMT.053 `parseTagValue:false`
+  lesson exactly**: Bridge's amount type (string vs. native JSON
+  number) is unconfirmed, so `BridgeAggregatorAdapter` handles both —
+  `toMoneyApiString()` converts via `Money.fromString()` or the
+  explicit `Money.fromNumber()` escape hatch at the exact boundary
+  where the parsed JSON response is first touched, and throws rather
+  than guessing for any other type. Nothing past that boundary ever
+  touches a raw parsed number again.
+- **`BankAggregatorLink`** (new Prisma model) is keyed to an existing
+  `BankAccount` (1a), not a new parallel "account" concept — a live
+  link only changes HOW that account's statement lines arrive.
+  `encryptedAccessToken` is the provider's own per-connection token
+  (obtained via its Connect flow), stored encrypted via
+  `CredentialEncryptionService` — explicitly NOT the same thing as
+  `BRIDGE_CLIENT_ID`/`BRIDGE_CLIENT_SECRET` (`backend/.env` only, this
+  deployment's own registered identity with Bridge, shared by every
+  company, never stored in this table). Reusing
+  `CredentialEncryptionService` means both are encrypted under the
+  same `CLOUD_CREDENTIAL_ENCRYPTION_KEY` — functionally fine (same
+  threat model either way), but that env var name is now a slight
+  misnomer for what it protects; a worthwhile rename someday, not done
+  this pass so as not to touch the already-shipped cloud-AI-tier config
+  surface unasked.
+- **`revoke()` MUST call the provider's own revoke endpoint BEFORE
+  deleting the local row** — never just a local delete, which would
+  leave the provider still holding a live connection (a real privacy
+  gap, not just incomplete cleanup). If the provider call fails, the
+  row is marked `ERROR` rather than silently kept `ACTIVE` or deleted
+  anyway. Verified live: the ordering (`port.revoke()` before
+  `prisma.delete()`) is asserted directly in
+  `bank-aggregator-link.service.spec.ts`, and confirmed against the
+  real, DI-substituted-network adapter in this pass's live check (see
+  below).
+- **The one-time Connect handshake needs no public backend endpoint
+  either, not just ongoing sync — a correction made mid-design, not a
+  restatement.** The design pass initially conflated "needs a public
+  endpoint" for both ongoing sync notifications (a true webhook —
+  Bridge's servers calling this backend, genuinely not possible today)
+  and the one-time bank-login handshake (Bridge's hosted Connect widget
+  handing a result back to the user's own browser — the same
+  reachability bar this web app already has for any user to load it at
+  all, not a new one). The exact widget-callback mechanism
+  (postMessage vs. redirect) remains unconfirmed and is NOT wired in
+  the frontend this pass — `AggregatorConsentDialog` opens the Connect
+  session URL in a new tab and stops there, honestly, rather than
+  faking a "confirm" button against a guessed payload shape that would
+  silently create a wrong link.
+- **Frontend built the same day**: `BankReconciliationPage.tsx` gained
+  an `AggregatorSection` per bank account (🔗 Bridge badge + masked
+  token + last-synced date + "Synchroniser maintenant"/"Déconnecter"
+  once linked, else a "☁️ Connecter via Bridge…" button) and
+  `AggregatorConsentDialog` (adapts `AssistantSettingsPage.tsx`'s
+  `ConsentDialog` two-step shape — disclosure+checkbox, then a connect
+  action instead of a key-input, since there's no key to type). The
+  disclosure copy honestly states that Bridge's own residency/DPA
+  facts have NOT been independently verified this pass, unlike the
+  cloud AI tier's own citation-backed `CONSENT_COPY` — a real,
+  documented difference in confidence, not glossed over. Manual
+  CAMT.053 import (`StatementImportSection`) stays fully available
+  regardless — a `BankAccount` can have a manual-only history, a live
+  link, or both.
+- **Verified two ways.** Unit: `bridge-aggregator.adapter.spec.ts` (14
+  tests against hand-built fixture JSON, mirroring the CAMT.053
+  fixture pattern — proves the adapter's own parsing/conversion logic
+  is internally consistent, explicitly NOT that it matches Bridge's
+  real behavior), `bank-aggregator-link.service.spec.ts` (11 tests:
+  Monaco jurisdiction throws before any port call, `confirmLink()`
+  encrypts/upserts correctly, `syncNow()` decrypts+fetches
+  since-`lastSyncedAt`+persists+advances the timestamp, `revoke()`'s
+  ordering and its `ERROR`-on-failure path), plus 2 new tests in
+  `bank-statement-import.service.spec.ts` for the extracted
+  `persistParsedStatement()` seam — 559 backend tests passing overall.
+  **Live, with the network layer
+  faked (no real Bridge account exists) — a temporary script, deleted
+  after use**: confirmed the jurisdiction guard live over real HTTP
+  (an MC-jurisdiction company's `POST .../connect-session` returned
+  the exact 501 message, before ever reaching the adapter; the
+  missing-`BRIDGE_CLIENT_ID` guard on an FR company returned a clear
+  500, not a crash); then, with dummy app-level credentials and
+  `global.fetch` intercepted only for `api.bridgeapi.io` calls (letting
+  the REAL `BridgeAggregatorAdapter`/`createBankAggregatorAdapter()`
+  registry run unmodified): `confirmLink()` stored real ciphertext
+  (confirmed via a direct DB read) with the correct provider/status;
+  `syncNow()` reached the real adapter, converted a fixture Bridge
+  response, and persisted it into the exact same `BankStatementLine`
+  table via `persistParsedStatement()`; a real HTTP call to the
+  ALREADY-RUNNING, UNMODIFIED `GET
+  /bank-reconciliation/accounts/:id/proposals` endpoint correctly saw
+  the newly-synced line (`NO_CANDIDATE`, as expected with no matching
+  ledger line) — the "feeds the same pipeline" claim confirmed live,
+  not just by code inspection; `revoke()` reached the adapter's DELETE
+  call before the local row was removed. All test `BankAccount`s and
+  related rows deleted afterward, confirmed via a follow-up `GET
+  /bank-accounts` returning `[]` on both companies used.
+- **Not built this pass**: OFX/QIF/CSV, and — the explicit gate above —
+  verification against a real Bridge sandbox. `specs/roadmap.md`
+  updated to mark this shipped-with-caveats, matching Layer 1a's own
+  "shipped, pre-ship blocker still open" framing.
 
 ## Known scope boundaries
 

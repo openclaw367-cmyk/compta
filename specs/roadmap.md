@@ -52,7 +52,7 @@ item with zero dependencies on a higher one is called out, not silently
 reordered):
 
 1. **Bank reconciliation — Layer 1a (local statement import + matching engine)** — SHIPPED 2026-08-25
-2. **Bank reconciliation — Layer 1b (live aggregator connectivity)** — depends on 1a
+2. **Bank reconciliation — Layer 1b (live aggregator connectivity)** — SHIPPED 2026-08-29, with a pre-ship blocker (real Bridge sandbox verification still needed)
 3. **Batch invoice review queue** — no technical dependency on 1/2; reuses document attachment + `InvoiceExtractionService` + `propose_ecriture`, all already shipped. Could run in parallel with or before bank-rec if priorities shift; sequenced here per discussion, not because it's blocked.
 4. **Traceability drill-down** — no dependency on 1–3; already has its own detailed spec (folded in below); benefits from document attachments (shipped) for the "→ justificatif" extension.
 5. **Anomaly surfacing** — benefits from bank-rec (lettrage/matching data) and drill-down (to explain *why* something's flagged) existing first, though not hard-blocked by either.
@@ -144,7 +144,35 @@ ship checklist, not a someday-nice-to-have. OFX/QIF/CSV and Layer 1b
   multi-user, and explicitly called out by you as the #1 functional gap
   vs. market leaders.
 
-### Layer 1b — live aggregator connectivity (external, build second)
+### Layer 1b — live aggregator connectivity — SHIPPED WITH A PRE-SHIP BLOCKER (2026-08-29)
+
+Built and verified (with the network layer faked — no real Bridge
+account exists): `src/modules/bank-aggregator/` (`BankAggregatorPort`,
+mirroring `ChatModelPort`; `BridgeAggregatorAdapter`, the one adapter
+this pass ships; `BankAggregatorLink`, keyed to an existing
+`BankAccount`) + a small, precise extraction in
+`BankStatementImportService` (`persistParsedStatement()`) so a live
+sync lands in the exact same `BankStatementLine` rows a CAMT.053 upload
+does — the matching engine and review UI needed zero changes, confirmed
+live by calling the already-running, unmodified proposals endpoint
+against a freshly-synced line. All four decisions below resolved to the
+recommended option: polling only (no webhook — this app has no public
+deployment story), Monaco explicitly deferred
+(`NotImplementedException`, confirmed live), Bridge as the one
+reference aggregator, `CredentialEncryptionService` reused verbatim.
+
+**⚠️ PRE-SHIP BLOCKER, same discipline as Layer 1a's own CAMT.053
+caveat.** `BridgeAggregatorAdapter` is a paper design against Bridge's
+public docs only — every endpoint path and request/response shape is a
+placeholder. Real Bridge sandbox credentials (an actual account/contract
+— outside what an agent can do) are required before this reaches a real
+user's real bank connection. See CLAUDE.md "Bank reconciliation — Layer
+1b" for the full design, the honest mid-design correction (the Connect
+handshake itself needs no public backend endpoint, only ongoing sync
+would), and the exact live verification performed. OFX/QIF/CSV remain
+unbuilt.
+
+### Layer 1b (original scope note, below) — live aggregator connectivity (external, build second)
 
 - **What it is**: instead of a manual statement upload, connect
   directly to the bank via an aggregator (Bridge, Powens, or a direct

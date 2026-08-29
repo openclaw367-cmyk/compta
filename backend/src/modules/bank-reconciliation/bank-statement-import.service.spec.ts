@@ -80,4 +80,65 @@ describe('BankStatementImportService', () => {
       expect(bankStatementLineCreateMany).not.toHaveBeenCalled();
     });
   });
+
+  describe("persistParsedStatement (the seam Layer 1b's live sync reuses)", () => {
+    it('persists an already-parsed statement with the given source label, no XML/CAMT.053 involved', async () => {
+      const bankStatementLineCreateMany = jest.fn();
+      (prisma as any).bankStatementLine.createMany = bankStatementLineCreateMany;
+      const parsed = {
+        iban: null,
+        periodStart: '2026-03-01',
+        periodEnd: '2026-03-31',
+        openingBalance: '100.00',
+        closingBalance: '150.00',
+        lines: [
+          {
+            bookingDate: '2026-03-05',
+            valueDate: null,
+            amount: '50.00',
+            label: 'Virement reçu',
+            bankReference: 'bridge-tx-1',
+          },
+        ],
+      };
+      const result = await service.persistParsedStatement(
+        company,
+        'bank-1',
+        'Bridge — synchronisation du 2026-03-31',
+        parsed,
+      );
+      expect(result.fileName).toBe('Bridge — synchronisation du 2026-03-31');
+      expect(bankStatementLineCreateMany).toHaveBeenCalledTimes(1);
+      const data = bankStatementLineCreateMany.mock.calls[0][0].data;
+      expect(data).toHaveLength(1);
+      expect(data[0].bankReference).toBe('bridge-tx-1');
+    });
+
+    it('existingReferences() and assertNoDuplicates() are public, reusable by a caller other than confirmImport()', async () => {
+      prisma.bankStatementLine.findMany.mockResolvedValueOnce([{ bankReference: 'bridge-tx-1' }]);
+      const existing = await service.existingReferences(company, 'bank-1');
+      expect(existing.has('bridge-tx-1')).toBe(true);
+      expect(() =>
+        service.assertNoDuplicates(
+          {
+            iban: null,
+            periodStart: '2026-03-01',
+            periodEnd: '2026-03-31',
+            openingBalance: '0.00',
+            closingBalance: '0.00',
+            lines: [
+              {
+                bookingDate: '2026-03-05',
+                valueDate: null,
+                amount: '10.00',
+                label: 'x',
+                bankReference: 'bridge-tx-1',
+              },
+            ],
+          },
+          existing,
+        ),
+      ).toThrow(ConflictException);
+    });
+  });
 });

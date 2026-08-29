@@ -1131,3 +1131,22 @@ export interface BankStatementLine {
   matchedLigneId: string | null;
   ignoredReason: string | null;
 }
+
+/**
+ * Bank reconciliation — Layer 1b, live aggregator connectivity. See
+ * CLAUDE.md "Bank reconciliation — Layer 1b". Bridge is the only
+ * provider this pass ships — still a paper design against Bridge's
+ * public docs, not yet verified against a real Bridge sandbox.
+ */
+export type BankAggregatorProvider = 'BRIDGE';
+export type BankAggregatorLinkStatus = 'ACTIVE' | 'REVOKED' | 'ERROR';
+
+/** Never carries the real access token — always a masked hint, same discipline as CloudCredentialSummary. */
+export interface BankAggregatorLinkSummary {
+  id: string;
+  bankAccountId: string;
+  provider: BankAggregatorProvider;
+  maskedAccessToken: string;
+  status: BankAggregatorLinkStatus;
+  lastSyncedAt: string | null;
+}

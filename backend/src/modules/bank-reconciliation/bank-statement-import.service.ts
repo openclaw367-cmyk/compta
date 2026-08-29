@@ -55,13 +55,43 @@ export class BankStatementImportService {
     const parsed = this.parser.parse(xml);
     const existingReferences = await this.existingReferences(company, bankAccount.id);
     this.assertNoDuplicates(parsed, existingReferences);
+    return this.persistParsedStatement(company, bankAccount.id, fileName, parsed);
+  }
 
+  /**
+   * The shared persistence step, extracted so a live-aggregator sync
+   * (Layer 1b — see CLAUDE.md "Bank reconciliation — Layer 1b") can land
+   * its own already-parsed `ParsedStatement` in the exact same
+   * `BankStatementImport`/`BankStatementLine` rows a CAMT.053 upload
+   * produces, with zero duplicated persistence logic. `sourceLabel` fills
+   * the same `fileName` column either way — for an aggregator sync this
+   * is a documented, human-readable stand-in (e.g. "Bridge — sync du
+   * 2026-08-29"), never a real uploaded file name, same "a conventional
+   * value, not a guess" discipline as the FEC export's own PieceRef/
+   * PieceDate fallback. Dedup is free either way: whichever source
+   * populates `bankReference` (the bank's own CAMT reference, or
+   * Bridge's own transaction id), `assertNoDuplicates()` already keys off
+   * that one field — no per-source dedup logic needed.
+   *
+   * Callers are responsible for having already called
+   * `assertNoDuplicates()` against a FRESH `existingReferences()` read —
+   * this method does not re-check, so it stays usable inside another
+   * caller's own transaction/guard sequencing (Layer 1b's sync path
+   * checks duplicates the same way `confirmImport()` does, immediately
+   * before calling this).
+   */
+  async persistParsedStatement(
+    company: CompanyContext,
+    bankAccountId: string,
+    sourceLabel: string,
+    parsed: ParsedStatement,
+  ): Promise<BankStatementImport> {
     return this.prisma.$transaction(async (tx) => {
       const statementImport = await tx.bankStatementImport.create({
         data: {
           companyId: company.companyId,
-          bankAccountId: bankAccount.id,
-          fileName,
+          bankAccountId,
+          fileName: sourceLabel,
           periodStart: new Date(parsed.periodStart),
           periodEnd: new Date(parsed.periodEnd),
           openingBalance: parsed.openingBalance,
@@ -72,7 +102,7 @@ export class BankStatementImportService {
         data: parsed.lines.map((line) => ({
           companyId: company.companyId,
           importId: statementImport.id,
-          bankAccountId: bankAccount.id,
+          bankAccountId,
           bookingDate: new Date(line.bookingDate),
           valueDate: line.valueDate ? new Date(line.valueDate) : undefined,
           amount: line.amount,
@@ -94,10 +124,13 @@ export class BankStatementImportService {
     return bankAccount;
   }
 
-  private async existingReferences(
-    company: CompanyContext,
-    bankAccountId: string,
-  ): Promise<Set<string>> {
+  /**
+   * Public (not private) specifically so Layer 1b's sync path can check
+   * duplicates the exact same way `confirmImport()` does, immediately
+   * before calling `persistParsedStatement()` — see that method's own
+   * doc comment.
+   */
+  async existingReferences(company: CompanyContext, bankAccountId: string): Promise<Set<string>> {
     const rows = await this.prisma.bankStatementLine.findMany({
       where: { companyId: company.companyId, bankAccountId, bankReference: { not: null } },
       select: { bankReference: true },
@@ -105,7 +138,8 @@ export class BankStatementImportService {
     return new Set(rows.map((r) => r.bankReference!));
   }
 
-  private assertNoDuplicates(parsed: ParsedStatement, existingReferences: Set<string>): void {
+  /** Public for the same reason as `existingReferences()` above. */
+  assertNoDuplicates(parsed: ParsedStatement, existingReferences: Set<string>): void {
     const duplicates = parsed.lines
       .map((l) => l.bankReference)
       .filter((ref): ref is string => ref !== null && existingReferences.has(ref));

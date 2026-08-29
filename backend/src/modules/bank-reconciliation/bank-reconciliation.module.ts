@@ -9,5 +9,9 @@ import { Camt053ParserService } from './camt053-parser.service';
   imports: [EntriesModule],
   controllers: [BankReconciliationController],
   providers: [Camt053ParserService, BankStatementImportService, BankReconciliationService],
+  // BankStatementImportService is reused by BankAggregatorModule (Layer
+  // 1b) so a live sync can call its persistParsedStatement() verbatim —
+  // see CLAUDE.md "Bank reconciliation — Layer 1b".
+  exports: [BankStatementImportService],
 })
 export class BankReconciliationModule {}
