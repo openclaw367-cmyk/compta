@@ -2815,6 +2815,24 @@ work.
   the FR demo company (n°4, "Vente marchandises - Client Petit") after
   this pass specifically so a chain ending in a real justificatif is
   already there to find, rather than cleaned up immediately.
+- **A real content-mismatch bug in that test document, found by the
+  user's own review pass, not by inspection — fixed the same day.**
+  The PDF originally left attached (`test-invoice.pdf`) was reused from
+  the AI-chatbot Phase 2 fixtures without checking its content: it's a
+  120,00 € PURCHASE invoice from "ACME Fournitures SARL," attached to a
+  1 800,00 € SALE écriture ("Vente marchandises - Client Petit") — the
+  chain reached a real document, but that document didn't correspond to
+  the écriture at all. The drill-down feature itself was never at
+  fault (it only displays whatever's attached, correctly) — this was a
+  test-data mistake in how the demo justificatif was picked. Fixed by
+  removing the mismatched file (`DELETE .../documents/:id`, confirmed
+  in the audit log as `ATTACHED` then `REMOVED`) and attaching a new
+  synthetic fixture generated to match the écriture exactly — HT
+  1 500,00 / TVA 300,00 / TTC 1 800,00, "Client Petit," pièce
+  `SAMPLE-VE-0002`, dated 15/03/2026, with an explicit "document de
+  test synthétique... ne représente pas une transaction réelle"
+  disclaimer on its face, same synthetic-fixture discipline as
+  `test-invoice.pdf`/`test-invoice-laptop.pdf` elsewhere in this app.
 - **Deferred to Tier 2, not started**: whatever the user's own review
   of this Tier 1 result surfaces. No scope for Tier 2 has been fixed
   yet — this file will be updated again once that's decided.
