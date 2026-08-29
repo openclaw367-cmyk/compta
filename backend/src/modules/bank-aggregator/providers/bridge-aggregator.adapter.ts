@@ -9,17 +9,38 @@ import {
 import { BankAggregatorPort } from '../bank-aggregator.port';
 
 /**
- * ⚠️ PAPER DESIGN — NOT VERIFIED AGAINST THE REAL BRIDGE API.
+ * ⚠️ PAPER DESIGN — ZERO REQUESTS HAVE EVER BEEN SENT TO THE REAL BRIDGE
+ * API. Every line below is written from `docs.bridgeapi.io`'s PUBLIC
+ * pages only (Bearer auth, a `Bridge-Version` header, an
+ * Item→Account→Transaction hierarchy, `item.account.updated` webhooks, a
+ * `since`-param incremental fetch) — no code in this file has ever run
+ * against a live Bridge sandbox or production endpoint. The endpoint
+ * paths, request/response field names, the Connect-session/
+ * token-exchange flow, and the `REQUESTED_SCOPE` value below are all
+ * PLACEHOLDERS. The sandbox-verification pass (see CLAUDE.md "Bank
+ * reconciliation — Layer 1b") is a REAL verification pass, not a rubber
+ * stamp: it will exercise every one of these placeholders against
+ * reality and should be expected to find real mismatches (a wrong field
+ * name, a different response envelope, a scope parameter that doesn't
+ * exist under this name) requiring adapter corrections — not just
+ * confirming a working key.
  *
- * Built from `docs.bridgeapi.io`'s PUBLIC pages only (Bearer auth, a
- * `Bridge-Version` header, an Item→Account→Transaction hierarchy,
- * `item.account.updated` webhooks, a `since`-param incremental fetch).
- * The exact endpoint paths, request/response field names, and the
- * Connect-session/token-exchange flow below are PLACEHOLDERS — every one
- * of them must be re-confirmed against the real, current
- * `docs.bridgeapi.io` (and a real sandbox app) before this talks to a
- * real bank. See CLAUDE.md "Bank reconciliation — Layer 1b" for the
- * verification plan and why no real sandbox could be used to build this.
+ * **Read-only (AIS) scope is the stated design intent, unconfirmed
+ * against Bridge's real scope model.** This app must never be able to
+ * request payment-initiation (PIS) capability — the whole point of a
+ * bank-token being sensitive is what it can DO, and "read-only" is the
+ * actual mitigation, not a detail. Two layers, both to be confirmed in
+ * the sandbox pass (see its checklist there):
+ *   1. App-level (business, outside this code): when registering/
+ *      contracting with Bridge, request an AIS-only application —
+ *      never grant this app's own `client_id` PIS capability at all, so
+ *      even a bug here structurally cannot initiate a payment.
+ *   2. Code-level (defense in depth, THIS file):
+ *      `REQUESTED_SCOPE` below is passed on every Connect session,
+ *      explicitly excluding payment scopes — but the actual parameter
+ *      name/value Bridge expects is UNCONFIRMED (a guess from the
+ *      general AIS/PIS split docs.bridgeapi.io describes), so this is
+ *      necessarily still a placeholder, not a verified guarantee.
  *
  * Deliberately NOT DI-bound (no `@Injectable`, no binding in
  * `bank-aggregator.module.ts`) — same reasoning as `ClaudeCloudModelAdapter`:
@@ -41,6 +62,14 @@ export class BridgeAggregatorAdapter implements BankAggregatorPort {
   // current value (docs.bridgeapi.io showed an example, not necessarily
   // the value to actually pin to) before go-live.
   private static readonly API_VERSION = '2025-01-15';
+  // PLACEHOLDER, NOT CONFIRMED — the actual Bridge scope/permission
+  // parameter name and value(s) that restrict a Connect session to
+  // read-only account information (AIS), excluding payment initiation
+  // (PIS). Sandbox verification MUST confirm the real parameter and
+  // that a session created this way genuinely cannot be used for a
+  // payment — see this class's own doc comment above and the
+  // sandbox-verification checklist in CLAUDE.md.
+  private static readonly REQUESTED_SCOPE = 'aggregation'; // AIS only — never 'payment'/PIS.
 
   constructor(private readonly config: ConfigService) {}
 
@@ -48,7 +77,10 @@ export class BridgeAggregatorAdapter implements BankAggregatorPort {
     const { clientId, clientSecret } = this.getAppCredentials();
     // PLACEHOLDER body/endpoint — the real flow likely needs an
     // app-side "user" created first, then a Connect session scoped to
-    // that user; confirm against real docs before go-live.
+    // that user; confirm against real docs before go-live. `scope` is
+    // the code-level half of the read-only/AIS-only intent above — its
+    // real parameter name/value is itself unconfirmed, see the class
+    // doc comment.
     const response = await this.request(
       'POST',
       '/aggregation/connect-sessions',
@@ -56,6 +88,7 @@ export class BridgeAggregatorAdapter implements BankAggregatorPort {
       clientSecret,
       {
         company_id: company.companyId,
+        scope: BridgeAggregatorAdapter.REQUESTED_SCOPE,
       },
     );
     const body = (await response.json()) as { url?: string };

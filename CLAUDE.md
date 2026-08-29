@@ -2777,19 +2777,54 @@ written.
   duplicated logic, dedup free either way since both sources populate
   the same `bankReference` field `assertNoDuplicates()` already keys
   off), so the matching engine and review UI needed ZERO changes.
-- **⚠️ `BridgeAggregatorAdapter` is a PAPER DESIGN, not verified
-  against the real Bridge API — this is a pre-ship blocker, stated up
-  front, not discovered later.** Built from `docs.bridgeapi.io`'s
-  public pages only; every endpoint path, request/response field name,
-  and the Connect-session/token-exchange flow are placeholders,
-  flagged explicitly in the adapter's own doc comment and inline
-  `PLACEHOLDER` comments at each call site. Getting real Bridge sandbox
-  credentials (an actual account/contract with Bridge) is required
-  before this reaches a real user's real bank connection — same
-  "verified against a real sample, not just a hand-built one" bar this
-  project already held for `InvoiceExtractionService`'s PDF fixtures,
-  the FEC export's Test Compta Demat run, and Layer 1a's own
-  CAMT.053-fixture caveat above.
+- **⚠️ `BridgeAggregatorAdapter` is a PAPER DESIGN — pre-ship blocker,
+  stated precisely, not softened into "needs sandbox credentials."**
+  ZERO requests have ever been sent to the real Bridge API from this
+  code. Every endpoint path, request/response field name, the
+  Connect-session/token-exchange flow, and the scope parameter (below)
+  are placeholders written from `docs.bridgeapi.io`'s public pages
+  only, flagged in the adapter's own doc comment and inline
+  `PLACEHOLDER` comments at each call site. **The sandbox-verification
+  pass is a real verification pass that should be EXPECTED to find
+  real mismatches — a wrong field name, a different response envelope,
+  a scope parameter that doesn't exist under this name — requiring
+  adapter corrections, not a rubber stamp that just confirms a key
+  works.** Same "verified against a real sample, not just a hand-built
+  one" bar this project already held for `InvoiceExtractionService`'s
+  PDF fixtures, the FEC export's Test Compta Demat run, and Layer 1a's
+  own CAMT.053-fixture caveat above — but sharper here, since NOTHING
+  in this adapter has touched the real API at all, not even once, vs.
+  those cases where the mechanism was at least exercised against
+  something real. **Sandbox-verification checklist** (update this list
+  as items close, don't just mark the whole blocker resolved on first
+  contact):
+  - [ ] `createConnectSession()`: real endpoint path, real request
+    body shape, real response shape (`url` field name).
+  - [ ] **Read-only/AIS scope — the actual mitigation for bank-token
+    sensitivity, not a nice-to-have**: confirm the real scope/permission
+    parameter name and value(s) Bridge expects for AIS-only access
+    (`REQUESTED_SCOPE` is currently a placeholder guess, `'aggregation'`);
+    confirm a session created this way is genuinely incapable of
+    payment initiation (PIS) — try to misuse the resulting token for a
+    payment-shaped call and confirm Bridge rejects it; separately,
+    confirm the app's own Bridge registration/contract itself was
+    granted AIS-only capability (the business-level half of this
+    mitigation, outside this code, see the adapter's own doc comment).
+  - [ ] `confirmLink()`: the real callback payload shape (redirect
+    query params vs. widget postMessage) — currently NOT wired in the
+    frontend at all, precisely because this is unconfirmed.
+  - [ ] `fetchTransactions()`: real endpoint path, real query params,
+    real response envelope and field names (`resources`, balance
+    fields, transaction fields), and — load-bearing —
+    **whether amounts are returned as strings or native JSON numbers**
+    (`toMoneyApiString()` handles both today, but confirm which one
+    Bridge actually sends so the untested branch isn't quietly dead
+    code).
+  - [ ] `revoke()`: real endpoint path, and confirm it actually
+    terminates the connection on Bridge's side (not just a 200 for an
+    already-inert item).
+  - [ ] Re-run `bridge-aggregator.adapter.spec.ts`'s fixtures against
+    real captured responses, correcting any mismatch found.
 - **Money-safety boundary, matching the CAMT.053 `parseTagValue:false`
   lesson exactly**: Bridge's amount type (string vs. native JSON
   number) is unconfirmed, so `BridgeAggregatorAdapter` handles both —
@@ -2851,17 +2886,21 @@ written.
   CAMT.053 import (`StatementImportSection`) stays fully available
   regardless — a `BankAccount` can have a manual-only history, a live
   link, or both.
-- **Verified two ways.** Unit: `bridge-aggregator.adapter.spec.ts` (14
+- **Verified two ways.** Unit: `bridge-aggregator.adapter.spec.ts` (15
   tests against hand-built fixture JSON, mirroring the CAMT.053
   fixture pattern — proves the adapter's own parsing/conversion logic
   is internally consistent, explicitly NOT that it matches Bridge's
-  real behavior), `bank-aggregator-link.service.spec.ts` (11 tests:
-  Monaco jurisdiction throws before any port call, `confirmLink()`
-  encrypts/upserts correctly, `syncNow()` decrypts+fetches
+  real behavior; includes a regression test asserting the connect
+  session request actually sends `scope: 'aggregation'` and never
+  `'payment'` — the code-level half of the read-only design intent
+  above, so a future edit can't silently drop it unnoticed),
+  `bank-aggregator-link.service.spec.ts` (11 tests: Monaco jurisdiction
+  throws before any port call, `confirmLink()` encrypts/upserts
+  correctly, `syncNow()` decrypts+fetches
   since-`lastSyncedAt`+persists+advances the timestamp, `revoke()`'s
   ordering and its `ERROR`-on-failure path), plus 2 new tests in
   `bank-statement-import.service.spec.ts` for the extracted
-  `persistParsedStatement()` seam — 559 backend tests passing overall.
+  `persistParsedStatement()` seam — 560 backend tests passing overall.
   **Live, with the network layer
   faked (no real Bridge account exists) — a temporary script, deleted
   after use**: confirmed the jurisdiction guard live over real HTTP

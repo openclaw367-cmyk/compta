@@ -64,6 +64,18 @@ describe('BridgeAggregatorAdapter', () => {
       );
     });
 
+    it("requests the read-only (AIS) scope, never a payment/PIS scope — the code-level half of the read-only design intent (unconfirmed parameter name, see the adapter's own doc comment)", async () => {
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({ url: 'https://connect.bridgeapi.io/session-1' }),
+      );
+      const adapter = new BridgeAggregatorAdapter(makeConfig());
+      await adapter.createConnectSession({ companyId: 'company-1' });
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const sentBody = JSON.parse(init.body as string) as Record<string, unknown>;
+      expect(sentBody.scope).toBe('aggregation');
+      expect(sentBody.scope).not.toBe('payment');
+    });
+
     it('throws on a non-2xx HTTP response, naming the status', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'nope' }, false, 401));
       const adapter = new BridgeAggregatorAdapter(makeConfig());

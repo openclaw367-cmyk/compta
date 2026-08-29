@@ -161,16 +161,39 @@ deployment story), Monaco explicitly deferred
 (`NotImplementedException`, confirmed live), Bridge as the one
 reference aggregator, `CredentialEncryptionService` reused verbatim.
 
-**⚠️ PRE-SHIP BLOCKER, same discipline as Layer 1a's own CAMT.053
-caveat.** `BridgeAggregatorAdapter` is a paper design against Bridge's
-public docs only — every endpoint path and request/response shape is a
-placeholder. Real Bridge sandbox credentials (an actual account/contract
-— outside what an agent can do) are required before this reaches a real
-user's real bank connection. See CLAUDE.md "Bank reconciliation — Layer
-1b" for the full design, the honest mid-design correction (the Connect
-handshake itself needs no public backend endpoint, only ongoing sync
-would), and the exact live verification performed. OFX/QIF/CSV remain
-unbuilt.
+**⚠️ PRE-SHIP BLOCKER — precise, not a soft "needs sandbox credentials"
+note.** `BridgeAggregatorAdapter` is a paper design against Bridge's
+public docs only, and ZERO requests have ever been sent to the real
+Bridge API from this code — every endpoint path, request/response
+shape, and the scope parameter are placeholders. **The
+sandbox-verification pass is a real verification pass that should be
+expected to find real mismatches (a wrong field name, a different
+response envelope, a scope parameter that doesn't exist under this
+name) requiring adapter corrections — it is not a rubber stamp that
+just confirms a key works.** Getting real Bridge sandbox credentials
+(an actual account/contract — outside what an agent can do) is the
+prerequisite; the checklist itself, including the read-only/AIS-scope
+confirmation below, is in CLAUDE.md "Bank reconciliation — Layer 1b."
+
+**Read-only (AIS) scope — the actual mitigation for bank-token
+sensitivity, confirm it's real, don't assume it from the code alone.**
+The adapter requests a `scope: 'aggregation'` parameter on every
+Connect session and never requests a payment (PIS) scope — but the
+real Bridge parameter name/value for this is itself UNCONFIRMED (a
+placeholder), so this is a stated design intent with a regression test
+guarding it in code, not yet a verified guarantee. Two things the
+sandbox pass must confirm: (1) the real scope parameter, and that a
+session created this way genuinely cannot be used for a payment; (2)
+that this app's own Bridge registration/contract was itself granted
+AIS-only capability (the business-level half of this mitigation,
+outside this code — the stronger guarantee, since it holds even if a
+future code change forgot the scope parameter).
+
+See CLAUDE.md "Bank reconciliation — Layer 1b" for the full design,
+the honest mid-design correction (the Connect handshake itself needs
+no public backend endpoint, only ongoing sync would), the full
+sandbox-verification checklist, and the exact live verification
+performed. OFX/QIF/CSV remain unbuilt.
 
 ### Layer 1b (original scope note, below) — live aggregator connectivity (external, build second)
 
