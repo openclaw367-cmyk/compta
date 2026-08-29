@@ -449,7 +449,7 @@ export function useRemoveDocument() {
 
 /**
  * Deterministic extraction, no persistence, no écriture id required — see
- * CLAUDE.md "Supporting-document attachments — Part 2". What makes
+ * CLAUDE.md "Supporting-document attachments" — Layer 2. What makes
  * attaching a file WHILE creating a new draft (before it has an id) work.
  */
 export function useExtractDocument() {
@@ -464,7 +464,7 @@ export function useExtractDocument() {
 
 /**
  * The "Comptable IA" toggle's explicit action (see CLAUDE.md "Supporting-
- * document attachments — Part 3") — one cloud turn, gated on a configured
+ * document attachments" — Layer 3) — one cloud turn, gated on a configured
  * credential, reusing propose_ecriture's own review discipline. Never
  * invalidates anything itself: the suggestion only merges into
  * EcritureEditor's own draft state on confirm, it never writes.

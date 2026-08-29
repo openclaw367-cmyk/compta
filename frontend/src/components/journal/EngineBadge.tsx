@@ -3,7 +3,7 @@ import type { ChatEngine, CloudProvider } from '../../api/types';
 /**
  * Extracted from AssistantPage.tsx (2026-08-25) so the journal-entry
  * "Comptable IA" suggestion flow (see CLAUDE.md "Supporting-document
- * attachments — Part 3") reuses the EXACT same ☁️/🔒 badge markup the
+ * attachments" — Layer 3) reuses the EXACT same ☁️/🔒 badge markup the
  * assistant already uses — one visual vocabulary for "this content came
  * from a cloud model," not a re-skinned copy.
  */

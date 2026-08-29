@@ -16,7 +16,7 @@ import { SuggestAccountsDto } from './dto/suggest-accounts.dto';
 
 /**
  * Stateless, no-persistence entry-creation helpers — see CLAUDE.md
- * "Supporting-document attachments — Part 2/3". Neither route here
+ * "Supporting-document attachments" — Layers 2/3. Neither route here
  * creates or reads an EcritureDocument; both exist so a document can be
  * useful BEFORE an écriture id exists yet (mid-creation, in
  * EcritureEditor). `/documents/extract` never touches company data (pure
@@ -66,7 +66,7 @@ export class DocumentExtractionController {
     summary: 'The "Comptable IA" toggle\'s explicit action — one cloud turn suggesting accounts.',
     description:
       'Requires a configured cloud credential for the given provider (never local — see ' +
-      'CLAUDE.md "Supporting-document attachments — Part 3": the earlier local-model benchmark ' +
+      'CLAUDE.md "Supporting-document attachments" — Layer 3: the earlier local-model benchmark ' +
       "already showed local models can't reliably suggest valid accounts). Reuses " +
       'ChatOrchestratorService.runTurn() + CloudProposeToolsService verbatim — the SAME gate and ' +
       'review discipline propose_ecriture already uses in the assistant, not a parallel, weaker ' +

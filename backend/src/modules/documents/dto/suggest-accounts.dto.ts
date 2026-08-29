@@ -7,7 +7,7 @@ export class SuggestAccountsDto {
    * Required (unlike SendChatMessageDto's optional cloudProvider) — this
    * endpoint IS the "☁️ Suggérer les comptes avec [Provider]" action
    * itself, always explicit, never a default. See CLAUDE.md
-   * "Supporting-document attachments — Part 3": the "Comptable IA" toggle
+   * "Supporting-document attachments" — Layer 3: the "Comptable IA" toggle
    * never falls back to a local model for account suggestion.
    */
   @ApiProperty({ enum: CloudModelProvider })

@@ -27,7 +27,7 @@ const SUGGESTION_INSTRUCTION =
 
 /**
  * The backend for the journal-entry "Comptable IA" toggle (see CLAUDE.md
- * "Supporting-document attachments — Part 3") — a genuine reuse of the
+ * "Supporting-document attachments" — Layer 3) — a genuine reuse of the
  * assistant's own cloud-suggestion machinery, not a parallel
  * implementation with a weaker review discipline. Same gate
  * (`CloudCredentialsService.getDecryptedKey()` — throws if the requested

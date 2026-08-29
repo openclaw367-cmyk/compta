@@ -980,7 +980,7 @@ export interface ProposedEcriture {
 /**
  * Response for POST /documents/suggest-accounts — the "Comptable IA"
  * toggle's own explicit action (see CLAUDE.md "Supporting-document
- * attachments — Part 3"). Reuses the SAME ProposedEcriture shape
+ * attachments" — Layer 3). Reuses the SAME ProposedEcriture shape
  * propose_ecriture already returns — one review discipline, not a
  * parallel one. `proposal` merges into EcritureEditor's own draft lines
  * on confirm; it never posts by itself.
