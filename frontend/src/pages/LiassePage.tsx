@@ -5,6 +5,7 @@ import {
   useEcritures,
   useGenerateLiasse,
   useGenerateLiasseSecondary,
+  useJournals,
 } from '../api/queries';
 import type {
   Bilan2033A,
@@ -13,7 +14,9 @@ import type {
   CompteResultat2033B,
   CompteResultat2052_2053,
   CompteResultatLigne,
+  Journal,
   LiasseAnyResult,
+  Regime,
   Tableau2054,
   Tableau2054Ligne,
   Tableau2055,
@@ -28,8 +31,10 @@ import type {
 import { ApiError } from '../api/client';
 import { useAppContext } from '../context/appContextStore';
 import { addMoneyStrings, formatMoneyFr, subtractMoneyStrings } from '../lib/money';
+import { LineTraceDrilldown } from '../components/ledger/LineTraceDrilldown';
 
 const NO_ECRITURES: never[] = [];
+const NO_JOURNALS: never[] = [];
 
 // ---------------------------------------------------------------------------
 // Form-order section grouping — mirrors the printed 2050/2051/2052/2053
@@ -213,10 +218,12 @@ export function LiassePage() {
   const companyQuery = useCompany();
   const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
   const ecrituresQuery = useEcritures();
+  const journalsQuery = useJournals();
   const generateLiasse = useGenerateLiasse();
   const generateSecondary = useGenerateLiasseSecondary();
 
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
+  const journals = journalsQuery.data ?? NO_JOURNALS;
 
   const [error, setError] = useState<string[] | null>(null);
   // See CashFlowPage.tsx's identical guard — never show a previous year's
@@ -315,8 +322,8 @@ export function LiassePage() {
           {result.regime === 'REEL_NORMAL' ? (
             <>
               <BalanceBanner totalActifNet={result.bilan.totalActifNet} totalPassif={result.bilan.totalPassif} />
-              <BilanSection bilan={result.bilan} />
-              <CompteResultatSection compteResultat={result.compteResultat} />
+              <BilanSection bilan={result.bilan} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
+              <CompteResultatSection compteResultat={result.compteResultat} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
               <TableauxArticulationBanner
                 bilan={result.bilan}
                 tableau2054={result.tableau2054}
@@ -327,14 +334,14 @@ export function LiassePage() {
               <Tableau2056ArticulationBanner bilan={result.bilan} tableau2056={result.tableau2056} />
               <Tableau2056Section tableau2056={result.tableau2056} />
               <Tableau2057ArticulationBanner bilan={result.bilan} tableau2057={result.tableau2057} />
-              <Tableau2057Section tableau2057={result.tableau2057} />
+              <Tableau2057Section tableau2057={result.tableau2057} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
               <Tableau2059Section tableau2059={result.tableau2059} />
             </>
           ) : (
             <>
               <BalanceBanner totalActifNet={result.bilan.totalActifNet} totalPassif={result.bilan.totalPassif} />
-              <Bilan2033ASection bilan={result.bilan} />
-              <CompteResultat2033BSection compteResultat={result.compteResultat} />
+              <Bilan2033ASection bilan={result.bilan} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
+              <CompteResultat2033BSection compteResultat={result.compteResultat} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
             </>
           )}
 
@@ -347,6 +354,8 @@ export function LiassePage() {
                 : 'Erreur inconnue.'
             }
             result={generateSecondary.data ?? null}
+            fiscalYearId={fiscalYearId!}
+            journals={journals}
           />
         </>
       )}
@@ -367,11 +376,15 @@ function ComparisonSection({
   isError,
   errorMessage,
   result,
+  fiscalYearId,
+  journals,
 }: {
   isPending: boolean;
   isError: boolean;
   errorMessage: string;
   result: LiasseAnyResult | null;
+  fiscalYearId: string;
+  journals: Journal[];
 }) {
   if (isPending) {
     return (
@@ -406,13 +419,13 @@ function ComparisonSection({
       <BalanceBanner totalActifNet={result.bilan.totalActifNet} totalPassif={result.bilan.totalPassif} />
       {result.regime === 'REEL_NORMAL' ? (
         <>
-          <BilanSection bilan={result.bilan} />
-          <CompteResultatSection compteResultat={result.compteResultat} />
+          <BilanSection bilan={result.bilan} fiscalYearId={fiscalYearId} regime={result.regime} journals={journals} />
+          <CompteResultatSection compteResultat={result.compteResultat} fiscalYearId={fiscalYearId} regime={result.regime} journals={journals} />
         </>
       ) : (
         <>
-          <Bilan2033ASection bilan={result.bilan} />
-          <CompteResultat2033BSection compteResultat={result.compteResultat} />
+          <Bilan2033ASection bilan={result.bilan} fiscalYearId={fiscalYearId} regime={result.regime} journals={journals} />
+          <CompteResultat2033BSection compteResultat={result.compteResultat} fiscalYearId={fiscalYearId} regime={result.regime} journals={journals} />
         </>
       )}
     </section>
@@ -479,7 +492,17 @@ function BalanceBanner({
 // Bilan (2050 Actif / 2051 Passif)
 // ---------------------------------------------------------------------------
 
-function BilanSection({ bilan }: { bilan: Bilan2050 }) {
+function BilanSection({
+  bilan,
+  fiscalYearId,
+  regime,
+  journals,
+}: {
+  bilan: Bilan2050;
+  fiscalYearId: string;
+  regime: Regime;
+  journals: Journal[];
+}) {
   const actifByCode = new Map(bilan.actif.map((l) => [l.code, l]));
   const passifByCode = new Map(bilan.passif.map((l) => [l.code, l]));
 
@@ -503,7 +526,15 @@ function BilanSection({ bilan }: { bilan: Bilan2050 }) {
                 {section.codes.map((code) => {
                   const ligne = actifByCode.get(code);
                   if (!ligne) return null;
-                  return <ActifRow key={code} ligne={ligne} />;
+                  return (
+                    <ActifRow
+                      key={code}
+                      ligne={ligne}
+                      fiscalYearId={fiscalYearId}
+                      regime={regime}
+                      journals={journals}
+                    />
+                  );
                 })}
               </SectionRows>
             ))}
@@ -547,12 +578,25 @@ function BilanSection({ bilan }: { bilan: Bilan2050 }) {
                         label="Résultat de l'exercice (bénéfice ou perte)"
                         montant={bilan.resultatDeLExercice}
                         emphasize
+                        fiscalYearId={fiscalYearId}
+                        regime={regime}
+                        journals={journals}
                       />
                     );
                   }
                   const ligne = passifByCode.get(code);
                   if (!ligne) return null;
-                  return <PassifRow key={code} code={ligne.code} label={ligne.label} montant={ligne.montant} />;
+                  return (
+                    <PassifRow
+                      key={code}
+                      code={ligne.code}
+                      label={ligne.label}
+                      montant={ligne.montant}
+                      fiscalYearId={fiscalYearId}
+                      regime={regime}
+                      journals={journals}
+                    />
+                  );
                 })}
               </SectionRows>
             ))}
@@ -572,21 +616,61 @@ function BilanSection({ bilan }: { bilan: Bilan2050 }) {
   );
 }
 
-function ActifRow({ ligne }: { ligne: BilanActifLigne }) {
+/**
+ * Traceability drill-down, Tier 1 — clicking a row toggles its own
+ * LineTraceDrilldown directly beneath it (a second `<tr>`, matching
+ * TrialBalanceTable.tsx's own inline row-expand idiom). Local state per
+ * row, not lifted to the section: each row's own expand/collapse is
+ * independent, and several can be open at once. Reused verbatim by
+ * Bilan2033ASection below (see that section's own comment) — making
+ * this component drillable makes RÉEL_SIMPLIFIE drillable too, with no
+ * extra code, since both regimes already shared this exact row.
+ */
+function ActifRow({
+  ligne,
+  fiscalYearId,
+  regime,
+  journals,
+}: {
+  ligne: BilanActifLigne;
+  fiscalYearId: string;
+  regime: Regime;
+  journals: Journal[];
+}) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <tr className="border-b border-border last:border-b-0">
-      <td className="px-4 py-2 text-ink">
-        <span className="mr-2 font-medium tabular-nums text-ink-faint">{ligne.code}</span>
-        {ligne.label}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.brut)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.amortissements)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink">{formatMoneyFr(ligne.net)}</td>
-    </tr>
+    <>
+      <tr
+        className="cursor-pointer border-b border-border last:border-b-0 hover:bg-bg"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <td className="px-4 py-2 text-ink">
+          <span className="mr-1.5 text-ink-faint">{expanded ? '▾' : '▸'}</span>
+          <span className="mr-2 font-medium tabular-nums text-ink-faint">{ligne.code}</span>
+          {ligne.label}
+        </td>
+        <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+          {formatMoneyFr(ligne.brut)}
+        </td>
+        <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+          {formatMoneyFr(ligne.amortissements)}
+        </td>
+        <td className="px-4 py-2 text-right tabular-nums text-ink">{formatMoneyFr(ligne.net)}</td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={4} className="p-0">
+            <LineTraceDrilldown
+              family="bilan"
+              fiscalYearId={fiscalYearId}
+              lineCode={ligne.code}
+              regime={regime}
+              journals={journals}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -595,27 +679,53 @@ function PassifRow({
   label,
   montant,
   emphasize,
+  fiscalYearId,
+  regime,
+  journals,
 }: {
   code: string;
   label: string;
   montant: string;
   emphasize?: boolean;
+  fiscalYearId: string;
+  regime: Regime;
+  journals: Journal[];
 }) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <tr className="border-b border-border last:border-b-0">
-      <td className={['px-4 py-2', emphasize ? 'font-semibold text-ink' : 'text-ink'].join(' ')}>
-        <span className="mr-2 font-medium tabular-nums text-ink-faint">{code}</span>
-        {label}
-      </td>
-      <td
-        className={[
-          'px-4 py-2 text-right tabular-nums',
-          emphasize ? 'font-semibold text-ink' : 'text-ink',
-        ].join(' ')}
+    <>
+      <tr
+        className="cursor-pointer border-b border-border last:border-b-0 hover:bg-bg"
+        onClick={() => setExpanded((v) => !v)}
       >
-        {formatMoneyFr(montant)}
-      </td>
-    </tr>
+        <td className={['px-4 py-2', emphasize ? 'font-semibold text-ink' : 'text-ink'].join(' ')}>
+          <span className="mr-1.5 text-ink-faint">{expanded ? '▾' : '▸'}</span>
+          <span className="mr-2 font-medium tabular-nums text-ink-faint">{code}</span>
+          {label}
+        </td>
+        <td
+          className={[
+            'px-4 py-2 text-right tabular-nums',
+            emphasize ? 'font-semibold text-ink' : 'text-ink',
+          ].join(' ')}
+        >
+          {formatMoneyFr(montant)}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={2} className="p-0">
+            <LineTraceDrilldown
+              family="bilan"
+              fiscalYearId={fiscalYearId}
+              lineCode={code}
+              regime={regime}
+              journals={journals}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -635,7 +745,17 @@ const ACTIF_2033A_SECTIONS: { title: string; codes: string[] }[] = [
 const PASSIF_2033A_CAPITAUX_CODES = ['120', '124', '126', '130', '132', '134', '__RESULTAT__', '137', '140'];
 const PASSIF_2033A_DETTES_CODES = ['156', '164', '166', '172', '173', '175', '174'];
 
-function Bilan2033ASection({ bilan }: { bilan: Bilan2033A }) {
+function Bilan2033ASection({
+  bilan,
+  fiscalYearId,
+  regime,
+  journals,
+}: {
+  bilan: Bilan2033A;
+  fiscalYearId: string;
+  regime: Regime;
+  journals: Journal[];
+}) {
   const actifByCode = new Map(bilan.actif.map((l) => [l.code, l]));
   const passifByCode = new Map(bilan.passif.map((l) => [l.code, l]));
   const totalICapitauxPropres = addMoneyStrings(
@@ -663,7 +783,15 @@ function Bilan2033ASection({ bilan }: { bilan: Bilan2033A }) {
                 {section.codes.map((code) => {
                   const ligne = actifByCode.get(code);
                   if (!ligne) return null;
-                  return <ActifRow key={code} ligne={ligne} />;
+                  return (
+                    <ActifRow
+                      key={code}
+                      ligne={ligne}
+                      fiscalYearId={fiscalYearId}
+                      regime={regime}
+                      journals={journals}
+                    />
+                  );
                 })}
               </SectionRows>
             ))}
@@ -706,13 +834,24 @@ function Bilan2033ASection({ bilan }: { bilan: Bilan2033A }) {
                       label="Résultat de l'exercice (bénéfice ou perte)"
                       montant={bilan.resultatDeLExercice}
                       emphasize
+                      fiscalYearId={fiscalYearId}
+                      regime={regime}
+                      journals={journals}
                     />
                   );
                 }
                 const ligne = passifByCode.get(code);
                 if (!ligne) return null;
                 return (
-                  <PassifRow key={code} code={ligne.code} label={ligne.label} montant={ligne.montant} />
+                  <PassifRow
+                    key={code}
+                    code={ligne.code}
+                    label={ligne.label}
+                    montant={ligne.montant}
+                    fiscalYearId={fiscalYearId}
+                    regime={regime}
+                    journals={journals}
+                  />
                 );
               })}
               <tr className="border-b border-border bg-bg">
@@ -741,7 +880,15 @@ function Bilan2033ASection({ bilan }: { bilan: Bilan2033A }) {
                 const ligne = passifByCode.get(code);
                 if (!ligne) return null;
                 return (
-                  <PassifRow key={code} code={ligne.code} label={ligne.label} montant={ligne.montant} />
+                  <PassifRow
+                    key={code}
+                    code={ligne.code}
+                    label={ligne.label}
+                    montant={ligne.montant}
+                    fiscalYearId={fiscalYearId}
+                    regime={regime}
+                    journals={journals}
+                  />
                 );
               })}
               <tr className="border-b border-border bg-bg">
@@ -782,7 +929,17 @@ const CDR_2033B_CHARGES_EXPLOITATION = [
   '234', '236', '238', '240', '242', '244', '250', '252', '254', '256', '262',
 ];
 
-function CompteResultat2033BSection({ compteResultat }: { compteResultat: CompteResultat2033B }) {
+function CompteResultat2033BSection({
+  compteResultat,
+  fiscalYearId,
+  regime,
+  journals,
+}: {
+  compteResultat: CompteResultat2033B;
+  fiscalYearId: string;
+  regime: Regime;
+  journals: Journal[];
+}) {
   const byCode = new Map(compteResultat.lignes.map((l) => [l.code, l]));
   const isPerte = compteResultat.beneficeOuPerte.startsWith('-');
 
@@ -801,7 +958,15 @@ function CompteResultat2033BSection({ compteResultat }: { compteResultat: Compte
           </thead>
           <tbody>
             <SectionRows title="Produits d'exploitation" colSpan={2}>
-              {CDR_2033B_PRODUITS_EXPLOITATION.map((code) => renderCdrRow(byCode.get(code)))}
+              {CDR_2033B_PRODUITS_EXPLOITATION.map((code) => (
+                <CdrLineRow
+                  key={code}
+                  ligne={byCode.get(code)}
+                  fiscalYearId={fiscalYearId}
+                  regime={regime}
+                  journals={journals}
+                />
+              ))}
             </SectionRows>
             <CdrTotalRow
               code="232"
@@ -809,7 +974,15 @@ function CompteResultat2033BSection({ compteResultat }: { compteResultat: Compte
               montant={compteResultat.totalProduitsExploitation}
             />
             <SectionRows title="Charges d'exploitation" colSpan={2}>
-              {CDR_2033B_CHARGES_EXPLOITATION.map((code) => renderCdrRow(byCode.get(code)))}
+              {CDR_2033B_CHARGES_EXPLOITATION.map((code) => (
+                <CdrLineRow
+                  key={code}
+                  ligne={byCode.get(code)}
+                  fiscalYearId={fiscalYearId}
+                  regime={regime}
+                  journals={journals}
+                />
+              ))}
             </SectionRows>
             <CdrTotalRow
               code="264"
@@ -868,7 +1041,17 @@ function CompteResultat2033BSection({ compteResultat }: { compteResultat: Compte
 // Compte de résultat (2052/2053)
 // ---------------------------------------------------------------------------
 
-function CompteResultatSection({ compteResultat }: { compteResultat: CompteResultat2052_2053 }) {
+function CompteResultatSection({
+  compteResultat,
+  fiscalYearId,
+  regime,
+  journals,
+}: {
+  compteResultat: CompteResultat2052_2053;
+  fiscalYearId: string;
+  regime: Regime;
+  journals: Journal[];
+}) {
   const byCode = new Map(compteResultat.lignes.map((l) => [l.code, l]));
   const isPerte = compteResultat.beneficeOuPerte.startsWith('-');
 
@@ -887,20 +1070,52 @@ function CompteResultatSection({ compteResultat }: { compteResultat: CompteResul
           </thead>
           <tbody>
             <SectionRows title="Produits d'exploitation" colSpan={2}>
-              {CDR_PRODUITS_EXPLOITATION.map((code) => renderCdrRow(byCode.get(code)))}
+              {CDR_PRODUITS_EXPLOITATION.map((code) => (
+                <CdrLineRow
+                  key={code}
+                  ligne={byCode.get(code)}
+                  fiscalYearId={fiscalYearId}
+                  regime={regime}
+                  journals={journals}
+                />
+              ))}
             </SectionRows>
             <CdrTotalRow code="FR" label="Total des produits d'exploitation (I)" montant={compteResultat.totalProduitsExploitation} />
             <SectionRows title="Charges d'exploitation" colSpan={2}>
-              {CDR_CHARGES_EXPLOITATION.map((code) => renderCdrRow(byCode.get(code)))}
+              {CDR_CHARGES_EXPLOITATION.map((code) => (
+                <CdrLineRow
+                  key={code}
+                  ligne={byCode.get(code)}
+                  fiscalYearId={fiscalYearId}
+                  regime={regime}
+                  journals={journals}
+                />
+              ))}
             </SectionRows>
             <CdrTotalRow code="GF" label="Total des charges d'exploitation (II)" montant={compteResultat.totalChargesExploitation} />
             <CdrTotalRow code="GG" label="1 — Résultat d'exploitation (I − II)" montant={compteResultat.resultatExploitation} strong />
             <SectionRows title="Produits financiers" colSpan={2}>
-              {CDR_PRODUITS_FINANCIERS.map((code) => renderCdrRow(byCode.get(code)))}
+              {CDR_PRODUITS_FINANCIERS.map((code) => (
+                <CdrLineRow
+                  key={code}
+                  ligne={byCode.get(code)}
+                  fiscalYearId={fiscalYearId}
+                  regime={regime}
+                  journals={journals}
+                />
+              ))}
             </SectionRows>
             <CdrTotalRow code="GP" label="Total des produits financiers (V)" montant={compteResultat.totalProduitsFinanciers} />
             <SectionRows title="Charges financières" colSpan={2}>
-              {CDR_CHARGES_FINANCIERES.map((code) => renderCdrRow(byCode.get(code)))}
+              {CDR_CHARGES_FINANCIERES.map((code) => (
+                <CdrLineRow
+                  key={code}
+                  ligne={byCode.get(code)}
+                  fiscalYearId={fiscalYearId}
+                  regime={regime}
+                  journals={journals}
+                />
+              ))}
             </SectionRows>
             <CdrTotalRow code="GU" label="Total des charges financières (VI)" montant={compteResultat.totalChargesFinancieres} />
             <CdrTotalRow code="GV" label="2 — Résultat financier (V − VI)" montant={compteResultat.resultatFinancier} strong />
@@ -924,11 +1139,11 @@ function CompteResultatSection({ compteResultat }: { compteResultat: CompteResul
             </tr>
           </thead>
           <tbody>
-            {renderCdrRow(byCode.get('HD'), 'Produits exceptionnels (VII)')}
-            {renderCdrRow(byCode.get('HH'), 'Charges exceptionnelles (VIII)')}
+            <CdrLineRow ligne={byCode.get('HD')} overrideLabel="Produits exceptionnels (VII)" fiscalYearId={fiscalYearId} regime={regime} journals={journals} />
+            <CdrLineRow ligne={byCode.get('HH')} overrideLabel="Charges exceptionnelles (VIII)" fiscalYearId={fiscalYearId} regime={regime} journals={journals} />
             <CdrTotalRow code="HI" label="4 — Résultat exceptionnel (VII − VIII)" montant={compteResultat.resultatExceptionnel} strong />
-            {renderCdrRow(byCode.get('HJ'), 'Participation des salariés aux résultats (IX)')}
-            {renderCdrRow(byCode.get('HK'), 'Impôts sur les bénéfices (X)')}
+            <CdrLineRow ligne={byCode.get('HJ')} overrideLabel="Participation des salariés aux résultats (IX)" fiscalYearId={fiscalYearId} regime={regime} journals={journals} />
+            <CdrLineRow ligne={byCode.get('HK')} overrideLabel="Impôts sur les bénéfices (X)" fiscalYearId={fiscalYearId} regime={regime} journals={journals} />
             <CdrTotalRow code="HL" label="Total des produits (I + III + V + VII)" montant={compteResultat.totalProduits} />
             <CdrTotalRow code="HM" label="Total des charges (II + IV + VI + VIII + IX + X)" montant={compteResultat.totalCharges} />
           </tbody>
@@ -968,16 +1183,57 @@ function CompteResultatSection({ compteResultat }: { compteResultat: CompteResul
   );
 }
 
-function renderCdrRow(ligne: CompteResultatLigne | undefined, overrideLabel?: string) {
+/**
+ * Traceability drill-down for a CDR line — same click-to-expand idiom
+ * as ActifRow/PassifRow above, `family="cdr"` instead of `"bilan"`.
+ * Reused by both CompteResultatSection (2052-2053) and
+ * CompteResultat2033BSection (2033-B) — the same component either way,
+ * matching how ActifRow/PassifRow are already shared across regimes.
+ * `undefined` ligne (a code the fixture/company never used) still
+ * renders nothing, same as the plain function this replaces.
+ */
+function CdrLineRow({
+  ligne,
+  overrideLabel,
+  fiscalYearId,
+  regime,
+  journals,
+}: {
+  ligne: CompteResultatLigne | undefined;
+  overrideLabel?: string;
+  fiscalYearId: string;
+  regime: Regime;
+  journals: Journal[];
+}) {
+  const [expanded, setExpanded] = useState(false);
   if (!ligne) return null;
   return (
-    <tr key={ligne.code} className="border-b border-border last:border-b-0">
-      <td className="px-4 py-2 text-ink">
-        <span className="mr-2 font-medium tabular-nums text-ink-faint">{ligne.code}</span>
-        {overrideLabel ?? ligne.label}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink">{formatMoneyFr(ligne.montant)}</td>
-    </tr>
+    <>
+      <tr
+        className="cursor-pointer border-b border-border last:border-b-0 hover:bg-bg"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <td className="px-4 py-2 text-ink">
+          <span className="mr-1.5 text-ink-faint">{expanded ? '▾' : '▸'}</span>
+          <span className="mr-2 font-medium tabular-nums text-ink-faint">{ligne.code}</span>
+          {overrideLabel ?? ligne.label}
+        </td>
+        <td className="px-4 py-2 text-right tabular-nums text-ink">{formatMoneyFr(ligne.montant)}</td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={2} className="p-0">
+            <LineTraceDrilldown
+              family="cdr"
+              fiscalYearId={fiscalYearId}
+              lineCode={ligne.code}
+              regime={regime}
+              journals={journals}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -1523,7 +1779,17 @@ function Tableau2057ArticulationBanner({
   );
 }
 
-function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
+function Tableau2057Section({
+  tableau2057,
+  fiscalYearId,
+  regime,
+  journals,
+}: {
+  tableau2057: Tableau2057;
+  fiscalYearId: string;
+  regime: Regime;
+  journals: Journal[];
+}) {
   const [search, setSearch] = useState('');
   const needle = search.trim().toLowerCase();
   const matches = (ligne: { code: string; label: string }) =>
@@ -1564,7 +1830,13 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
           </thead>
           <tbody>
             {cadreA.map((ligne) => (
-              <Tableau2057CadreARow key={ligne.code} ligne={ligne} />
+              <Tableau2057CadreARow
+                key={ligne.code}
+                ligne={ligne}
+                fiscalYearId={fiscalYearId}
+                regime={regime}
+                journals={journals}
+              />
             ))}
             <tr className="bg-bg">
               <td className="px-4 py-2.5 font-semibold text-ink">TOTAUX</td>
@@ -1597,7 +1869,13 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
           </thead>
           <tbody>
             {cadreB.map((ligne) => (
-              <Tableau2057CadreBRow key={ligne.code} ligne={ligne} />
+              <Tableau2057CadreBRow
+                key={ligne.code}
+                ligne={ligne}
+                fiscalYearId={fiscalYearId}
+                regime={regime}
+                journals={journals}
+              />
             ))}
             <tr className="bg-bg">
               <td className="px-4 py-2.5 font-semibold text-ink">TOTAUX</td>
@@ -1619,46 +1897,114 @@ function Tableau2057Section({ tableau2057 }: { tableau2057: Tableau2057 }) {
   );
 }
 
-function Tableau2057CadreARow({ ligne }: { ligne: Tableau2057CadreALigne }) {
+/**
+ * 2057 traces "for free" — see CLAUDE.md "Traceability drill-down" and
+ * "Liasse fiscale annexes 2056/2059": every 2057 row's own `code` IS a
+ * bilan actif/passif code (confirmed against tableau-2057.ts's own
+ * CADRE_A_ROWS/CADRE_B_ROWS), so this reuses the exact same
+ * `family="bilan"` trace the bilan section itself uses — no new
+ * backend endpoint, no 2057-specific frontend logic.
+ */
+function Tableau2057CadreARow({
+  ligne,
+  fiscalYearId,
+  regime,
+  journals,
+}: {
+  ligne: Tableau2057CadreALigne;
+  fiscalYearId: string;
+  regime: Regime;
+  journals: Journal[];
+}) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <tr className="border-b border-border last:border-b-0">
-      <td className="px-4 py-2 text-ink">
-        <span className="mr-2 font-medium tabular-nums text-ink-faint">{ligne.code}</span>
-        {ligne.label}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink">
-        {formatMoneyFr(ligne.montantBrut)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.aUnAnAuPlus)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.aPlusDUnAn)}
-      </td>
-    </tr>
+    <>
+      <tr
+        className="cursor-pointer border-b border-border last:border-b-0 hover:bg-bg"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <td className="px-4 py-2 text-ink">
+          <span className="mr-1.5 text-ink-faint">{expanded ? '▾' : '▸'}</span>
+          <span className="mr-2 font-medium tabular-nums text-ink-faint">{ligne.code}</span>
+          {ligne.label}
+        </td>
+        <td className="px-4 py-2 text-right tabular-nums text-ink">
+          {formatMoneyFr(ligne.montantBrut)}
+        </td>
+        <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+          {formatMoneyFr(ligne.aUnAnAuPlus)}
+        </td>
+        <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+          {formatMoneyFr(ligne.aPlusDUnAn)}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={4} className="p-0">
+            <LineTraceDrilldown
+              family="bilan"
+              fiscalYearId={fiscalYearId}
+              lineCode={ligne.code}
+              regime={regime}
+              journals={journals}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
-function Tableau2057CadreBRow({ ligne }: { ligne: Tableau2057CadreBLigne }) {
+function Tableau2057CadreBRow({
+  ligne,
+  fiscalYearId,
+  regime,
+  journals,
+}: {
+  ligne: Tableau2057CadreBLigne;
+  fiscalYearId: string;
+  regime: Regime;
+  journals: Journal[];
+}) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <tr className="border-b border-border last:border-b-0">
-      <td className="px-4 py-2 text-ink">
-        <span className="mr-2 font-medium tabular-nums text-ink-faint">{ligne.code}</span>
-        {ligne.label}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink">
-        {formatMoneyFr(ligne.montantBrut)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.aUnAnAuPlus)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.aPlusDUnAnEt5AnsAuPlus)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.aPlusDe5Ans)}
-      </td>
-    </tr>
+    <>
+      <tr
+        className="cursor-pointer border-b border-border last:border-b-0 hover:bg-bg"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <td className="px-4 py-2 text-ink">
+          <span className="mr-1.5 text-ink-faint">{expanded ? '▾' : '▸'}</span>
+          <span className="mr-2 font-medium tabular-nums text-ink-faint">{ligne.code}</span>
+          {ligne.label}
+        </td>
+        <td className="px-4 py-2 text-right tabular-nums text-ink">
+          {formatMoneyFr(ligne.montantBrut)}
+        </td>
+        <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+          {formatMoneyFr(ligne.aUnAnAuPlus)}
+        </td>
+        <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+          {formatMoneyFr(ligne.aPlusDUnAnEt5AnsAuPlus)}
+        </td>
+        <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
+          {formatMoneyFr(ligne.aPlusDe5Ans)}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={5} className="p-0">
+            <LineTraceDrilldown
+              family="bilan"
+              fiscalYearId={fiscalYearId}
+              lineCode={ligne.code}
+              regime={regime}
+              journals={journals}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

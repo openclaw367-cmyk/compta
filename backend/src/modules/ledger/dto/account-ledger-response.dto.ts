@@ -34,6 +34,13 @@ export class AccountLedgerLineDto {
       'Cumulative debit-minus-credit balance up to and including this line, as a money string.',
   })
   runningBalance!: string;
+
+  @ApiProperty({
+    description:
+      "How many documents (justificatifs) are attached to this line's own écriture — see " +
+      'CLAUDE.md "Supporting-document attachments". Same reshape as EcritureWithDocumentCount.',
+  })
+  documentCount!: number;
 }
 
 /** Response for GET /ledger/accounts/:accountId — one account's grand livre. */

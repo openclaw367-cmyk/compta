@@ -2575,6 +2575,250 @@ its own beyond what those services already expose.
   écriture itself was reversed and the reversal validated, restoring
   the exact original figures.
 
+## Supporting-document attachments
+
+`src/modules/documents/` (shipped 2026-08-25, commit `94ec7aa`) lets a
+justificatif (invoice/receipt PDF or image) attach to an écriture, be
+viewed inline, and — separately — prefill or suggest a new draft's own
+fields before it's ever saved. **This section was missing from
+CLAUDE.md until 2026-08-29**, discovered while reconciling
+`specs/liasse-drilldown-traceability-implementation-spec.md` (the
+drill-down's own justificatif hop needs this feature) — several code
+comments elsewhere in this codebase (`frontend/src/api/queries.ts`,
+`EcritureEditor.tsx`) already pointed at "CLAUDE.md 'Supporting-document
+attachments — Part 2/3'" as if a section existed; it never did. Written
+now from the shipped code and its own commit message, not reconstructed
+from those comments' assumptions.
+
+- **Layer 1 — attach, view, replace, remove.** `EcritureDocument`
+  (`schema.prisma`, migration `20260825191240_add_ecriture_documents`)
+  — `id`, `companyId`, `ecritureId` (required, non-nullable — a document
+  cannot exist without a real écriture already behind it, no
+  "pending, unattached" state anywhere in this schema), `fileName`,
+  `mimeType`, `sizeBytes`, `storagePath`, `uploadedAt`. Files live on
+  local disk (`DOCUMENT_STORAGE_DIR`, per-company subfolder,
+  server-generated filenames only — never the original filename used as
+  a path). `EcritureDocumentsController`
+  (`entries/:ecritureId/documents`) exposes `GET` (list), `GET
+  /audit-log`, `GET /:id/file` (streamed `inline`, never a download
+  prompt — the viewer opens it directly), `POST` (attach), `PUT /:id`
+  (replace), `DELETE /:id` (remove) — all on `EcritureDocumentsService`.
+  **Deliberately allowed on ANY entry, draft or already-validated,
+  never gated by `assertDraft()`/`assertFiscalYearOpen()`** — a document
+  is metadata about an entry, never part of its balance or compliance
+  content, same reasoning as `lettrage` (see "Bank reconciliation —
+  Layer 1a" below). Every mutation (`ATTACHED`/`REPLACED`/`REMOVED`) is
+  logged to `EcritureDocumentAuditLog` (`ecritureId`, `action`,
+  `fileName`, `occurredAt` — no "who," this app has no auth/user-identity
+  model to honestly attribute one) — the audit trail is what closes the
+  compliance gap that allowing this on a validated entry would otherwise
+  open.
+  - **A real bug found live, fixed at the schema level, migration
+    `20260825194245_cascade_delete_ecriture_documents`**: deleting a
+    draft that had a document attached threw a raw FK-violation 500 —
+    `EntriesService.remove()` has no knowledge of documents by design
+    (avoiding a circular module dependency, same discipline
+    bank-reconciliation later followed for its own orphaned-match fix),
+    so `EcritureDocument.ecriture` now cascades on delete at the schema
+    level instead of needing `EntriesModule` to know this module exists.
+  - `EcritureWithDocumentCount` (`entries.service.ts:31`) reshapes
+    Prisma's `_count.documents` into a flat `documentCount: number` on
+    every `Ecriture` `findAll()`/`findOne()` result — never leaking
+    Prisma's own `_count` wrapper shape at the API boundary.
+    `DocumentIndicator({ ecritureId, documentCount })`
+    (`frontend/src/components/journal/DocumentViewer.tsx:39`) is the one
+    reusable list-row entry point — always rendered (not just when
+    `documentCount > 0`, so attaching a *first* document has an
+    affordance too), muted/outline when empty, a filled count badge once
+    documents exist; click opens `DocumentViewerModal`. Used identically
+    in `EcrituresList.tsx` and `EcritureEditor.tsx` — the same component,
+    not a parallel implementation per screen.
+- **Layer 2 — deterministic prefill from a document, before the
+  écriture has an id yet.** `InvoiceExtractionService` (relocated out of
+  `ai-chat` into its own leaf module, `invoice-extraction/`, so both the
+  assistant and the journal-entry flow import the same instance rather
+  than a parallel copy — see CLAUDE.md "AI chatbot Phase 2" for its own
+  extraction discipline: a field is either matched by an anchored regex
+  and tagged `source: "parsed"`, or simply absent, never guessed).
+  Stateless `POST /documents/extract` (single file, no persistence) lets
+  `EcritureEditor.tsx` prefill `pieceRef`/date/reference amounts for a
+  brand-new draft via "Insérer" buttons next to each extracted field —
+  confirmed live end to end this session (batch invoice queue, 2026-08-29)
+  and originally verified live at ship time.
+- **Layer 3 — "Comptable IA," opt-in, cloud-only.** A toggle in
+  `EcritureEditor.tsx`, gated on a configured cloud credential (never
+  local — the prior local-model benchmark already showed local models
+  can't reliably suggest accounts, see CLAUDE.md "AI chatbot Phase 2"
+  §5/§5b). `DocumentSuggestionService`
+  (`src/modules/documents/document-suggestion.service.ts`) reuses
+  `ChatOrchestratorService.runTurn()` + `CloudProposeToolsService`
+  verbatim for one stateless cloud turn (`history: []`, no `ChatSession`
+  persisted) — the SAME gate and `propose_ecriture` review discipline
+  the assistant's own cloud tier already uses, not a parallel
+  implementation. A suggestion (`{ proposal: ProposedEcriture | null,
+  message: string | null }`) only merges into the editor's own
+  still-editable draft rows on an explicit "Appliquer" — the ordinary
+  "Enregistrer" save path (`useCreateEcriture()`) is completely
+  unchanged; this toggle can never itself write to the ledger.
+- **Verified live end to end at ship time** (2026-08-25): attached/
+  viewed/replaced/removed a real PDF against the FR demo company
+  (including on an already-validated entry, confirmed via its audit
+  log), and created a new draft with a real invoice PDF whose
+  deterministic prefill was inserted and persisted after save. Backend:
+  482 tests passing at the time, `tsc`/`eslint` clean; frontend
+  `tsc`/`eslint`/`vite build` clean. Reused extensively since by two
+  later features with no changes needed to this module itself: bank
+  reconciliation Layer 1a's own statement-line-to-écriture flow, and the
+  batch invoice review queue (2026-08-29), which is built almost
+  entirely on top of `InvoiceExtractionService`/`DocumentSuggestionService`
+  as-is.
+
+## Traceability drill-down (Tier 1)
+
+`backend/src/modules/liasse/liasse-line-trace.ts` (as of 2026-08-29) lets
+any drillable bilan/CDR report line be expanded, in place, down to the
+accounts that produced it and then further down to the écritures on
+each account — reusing the Grand Livre's own row-expand
+(`AccountLedgerDrilldown`) and the supporting-document indicator (see
+"Supporting-document attachments" above) as the bottom of the chain.
+Full design and the reconciliation against the original 2026-08-24 spec
+are in `specs/liasse-drilldown-traceability-implementation-spec.md`.
+Built strictly Tier 1 only, per the build instruction — no bulk/
+automatic anything, and explicitly stopped for review before any Tier 2
+work.
+
+- **Reverse reuses forward via one shared primitive — no separately-
+  written reverse mapping anywhere.** `resolveLineContribution()`
+  (new, `liasse-line-rules.ts`) is the actual reverse-trace engine:
+  given one account's number and balance, it returns `{ code,
+  contribution }` — the SAME `matchingRules()`/`matchingDualNatureRule()`
+  private primitives `classifyAccounts()` (the forward engine) already
+  used are reused here, not duplicated. `resolveLineCode()` (pre-
+  existing, used by 2057's montant-brut regrouping) is now a thin
+  wrapper over `resolveLineContribution()` — zero external behavior
+  change, all 14 of its pre-existing tests pass unmodified.
+- **The oracle, non-negotiable, exactly as instructed**:
+  `assertLineTraceabilitySums()` sums `resolveLineContribution()`
+  results independently per account and asserts the total equals
+  `classifyAccounts()`'s own total for that code — two genuinely
+  separate derivations, not the same call checked against itself.
+  Throws `ConflictException` naming both figures on mismatch, same
+  discipline as `assertVncTiesToLedger`/`assertCashFlowReconciles`
+  elsewhere in this app.
+- **Dual-nature lines were tested hardest, per the build instruction,
+  and the landmine held**: a dual-nature account (512/514/516/517,
+  455/428/438/448/458/467/468) routes to its debit-line or credit-line
+  by its own AGGREGATE balance sign, never per-ligne — the exact same
+  rule `classifyAccounts()` already used, now reused unchanged for the
+  reverse direction. Verified both by oracle (`CF`'s single-account
+  debit branch, `DU`'s two-account credit branch summing
+  40 000,00 + 3 000,00 = 43 000,00, and a live sign-flip test) and live
+  against real data on two independent companies.
+- **Non-drillable lines are refused server-side, not filtered by
+  frontend convention.** `traceLine()`'s own `rules.find((r) => r.code
+  === lineCode)` check is the entire mechanism — a derived aggregate
+  with no rule-table entry (bilan's `DI`, a CDR subtotal like `HM`) or
+  an unknown code throws `BadRequestException` naming it, honestly,
+  rather than faking a decomposition. No frontend exclusion list
+  exists or is needed.
+- **Regime-aware, and NOT inferred from `Company.regime` — a real bug
+  found and fixed before shipping Tier 1.** `LineTraceQueryDto.regime`
+  is a REQUIRED, caller-supplied field. The first version branched on
+  `Company.regime` instead; that broke the exact case a second later
+  look caught: `ComparisonSection` (see "Liasse fiscale — comparison
+  view..." above) renders the regime the company DIDN'T pick, so a
+  click on a comparison-view row must trace against THAT regime's rule
+  table, not the company's own official one — inferring from
+  `Company.regime` would have silently used the wrong table (e.g. a
+  REEL_NORMAL company's 2033-A comparison rows traced against
+  2050-series codes, which don't exist there, spuriously refusing a
+  real, traceable line as "pas traçable"). Fixed by making `regime` an
+  explicit, required query param the frontend always supplies from
+  `result.regime` — the primary section passes the regime it's
+  actually rendering, `ComparisonSection` passes its own, independent
+  `result.regime`. Confirmed live: before the fix this would have
+  misfired; after, tracing code `028` inside the FR demo company's
+  (REEL_NORMAL) own 2033-A *comparison* section returns a correct 200
+  with the real contributing account, and omitting `regime` entirely
+  now returns a clear 400 naming the missing field.
+- **2057 traces "for free"** — confirmed via `tableau-2057.ts`'s own
+  `CADRE_A_ROWS`/`CADRE_B_ROWS` that every 2057 row's `code` IS a
+  literal bilan code (`BX`, `DZ`, ...), so `Tableau2057CadreARow`/
+  `Tableau2057CadreBRow` reuse the exact same `family="bilan"` trace
+  with zero new backend logic and zero 2057-specific frontend code.
+- **Regime-agnostic at the wiring layer, proven not assumed**:
+  `LiasseService.traceBilanLine()`/`traceCdrLine()` branch only on
+  which rule tables to pass to the SAME `traceLine()` — a dedicated
+  test drives a REEL_SIMPLIFIE trace through the 2033-A code space
+  (`'010'`, disjoint from the 2050-series' `AN`/`BX`/...) and confirms
+  it resolves correctly, proving the branch actually switches tables
+  rather than just carrying data through. `CDR_RULES` in both
+  `compte-resultat-2052-2053.ts` and `compte-resultat-2033-b.ts`, and
+  all three rule tables in `bilan-2033-a.ts`, were module-private until
+  this pass — a real, previously-unflagged export gap found mid-build
+  (the earlier reconciliation pass had only flagged CA3's constants),
+  now exported and imported under aliases (`CDR_RULES_2050`/
+  `CDR_RULES_2033`, etc.) since both files use the identical name for
+  disjoint code spaces.
+- **The GET/POST discipline already established for reads elsewhere in
+  this app** (see "Dashboard" above): `GET /liasse/bilan-line-trace`
+  and `GET /liasse/cdr-line-trace`, not POST — auto-fetched on row
+  expand, not a triggered action.
+- **Frontend**: `LineTraceDrilldown` (new,
+  `components/ledger/LineTraceDrilldown.tsx`) is the one component
+  every drillable row expands into, picking `useTraceBilanLine`/
+  `useTraceCdrLine` by its `family` prop; each traced account expands
+  further into the UNMODIFIED `AccountLedgerDrilldown` (which itself
+  gained a `DocumentIndicator` next to each écriture's libellé this
+  same pass — a bonus, since it means the ordinary Grand Livre page
+  also gained the justificatif indicator "for free"). `ActifRow`/
+  `PassifRow` (shared verbatim between the 2050-series bilan and the
+  2033-A comparison view — making one drillable makes both), the new
+  `CdrLineRow` (replacing a former plain `renderCdrRow` function; the
+  always-derived `CdrTotalRow` subtotals stay deliberately
+  non-clickable), and `Tableau2057CadreARow`/`Tableau2057CadreBRow` all
+  follow the same inline click-to-expand idiom `TrialBalanceTable.tsx`
+  already established. `LedgerService.accountLedger()` gained
+  `documentCount` (a `_count.documents` reshape, mirroring
+  `entries.service.ts`'s `withDocumentCount()` pattern, duplicated
+  locally rather than cross-module-imported) so `AccountLedgerDrilldown`
+  can show the indicator without a second round trip.
+- **Verified two ways, on both required companies, plus a real browser
+  click-through.** 13 hand-traced oracle tests in
+  `liasse-line-trace.spec.ts` (reusing `liasse-oracle-fixture.ts`, not
+  a new fixture) covering both bilan and CDR, both dual-nature
+  branches, the two-account dual-nature sum, a live sign-flip, and
+  three non-drillable-line refusals (`DI`, `HM`, an unknown code).
+  5 more in `liasse.service.ts`'s own wiring tests (regime branching by
+  `dto.regime`, deliberately proven against a company whose OWN
+  `Company.regime` is the OTHER value — the regression test for the
+  bug above — plus the "account no longer exists" guard). 586 backend
+  tests passing overall; `tsc`/`eslint`/`vite build` all clean. Live,
+  via curl AND a real browser click-through, on the FR demo company:
+  `BX` (dual-nature-free, ties to 6 050,00), `CF` (dual-nature debit
+  branch, ties to 32 355,00), `DX`, `FC` (CDR), `DI` (correctly
+  refused) — then in the browser, generated the liasse, expanded `BX`,
+  expanded the `411000` account it traced to, and opened the
+  "1 document joint" indicator on a real écriture, confirming the full
+  chain (line → accounts → écritures → justificatif) live, not just
+  via API — and, after the regime fix, expanded code `028` inside the
+  comparison view specifically, confirming the exact case that used to
+  misfire now traces correctly, with `regime=REEL_SIMPLIFIE` visible on
+  the wire. Separately live on "Société Test Multi-Année" (`x-company-
+  id: cmsm0x5cc0000o5j8z8a3rr53`, `fiscalYearId:
+  cmsm0xdlq0004o5j8ja1yc84k`): `CF` (single-account dual-nature branch,
+  ties to 14 000,00 — matching this fixture's already-documented
+  trésorerie figure elsewhere in this file) and `AN` (ties to
+  50 000,00), both re-run with the now-required `regime` param to
+  confirm the fixed API shape holds on a second, independent dataset.
+  A test document was deliberately left attached to a real écriture on
+  the FR demo company (n°4, "Vente marchandises - Client Petit") after
+  this pass specifically so a chain ending in a real justificatif is
+  already there to find, rather than cleaned up immediately.
+- **Deferred to Tier 2, not started**: whatever the user's own review
+  of this Tier 1 result surfaces. No scope for Tier 2 has been fixed
+  yet — this file will be updated again once that's decided.
+
 ## Bank reconciliation — Layer 1a (statement import + matching + review)
 
 `src/modules/bank-accounts/` + `src/modules/bank-reconciliation/`

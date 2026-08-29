@@ -20,7 +20,14 @@ import { LineRule, classifyAccounts } from './liasse-line-rules';
  * implying "computed as zero".
  */
 
-const CDR_RULES: LineRule[] = [
+/**
+ * Exported (2026-08-29) so the traceability drill-down's reverse
+ * mapping (`liasse-line-trace.ts`) can reuse this exact table — see
+ * CLAUDE.md "Traceability drill-down". No behavior change: this was
+ * already the single source of truth `classifyAccounts()` reads below;
+ * only its visibility changed.
+ */
+export const CDR_RULES: LineRule[] = [
   { code: 'FC', label: 'Ventes de marchandises', prefixes: ['707', '7097'], direction: 'credit' },
   {
     code: 'FF',

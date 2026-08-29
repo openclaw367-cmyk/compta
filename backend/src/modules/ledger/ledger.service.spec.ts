@@ -112,6 +112,7 @@ describe('LedgerService', () => {
             pieceRef: 'FA-0001',
             libelle: 'Achat',
             journal: { code: 'AC' },
+            _count: { documents: 2 },
           },
         },
         {
@@ -125,6 +126,7 @@ describe('LedgerService', () => {
             pieceRef: 'REG-0001',
             libelle: 'Règlement',
             journal: { code: 'BQ' },
+            _count: { documents: 0 },
           },
         },
       ]);
@@ -133,7 +135,12 @@ describe('LedgerService', () => {
 
       expect(result.lines).toHaveLength(2);
       expect(result.lines[0]).toEqual(
-        expect.objectContaining({ debit: '1000.00', credit: '0.00', runningBalance: '1000.00' }),
+        expect.objectContaining({
+          debit: '1000.00',
+          credit: '0.00',
+          runningBalance: '1000.00',
+          documentCount: 2,
+        }),
       );
       expect(result.lines[1]).toEqual(
         expect.objectContaining({
@@ -141,6 +148,7 @@ describe('LedgerService', () => {
           credit: '400.00',
           lettrage: 'A1',
           runningBalance: '600.00',
+          documentCount: 0,
         }),
       );
       expect(result.totals).toEqual({ debit: '1000.00', credit: '400.00', balance: '600.00' });

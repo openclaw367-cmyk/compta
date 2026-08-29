@@ -29,12 +29,15 @@ export interface Account {
   parentId: string | null;
 }
 
+/** Shared alias — used wherever a regime needs to be named explicitly, e.g. the line-trace query params. */
+export type Regime = 'REEL_NORMAL' | 'REEL_SIMPLIFIE';
+
 export interface Company {
   id: string;
   name: string;
   jurisdiction: 'FR' | 'MC';
   /** Selects which liasse (2050-series vs. 2033-series) is the official/fileable one — see LiassePage. */
-  regime: 'REEL_NORMAL' | 'REEL_SIMPLIFIE';
+  regime: Regime;
   siren: string | null;
   rci: string | null;
   vatNumber: string | null;
@@ -241,6 +244,7 @@ export interface AccountLedgerLine {
   credit: string;
   lettrage?: string | null;
   runningBalance: string;
+  documentCount: number;
 }
 
 export interface AccountLedgerResponse {
@@ -1149,4 +1153,28 @@ export interface BankAggregatorLinkSummary {
   maskedAccessToken: string;
   status: BankAggregatorLinkStatus;
   lastSyncedAt: string | null;
+}
+
+/**
+ * Traceability drill-down, Tier 1 — see CLAUDE.md "Traceability
+ * drill-down". Response for GET /liasse/bilan-line-trace and
+ * /liasse/cdr-line-trace. `lineValue` is asserted server-side to equal
+ * the sum of every account's own `contribution` — the oracle this
+ * feature is built on; if the backend ever disagreed, it would throw
+ * rather than return this shape at all.
+ */
+export interface TracedAccount {
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  /** This account's own signed contribution to the line's total. */
+  contribution: string;
+}
+
+export interface LineTraceResult {
+  lineCode: string;
+  lineLabel: string;
+  lineValue: string;
+  fiscalYearId: string;
+  accounts: TracedAccount[];
 }

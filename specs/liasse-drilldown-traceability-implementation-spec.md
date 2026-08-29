@@ -1,12 +1,15 @@
 # Drill-down traceability — "click any computed number, see what feeds it"
 
-**Status: scope only. No computation built, no code touched.** This is
-the gated item held back from the 2026-08-24 autonomous UX pass (see
-that session's proposal list) — a REVERSE computation (line → accounts
-→ écritures) sitting on top of several FORWARD computations that were
-each independently verified in their own direction only. It needs its
-own design-then-verify pass, not autonomous UI work, because a wrong
-reverse mapping is a wrong compliance artifact, not a cosmetic bug.
+**Status: Tier 1 SHIPPED (2026-08-29) — see the end of this file for the
+verification summary and CLAUDE.md's own "Traceability drill-down
+(Tier 1)" section for the permanent record. Tiers 2+ not started; no
+scope decided yet.** This was the gated item held back from the
+2026-08-24 autonomous UX pass (see that session's proposal list) — a
+REVERSE computation (line → accounts → écritures) sitting on top of
+several FORWARD computations that were each independently verified in
+their own direction only. It needed its own design-then-verify pass,
+not autonomous UI work, because a wrong reverse mapping is a wrong
+compliance artifact, not a cosmetic bug.
 **Reconciled against current code on 2026-08-29 — see §0 immediately
 below before reading further; a few claims below are refined, one tier
 gains a fourth hop, nothing in scope changed.**
@@ -361,3 +364,39 @@ cleanly" discipline as the autonomous UX pass, and each one needs its
 own hand-traced oracle test **before** the endpoint exists — proving
 the reverse mapping against a literal dataset the same way
 `liasse-oracle-fixture.ts` already does for the forward direction.
+
+## 4. Tier 1 — SHIPPED (2026-08-29)
+
+Step 1 above (bilan 2050/2051, plus CDR 2052/2053 + the 2033-series
+equivalents, plus 2057 tracing for free) shipped together as "Tier 1",
+per the build instruction. Steps 2–6 in §3 are Tier 2+ and NOT started.
+See CLAUDE.md's own "Traceability drill-down (Tier 1)" section for the
+permanent, detailed record — this entry is intentionally a pointer, not
+a duplicate, to avoid the two drifting apart.
+
+- `resolveLineContribution()` (new, `liasse-line-rules.ts`) is the
+  actual reverse-trace primitive, sharing `classifyAccounts()`'s own
+  private matching functions — confirming §2's "reverse reuses forward"
+  requirement was buildable exactly as scoped, with no separately-
+  written reverse mapping anywhere.
+- The oracle (§ above, "non-negotiable") is `assertLineTraceabilitySums()`
+  — a genuinely separate second derivation checked against
+  `classifyAccounts()`'s own total, not the same call reused as its own
+  proof.
+- **One real bug was found and fixed before this was presented for
+  review, not by the reviewer**: the first version inferred which
+  regime's rule table to trace against from `Company.regime`, which
+  silently breaks the comparison view (`ComparisonSection` renders the
+  regime the company did NOT officially pick). Fixed by making `regime`
+  an explicit, required field on the trace request instead of an
+  inferred one — see CLAUDE.md for the full account and the live
+  confirmation both before and after the fix.
+- Verified two ways (oracle tests + live, on both the FR demo company
+  and "Société Test Multi-Année", including a real browser click-through
+  reaching an attached justificatif) — see CLAUDE.md for the full
+  verification summary. §2's non-negotiable oracle held throughout,
+  across bilan lines, CDR lines, and both dual-nature branches
+  (including the two-account `DU` case).
+- Per the build instruction, this stops here for review before any
+  Tier 2 work begins. §3's numbered build order above is the candidate
+  shape for Tier 2, not yet confirmed.

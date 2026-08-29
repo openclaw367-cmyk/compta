@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { AccountLedgerLine, Journal, LedgerTotals } from '../../api/types';
 import { useAccountLedger } from '../../api/queries';
 import { addMoneyStrings, formatMoneyFr, isZeroMoney, subtractMoneyStrings } from '../../lib/money';
+import { DocumentIndicator } from '../journal/DocumentViewer';
 
 function formatDate(iso: string): string {
   const [year, month, day] = iso.slice(0, 10).split('-');
@@ -114,7 +115,12 @@ export function AccountLedgerDrilldown({
                 </td>
                 <td className="py-1.5 pr-3 text-ink-muted">{line.journalCode}</td>
                 <td className="py-1.5 pr-3 text-ink-muted">{line.pieceRef ?? '—'}</td>
-                <td className="py-1.5 pr-3 text-ink">{line.libelle}</td>
+                <td className="py-1.5 pr-3 text-ink">
+                  <div className="flex items-center gap-1.5">
+                    <span>{line.libelle}</span>
+                    <DocumentIndicator ecritureId={line.ecritureId} documentCount={line.documentCount} />
+                  </div>
+                </td>
                 <td className="py-1.5 pr-3 text-right tabular-nums text-ink">
                   {isZeroMoney(line.debit) ? '—' : formatMoneyFr(line.debit)}
                 </td>

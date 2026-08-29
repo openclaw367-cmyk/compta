@@ -118,7 +118,9 @@ export class LedgerService {
         compteId: accountId,
         ecriture: { fiscalYearId: fiscalYear.id, ecritureDate: dateFilter },
       },
-      include: { ecriture: { include: { journal: true } } },
+      include: {
+        ecriture: { include: { journal: true, _count: { select: { documents: true } } } },
+      },
       orderBy: [{ ecriture: { ecritureDate: 'asc' } }, { ecriture: { createdAt: 'asc' } }],
     });
 
@@ -142,6 +144,15 @@ export class LedgerService {
         credit: credit.toApiString(),
         lettrage: ligne.lettrage,
         runningBalance: running.toApiString(),
+        // Same reshape entries.service.ts's withDocumentCount() already
+        // does for the plain écritures list — duplicated here (4 lines,
+        // zero dependencies) rather than imported across modules, same
+        // "no cross-module coupling for a trivial reshape" discipline
+        // bank-reconciliation's own orphaned-match fix already
+        // established. Lets DocumentIndicator (see "Supporting-document
+        // attachments" above) render directly on a drill-down's own
+        // écriture rows — see "Traceability drill-down" below.
+        documentCount: ligne.ecriture._count.documents,
       };
     });
 

@@ -1,9 +1,10 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentCompany } from '../../common/tenant/current-company.decorator';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { LiasseService } from './liasse.service';
 import { ComputeLiasseDto } from './dto/compute-liasse.dto';
+import { LineTraceQueryDto } from './dto/line-trace-query.dto';
 
 @ApiTags('liasse')
 @ApiHeader({
@@ -41,5 +42,31 @@ export class LiasseController {
   @Post('generate-secondary')
   generateSecondary(@CurrentCompany() company: CompanyContext, @Body() dto: ComputeLiasseDto) {
     return this.liasseService.generateSecondary(company, dto);
+  }
+
+  @ApiOperation({
+    summary:
+      'Trace a bilan line back to its contributing accounts (Tier 1 — see CLAUDE.md "Traceability drill-down").',
+    description:
+      'A genuine read (GET, not POST — no side effects, cacheable, same "GET for a real read" ' +
+      "discipline as /dashboard/summary), unlike /generate's own POST — auto-fetched when a report " +
+      'row is expanded, not a triggered action. Reverse-classifies every account in the trial ' +
+      'balance via the SAME rule tables the forward bilan computation uses, then asserts the ' +
+      "detail sums to the line's own value to the centime — throws if it does not. Refuses " +
+      '(naming why) for a non-drillable derived line such as DI. Regime-aware: picks 2050-series ' +
+      'or 2033-series rule tables per Company.regime automatically.',
+  })
+  @Get('bilan-line-trace')
+  traceBilanLine(@CurrentCompany() company: CompanyContext, @Query() dto: LineTraceQueryDto) {
+    return this.liasseService.traceBilanLine(company, dto);
+  }
+
+  @ApiOperation({
+    summary:
+      'Trace a compte de résultat line back to its contributing accounts — same shape as bilan-line-trace.',
+  })
+  @Get('cdr-line-trace')
+  traceCdrLine(@CurrentCompany() company: CompanyContext, @Query() dto: LineTraceQueryDto) {
+    return this.liasseService.traceCdrLine(company, dto);
   }
 }

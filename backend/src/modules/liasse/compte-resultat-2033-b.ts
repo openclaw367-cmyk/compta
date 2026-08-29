@@ -34,7 +34,13 @@ import { LineRule, classifyAccounts } from './liasse-line-rules';
  * either — flagged here deliberately.
  */
 
-const CDR_RULES: LineRule[] = [
+/**
+ * Exported (2026-08-29) so the traceability drill-down's reverse
+ * mapping (`liasse-line-trace.ts`) can reuse this exact table for
+ * REEL_SIMPLIFIE companies — see CLAUDE.md "Traceability drill-down".
+ * No behavior change, visibility only.
+ */
+export const CDR_RULES: LineRule[] = [
   { code: '210', label: 'Ventes de marchandises', prefixes: ['707', '7097'], direction: 'credit' },
   {
     code: '214',

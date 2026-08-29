@@ -607,6 +607,167 @@ describe('LiasseService.generateSecondary', () => {
   });
 });
 
+/**
+ * Traceability drill-down, Tier 1 — see CLAUDE.md "Traceability
+ * drill-down". These tests exercise the SERVICE-level wiring (regime
+ * branch, account-id resolution, the controller's own pass-through
+ * shape) — the reverse-mapping math itself (including the dual-nature
+ * landmine) is proven independently and much more thoroughly in
+ * liasse-line-trace.spec.ts's own hand-traced oracle suite; duplicating
+ * that here would test the same thing twice for no extra confidence.
+ */
+describe('LiasseService.traceBilanLine / traceCdrLine', () => {
+  function makeAccountFindMany(rows: { id: string; number: string; label: string }[]) {
+    return jest.fn((args: { where?: { number?: { in?: string[] } } }) => {
+      const wanted = args?.where?.number?.in ?? [];
+      return Promise.resolve(rows.filter((r) => wanted.includes(r.number)));
+    });
+  }
+
+  it('traces a REEL_NORMAL bilan line, resolving real account ids/labels', async () => {
+    const prisma = makePrismaMock();
+    prisma.ecritureLigne.findMany = jest.fn().mockResolvedValue([
+      {
+        compteId: 'acc-211000',
+        compte: { number: '211000', pcgClass: 2 },
+        debit: new Prisma.Decimal('30000.00'),
+        credit: new Prisma.Decimal('0.00'),
+      },
+    ]);
+    (prisma as unknown as { account: unknown }).account = {
+      findMany: makeAccountFindMany([{ id: 'acc-211000', number: '211000', label: 'Terrains' }]),
+    };
+
+    const result = await service(prisma).traceBilanLine(company, {
+      fiscalYearId: FY_2026.id,
+      lineCode: 'AN',
+      regime: 'REEL_NORMAL',
+    });
+
+    expect(result).toEqual({
+      lineCode: 'AN',
+      lineLabel: expect.any(String),
+      lineValue: '30000.00',
+      fiscalYearId: FY_2026.id,
+      accounts: [
+        {
+          accountId: 'acc-211000',
+          accountNumber: '211000',
+          accountLabel: 'Terrains',
+          contribution: '30000.00',
+        },
+      ],
+    });
+  });
+
+  it('traces a REEL_SIMPLIFIE bilan line using the 2033-A rule tables, driven by dto.regime NOT Company.regime', async () => {
+    const prisma = makePrismaMock();
+    // Deliberately left at the default REEL_NORMAL company record (see
+    // makePrismaMock() line 78) — this is the regression test for the bug
+    // caught while wiring the frontend comparison view: this call must
+    // branch on dto.regime below, never on the company's own official
+    // regime, or a REEL_NORMAL company's 2033-A comparison rows would be
+    // traced against the wrong (2050-series) rule table and spuriously
+    // refused as "not traçable".
+    prisma.ecritureLigne.findMany = jest.fn().mockResolvedValue([
+      {
+        compteId: 'acc-207000',
+        compte: { number: '207000', pcgClass: 2 },
+        debit: new Prisma.Decimal('5000.00'),
+        credit: new Prisma.Decimal('0.00'),
+      },
+    ]);
+    (prisma as unknown as { account: unknown }).account = {
+      findMany: makeAccountFindMany([
+        { id: 'acc-207000', number: '207000', label: 'Fonds commercial' },
+      ]),
+    };
+
+    // '010' is 2033-A's own code for this account (bilan-2033-a.ts) — a
+    // different code space entirely from the 2050-series' 'AN'/'BX'/...,
+    // so tracing it successfully proves the REEL_SIMPLIFIE branch really
+    // used the 2033-A rule tables, not the 2050-series ones.
+    const result = await service(prisma).traceBilanLine(company, {
+      fiscalYearId: FY_2026.id,
+      lineCode: '010',
+      regime: 'REEL_SIMPLIFIE',
+    });
+    expect(result.lineValue).toBe('5000.00');
+    expect(result.accounts).toEqual([
+      {
+        accountId: 'acc-207000',
+        accountNumber: '207000',
+        accountLabel: 'Fonds commercial',
+        contribution: '5000.00',
+      },
+    ]);
+  });
+
+  it('traces a CDR line', async () => {
+    const prisma = makePrismaMock();
+    prisma.ecritureLigne.findMany = jest.fn().mockResolvedValue([
+      {
+        compteId: 'acc-707000',
+        compte: { number: '707000', pcgClass: 7 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('30000.00'),
+      },
+    ]);
+    (prisma as unknown as { account: unknown }).account = {
+      findMany: makeAccountFindMany([
+        { id: 'acc-707000', number: '707000', label: 'Ventes de marchandises' },
+      ]),
+    };
+
+    const result = await service(prisma).traceCdrLine(company, {
+      fiscalYearId: FY_2026.id,
+      lineCode: 'FC',
+      regime: 'REEL_NORMAL',
+    });
+    expect(result.lineValue).toBe('30000.00');
+    expect(result.accounts).toEqual([
+      {
+        accountId: 'acc-707000',
+        accountNumber: '707000',
+        accountLabel: 'Ventes de marchandises',
+        contribution: '30000.00',
+      },
+    ]);
+  });
+
+  it('refuses a non-drillable line (DI) rather than faking a decomposition', async () => {
+    const prisma = makePrismaMock();
+    (prisma as unknown as { account: unknown }).account = { findMany: makeAccountFindMany([]) };
+    await expect(
+      service(prisma).traceBilanLine(company, {
+        fiscalYearId: FY_2026.id,
+        lineCode: 'DI',
+        regime: 'REEL_NORMAL',
+      }),
+    ).rejects.toThrow(/pas traçable/);
+  });
+
+  it('throws if a traced account number no longer resolves to a real Account row on this company', async () => {
+    const prisma = makePrismaMock();
+    prisma.ecritureLigne.findMany = jest.fn().mockResolvedValue([
+      {
+        compteId: 'acc-211000',
+        compte: { number: '211000', pcgClass: 2 },
+        debit: new Prisma.Decimal('30000.00'),
+        credit: new Prisma.Decimal('0.00'),
+      },
+    ]);
+    (prisma as unknown as { account: unknown }).account = { findMany: makeAccountFindMany([]) };
+    await expect(
+      service(prisma).traceBilanLine(company, {
+        fiscalYearId: FY_2026.id,
+        lineCode: 'AN',
+        regime: 'REEL_NORMAL',
+      }),
+    ).rejects.toThrow(/no longer exists/);
+  });
+});
+
 function service(prisma: ReturnType<typeof makePrismaMock>): LiasseService {
   return new LiasseService(prisma as unknown as PrismaService);
 }

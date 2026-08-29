@@ -31,7 +31,9 @@ import type {
   ImportPreviewResponse,
   Journal,
   LiasseAnyResult,
+  LineTraceResult,
   LocalModelAvailability,
+  Regime,
   ResultatFiscalResult,
   StatementLineMatchProposal,
   StatementPreviewResponse,
@@ -508,6 +510,52 @@ export function useAccountLedger(accountId: string | null, params: PeriodParams)
         `/ledger/accounts/${accountId}${periodQueryString(params)}`,
       ),
     enabled: Boolean(accountId && params.fiscalYearId),
+  });
+}
+
+/**
+ * Traceability drill-down, Tier 1 — see CLAUDE.md "Traceability
+ * drill-down". A genuine read (GET, auto-fetched when a report row is
+ * expanded — not a triggered "Générer" action), same discipline as
+ * every other real read in this file. `enabled` requires both a fiscal
+ * year AND a line code so a collapsed row never fires a request.
+ */
+/**
+ * `regime` is REQUIRED and must be the regime of the SECTION being traced,
+ * not necessarily the company's own official regime — the comparison view
+ * (see ComparisonSection in LiassePage.tsx) renders the OTHER regime's
+ * bilan/CDR alongside the official one, so a click there must pass THAT
+ * regime. The backend branches on this param explicitly, never re-deriving
+ * it from Company.regime — see LineTraceQueryDto's own doc comment for the
+ * bug this fixes.
+ */
+export function useTraceBilanLine(
+  fiscalYearId: string | null,
+  lineCode: string | null,
+  regime: Regime | null,
+) {
+  return useQuery({
+    queryKey: ['liasse-bilan-line-trace', fiscalYearId, lineCode, regime],
+    queryFn: () =>
+      api.get<LineTraceResult>(
+        `/liasse/bilan-line-trace?fiscalYearId=${encodeURIComponent(fiscalYearId!)}&lineCode=${encodeURIComponent(lineCode!)}&regime=${encodeURIComponent(regime!)}`,
+      ),
+    enabled: Boolean(fiscalYearId && lineCode && regime),
+  });
+}
+
+export function useTraceCdrLine(
+  fiscalYearId: string | null,
+  lineCode: string | null,
+  regime: Regime | null,
+) {
+  return useQuery({
+    queryKey: ['liasse-cdr-line-trace', fiscalYearId, lineCode, regime],
+    queryFn: () =>
+      api.get<LineTraceResult>(
+        `/liasse/cdr-line-trace?fiscalYearId=${encodeURIComponent(fiscalYearId!)}&lineCode=${encodeURIComponent(lineCode!)}&regime=${encodeURIComponent(regime!)}`,
+      ),
+    enabled: Boolean(fiscalYearId && lineCode && regime),
   });
 }
 

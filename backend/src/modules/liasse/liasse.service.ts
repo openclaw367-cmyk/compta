@@ -9,14 +9,34 @@ import { CompanyContext } from '../../common/tenant/company-context';
 import { Money } from '../../common/decimal';
 import { computeFixedAssetSummary } from '../depreciation/fixed-asset-invariants';
 import { ComputeLiasseDto } from './dto/compute-liasse.dto';
+import { LineTraceQueryDto } from './dto/line-trace-query.dto';
 import { LiasseLigne, buildTrialBalance } from './trial-balance-engine';
-import { Bilan2050, computeBilan2050, resolveImmobilisationLineCode } from './bilan-2050';
-import { Bilan2033A, computeBilan2033A } from './bilan-2033-a';
 import {
+  ACTIF_RULES as ACTIF_RULES_2050,
+  PASSIF_RULES as PASSIF_RULES_2050,
+  DUAL_NATURE_RULES as DUAL_NATURE_RULES_2050,
+  Bilan2050,
+  computeBilan2050,
+  resolveImmobilisationLineCode,
+} from './bilan-2050';
+import {
+  ACTIF_RULES as ACTIF_RULES_2033,
+  PASSIF_RULES as PASSIF_RULES_2033,
+  DUAL_NATURE_RULES as DUAL_NATURE_RULES_2033,
+  Bilan2033A,
+  computeBilan2033A,
+} from './bilan-2033-a';
+import {
+  CDR_RULES as CDR_RULES_2050,
   CompteResultat2052_2053,
   computeCompteResultat2052_2053,
 } from './compte-resultat-2052-2053';
-import { CompteResultat2033B, computeCompteResultat2033B } from './compte-resultat-2033-b';
+import {
+  CDR_RULES as CDR_RULES_2033,
+  CompteResultat2033B,
+  computeCompteResultat2033B,
+} from './compte-resultat-2033-b';
+import { LineTraceResult, traceLine } from './liasse-line-trace';
 import {
   VncCheckLine,
   assertLiasseArticulation,
@@ -37,6 +57,24 @@ import { ProvisionMovementLigne, Tableau2056, computeTableau2056 } from './table
 import { PROVISION_ACCOUNT_CLASS_PREFIXES } from './provision-categories';
 import { Tableau2057, Tableau2057RawLigne, computeTableau2057 } from './tableau-2057';
 import { Tableau2059AAsset, Tableau2059A, computeTableau2059A } from './tableau-2059';
+
+/** One contributing account in a traceability drill-down — see `liasse-line-trace.ts`. */
+export interface TracedAccountWithId {
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  /** This account's own signed contribution to the line's total. */
+  contribution: string;
+}
+
+/** Response shape for `traceBilanLine()`/`traceCdrLine()` — see CLAUDE.md "Traceability drill-down". */
+export interface LiasseLineTraceResult {
+  lineCode: string;
+  lineLabel: string;
+  lineValue: string;
+  fiscalYearId: string;
+  accounts: TracedAccountWithId[];
+}
 
 export interface LiasseResult {
   regime: 'REEL_NORMAL';
@@ -120,6 +158,95 @@ export class LiasseService {
       return this.computeReelNormal(company, ctx);
     }
     return this.computeReelSimplifie(ctx.bilanAccounts, ctx.compteResultatAccounts);
+  }
+
+  /**
+   * Traceability drill-down, Tier 1 — bilan family. See CLAUDE.md
+   * "Traceability drill-down" and `liasse-line-trace.ts`'s own doc
+   * comment for the design. Regime-agnostic at this call site: which
+   * rule table is picked is the ONLY branch, `traceLine()` itself is
+   * identical either way — the same engine `generate()` already proved
+   * supports both regimes without changes.
+   *
+   * Branches on `dto.regime` (caller-supplied), NEVER
+   * `ctx.companyRecord.regime` — a real bug caught before shipping: the
+   * comparison view (`generateSecondary()`) renders the regime the
+   * company DIDN'T pick, so a click there must trace against THAT
+   * regime's table, which can differ from the company's own official
+   * one. See `LineTraceQueryDto.regime`'s own doc comment.
+   */
+  async traceBilanLine(
+    company: CompanyContext,
+    dto: LineTraceQueryDto,
+  ): Promise<LiasseLineTraceResult> {
+    const ctx = await this.fetchLedgerContext(company, dto);
+    const { rules, dualNatureRules } =
+      dto.regime === 'REEL_SIMPLIFIE'
+        ? {
+            rules: [...ACTIF_RULES_2033, ...PASSIF_RULES_2033],
+            dualNatureRules: DUAL_NATURE_RULES_2033,
+          }
+        : {
+            rules: [...ACTIF_RULES_2050, ...PASSIF_RULES_2050],
+            dualNatureRules: DUAL_NATURE_RULES_2050,
+          };
+    const traced = traceLine(dto.lineCode, ctx.bilanAccounts, rules, dualNatureRules);
+    return this.withAccountIds(company, ctx.fiscalYear.id, traced);
+  }
+
+  /**
+   * Traceability drill-down, Tier 1 — compte de résultat family. Same
+   * shape as `traceBilanLine()` above, including branching on
+   * `dto.regime` rather than `ctx.companyRecord.regime` for the same
+   * comparison-view reason.
+   */
+  async traceCdrLine(
+    company: CompanyContext,
+    dto: LineTraceQueryDto,
+  ): Promise<LiasseLineTraceResult> {
+    const ctx = await this.fetchLedgerContext(company, dto);
+    const rules = dto.regime === 'REEL_SIMPLIFIE' ? CDR_RULES_2033 : CDR_RULES_2050;
+    const traced = traceLine(dto.lineCode, ctx.compteResultatAccounts, rules);
+    return this.withAccountIds(company, ctx.fiscalYear.id, traced);
+  }
+
+  /**
+   * Resolves each traced account NUMBER back to its real id/label —
+   * `TrialBalanceAccount` (what `traceLine()` works from) only ever
+   * carries the number, never the id, so this is the one place the
+   * drill-down touches Prisma at all. Handed straight to
+   * `AccountLedgerDrilldown` on the frontend, unchanged — see CLAUDE.md.
+   */
+  private async withAccountIds(
+    company: CompanyContext,
+    fiscalYearId: string,
+    traced: LineTraceResult,
+  ): Promise<LiasseLineTraceResult> {
+    const numbers = traced.accounts.map((a) => a.accountNumber);
+    const accountRows = await this.prisma.account.findMany({
+      where: { companyId: company.companyId, number: { in: numbers } },
+    });
+    const byNumber = new Map(accountRows.map((a) => [a.number, a]));
+    return {
+      lineCode: traced.lineCode,
+      lineLabel: traced.lineLabel,
+      lineValue: traced.lineValue,
+      fiscalYearId,
+      accounts: traced.accounts.map((a) => {
+        const row = byNumber.get(a.accountNumber);
+        if (!row) {
+          throw new NotFoundException(
+            `Account "${a.accountNumber}" was traced to line ${traced.lineCode} but no longer exists on this company.`,
+          );
+        }
+        return {
+          accountId: row.id,
+          accountNumber: row.number,
+          accountLabel: row.label,
+          contribution: a.contribution,
+        };
+      }),
+    };
   }
 
   /**

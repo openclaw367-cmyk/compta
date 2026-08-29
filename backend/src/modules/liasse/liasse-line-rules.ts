@@ -67,30 +67,50 @@ function matchingDualNatureRule(
   );
 }
 
+export interface LineContribution {
+  code: string;
+  /**
+   * This account's contribution to `code`'s total, ALREADY signed per
+   * that code's own convention (dual-nature: always positive, whichever
+   * bucket it lands in; ordinary rule: per `rule.direction`) — summing
+   * every account's `contribution` for a given code reproduces
+   * `classifyAccounts()`'s own total for that code exactly. This is the
+   * one place both `resolveLineCode()` (below) and the drill-down
+   * traceability feature's reverse mapping
+   * (`liasse-line-trace.ts`) get their answer from — see CLAUDE.md
+   * "Traceability drill-down" for why routing both through this single
+   * function, rather than each re-deriving the sign convention
+   * separately, is what makes the reverse mapping provably unable to
+   * drift from the forward one.
+   */
+  contribution: Money;
+}
+
 /**
- * Classifies ONE account (by number) into exactly one line's code —
- * the same prefix-matching and dual-nature resolution classifyAccounts
+ * Classifies ONE account (by number) into exactly one line's code AND
+ * its own correctly-signed contribution to that line's total — the
+ * same prefix-matching and dual-nature resolution `classifyAccounts()`
  * uses internally per account, exposed standalone for anything needing
- * a per-account, non-aggregated lookup (e.g. tableau-2057.ts's maturity
- * split, which needs to know which Cadre A/B code a raw EcritureLigne's
- * account belongs to before it's ever aggregated into a
- * TrialBalanceAccount). Throws — never guesses — on zero or multiple
- * matches, same discipline as classifyAccounts itself.
+ * a per-account, non-aggregated lookup. Throws — never guesses — on
+ * zero or multiple matches, same discipline as `classifyAccounts()`
+ * itself.
  *
  * Dual-nature accounts need the account's OWN balance sign to resolve
- * (see DualNatureRule), so `balance` is required — pass the specific
+ * (see `DualNatureRule`), so `balance` is required — pass the specific
  * ligne's own debit/credit-derived amount when classifying a raw ligne
  * rather than an aggregated account.
  */
-export function resolveLineCode(
+export function resolveLineContribution(
   accountNumber: string,
   balance: Money,
   rules: LineRule[],
   dualNatureRules: DualNatureRule[] = [],
-): string {
+): LineContribution {
   const dualNature = matchingDualNatureRule(accountNumber, dualNatureRules);
   if (dualNature) {
-    return balance.isPositive() ? dualNature.debitLine : dualNature.creditLine;
+    return balance.isPositive()
+      ? { code: dualNature.debitLine, contribution: balance }
+      : { code: dualNature.creditLine, contribution: balance.times(-1) };
   }
 
   const matches = matchingRules(accountNumber, rules);
@@ -109,7 +129,26 @@ export function resolveLineCode(
         'account and must be disjoint. This is a mapping bug, not a data problem.',
     );
   }
-  return matches[0].code;
+  const rule = matches[0];
+  const contribution = rule.direction === 'debit' ? balance : balance.times(-1);
+  return { code: rule.code, contribution };
+}
+
+/**
+ * Classifies ONE account into exactly one line's code — a thin wrapper
+ * around `resolveLineContribution()` that discards the contribution,
+ * kept as its own named function since most callers (e.g.
+ * `tableau-2057.ts`'s maturity split) only need the code. Implemented
+ * in terms of `resolveLineContribution()` specifically so the two can
+ * never disagree about which code an account resolves to.
+ */
+export function resolveLineCode(
+  accountNumber: string,
+  balance: Money,
+  rules: LineRule[],
+  dualNatureRules: DualNatureRule[] = [],
+): string {
+  return resolveLineContribution(accountNumber, balance, rules, dualNatureRules).code;
 }
 
 /**

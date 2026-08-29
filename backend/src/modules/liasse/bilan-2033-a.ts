@@ -28,7 +28,13 @@ const DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT = '445662';
 const DEDUCTIBLE_AUTRES_ACCOUNT = '445660';
 const TVA_COLLECTEE_ACCOUNT = '445710';
 
-const ACTIF_RULES: LineRule[] = [
+/**
+ * Exported (2026-08-29) so the traceability drill-down's reverse
+ * mapping (`liasse-line-trace.ts`) can reuse this exact table for
+ * REEL_SIMPLIFIE companies — see CLAUDE.md "Traceability drill-down".
+ * No behavior change, visibility only.
+ */
+export const ACTIF_RULES: LineRule[] = [
   { code: '010', label: 'Fonds commercial (brut)', prefixes: ['207'], direction: 'debit' },
   { code: '012', label: 'Fonds commercial (amort.)', prefixes: ['2807'], direction: 'credit' },
   {
@@ -159,7 +165,8 @@ const ACTIF_RULES: LineRule[] = [
   },
 ];
 
-const PASSIF_RULES: LineRule[] = [
+/** Exported (2026-08-29), same reason as `ACTIF_RULES` above. */
+export const PASSIF_RULES: LineRule[] = [
   { code: '120', label: 'Capital social ou individuel', prefixes: ['101'], direction: 'credit' },
   { code: '124', label: 'Écarts de réévaluation', prefixes: ['105', '107'], direction: 'credit' },
   { code: '126', label: 'Réserve légale', prefixes: ['1061'], direction: 'credit' },
@@ -255,7 +262,8 @@ const PASSIF_RULES: LineRule[] = [
  * 451/464/458/467/468 — this form is MORE granular than 2050 for this
  * one family, not less.
  */
-const DUAL_NATURE_RULES: DualNatureRule[] = [
+/** Exported (2026-08-29), same reason as `ACTIF_RULES` above. */
+export const DUAL_NATURE_RULES: DualNatureRule[] = [
   { prefixes: ['512', '514', '516', '517'], debitLine: '084', creditLine: '156' },
   { prefixes: ['455'], debitLine: '072', creditLine: '173' },
   { prefixes: ['428', '438', '448'], debitLine: '072', creditLine: '172' },
