@@ -32,6 +32,7 @@ import { ApiError } from '../api/client';
 import { useAppContext } from '../context/appContextStore';
 import { addMoneyStrings, formatMoneyFr, subtractMoneyStrings } from '../lib/money';
 import { LineTraceDrilldown } from '../components/ledger/LineTraceDrilldown';
+import { MovementTraceDrilldown } from '../components/ledger/MovementTraceDrilldown';
 
 const NO_ECRITURES: never[] = [];
 const NO_JOURNALS: never[] = [];
@@ -329,10 +330,10 @@ export function LiassePage() {
                 tableau2054={result.tableau2054}
                 tableau2055={result.tableau2055}
               />
-              <Tableau2054Section tableau2054={result.tableau2054} />
-              <Tableau2055Section tableau2055={result.tableau2055} />
+              <Tableau2054Section tableau2054={result.tableau2054} fiscalYearId={fiscalYearId!} journals={journals} />
+              <Tableau2055Section tableau2055={result.tableau2055} fiscalYearId={fiscalYearId!} journals={journals} />
               <Tableau2056ArticulationBanner bilan={result.bilan} tableau2056={result.tableau2056} />
-              <Tableau2056Section tableau2056={result.tableau2056} />
+              <Tableau2056Section tableau2056={result.tableau2056} fiscalYearId={fiscalYearId!} journals={journals} />
               <Tableau2057ArticulationBanner bilan={result.bilan} tableau2057={result.tableau2057} />
               <Tableau2057Section tableau2057={result.tableau2057} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
               <Tableau2059Section tableau2059={result.tableau2059} />
@@ -1336,7 +1337,49 @@ function TableauxArticulationBanner({
   );
 }
 
-function Tableau2054Section({ tableau2054 }: { tableau2054: Tableau2054 }) {
+/**
+ * Traceability drill-down, Tier 2 — one clickable movement-column cell,
+ * shared by Tableau2054Row/Tableau2055Row/Tableau2056Row below (each
+ * row has up to 3 of these — "fin" never gets one, always derived,
+ * same non-clickable-subtotal convention as Tier 1's CdrTotalRow).
+ */
+function MovementCell({
+  value,
+  active,
+  onClick,
+}: {
+  value: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <td
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') onClick();
+      }}
+      className={[
+        'cursor-pointer px-4 py-2 text-right tabular-nums',
+        active ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:bg-bg',
+      ].join(' ')}
+    >
+      <span className="mr-1 text-ink-faint">{active ? '▾' : '▸'}</span>
+      {formatMoneyFr(value)}
+    </td>
+  );
+}
+
+function Tableau2054Section({
+  tableau2054,
+  fiscalYearId,
+  journals,
+}: {
+  tableau2054: Tableau2054;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
   const byCode = new Map(tableau2054.lignes.map((l) => [l.code, l]));
   const [search, setSearch] = useState('');
   const needle = search.trim().toLowerCase();
@@ -1376,7 +1419,14 @@ function Tableau2054Section({ tableau2054 }: { tableau2054: Tableau2054 }) {
                 {section.codes.map((code) => {
                   const ligne = byCode.get(code);
                   if (!ligne) return null;
-                  return <Tableau2054Row key={code} ligne={ligne} />;
+                  return (
+                    <Tableau2054Row
+                      key={code}
+                      ligne={ligne}
+                      fiscalYearId={fiscalYearId}
+                      journals={journals}
+                    />
+                  );
                 })}
               </SectionRows>
             ))}
@@ -1403,27 +1453,67 @@ function Tableau2054Section({ tableau2054 }: { tableau2054: Tableau2054 }) {
   );
 }
 
-function Tableau2054Row({ ligne }: { ligne: Tableau2054Ligne }) {
+function Tableau2054Row({
+  ligne,
+  fiscalYearId,
+  journals,
+}: {
+  ligne: Tableau2054Ligne;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
+  const [expanded, setExpanded] = useState<'debut' | 'acquisitions' | 'cessions' | null>(null);
+  const toggle = (column: 'debut' | 'acquisitions' | 'cessions') =>
+    setExpanded((c) => (c === column ? null : column));
   return (
-    <tr className="border-b border-border last:border-b-0">
-      <td className="px-4 py-2 text-ink">{ligne.label}</td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.valeurBruteDebut)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.acquisitions)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.cessions)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink">
-        {formatMoneyFr(ligne.valeurBruteFin)}
-      </td>
-    </tr>
+    <>
+      <tr className="border-b border-border last:border-b-0">
+        <td className="px-4 py-2 text-ink">{ligne.label}</td>
+        <MovementCell
+          value={ligne.valeurBruteDebut}
+          active={expanded === 'debut'}
+          onClick={() => toggle('debut')}
+        />
+        <MovementCell
+          value={ligne.acquisitions}
+          active={expanded === 'acquisitions'}
+          onClick={() => toggle('acquisitions')}
+        />
+        <MovementCell
+          value={ligne.cessions}
+          active={expanded === 'cessions'}
+          onClick={() => toggle('cessions')}
+        />
+        <td className="px-4 py-2 text-right tabular-nums text-ink">
+          {formatMoneyFr(ligne.valeurBruteFin)}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={5} className="p-0">
+            <MovementTraceDrilldown
+              family="2054"
+              fiscalYearId={fiscalYearId}
+              code={ligne.code}
+              column={expanded}
+              journals={journals}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
-function Tableau2055Section({ tableau2055 }: { tableau2055: Tableau2055 }) {
+function Tableau2055Section({
+  tableau2055,
+  fiscalYearId,
+  journals,
+}: {
+  tableau2055: Tableau2055;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
   const byCode = new Map(tableau2055.lignes.map((l) => [l.code, l]));
   const [search, setSearch] = useState('');
   const needle = search.trim().toLowerCase();
@@ -1463,7 +1553,14 @@ function Tableau2055Section({ tableau2055 }: { tableau2055: Tableau2055 }) {
                 {section.codes.map((code) => {
                   const ligne = byCode.get(code);
                   if (!ligne) return null;
-                  return <Tableau2055Row key={code} ligne={ligne} />;
+                  return (
+                    <Tableau2055Row
+                      key={code}
+                      ligne={ligne}
+                      fiscalYearId={fiscalYearId}
+                      journals={journals}
+                    />
+                  );
                 })}
               </SectionRows>
             ))}
@@ -1491,23 +1588,55 @@ function Tableau2055Section({ tableau2055 }: { tableau2055: Tableau2055 }) {
   );
 }
 
-function Tableau2055Row({ ligne }: { ligne: Tableau2055Ligne }) {
+function Tableau2055Row({
+  ligne,
+  fiscalYearId,
+  journals,
+}: {
+  ligne: Tableau2055Ligne;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
+  const [expanded, setExpanded] = useState<'debut' | 'dotations' | 'diminutions' | null>(null);
+  const toggle = (column: 'debut' | 'dotations' | 'diminutions') =>
+    setExpanded((c) => (c === column ? null : column));
   return (
-    <tr className="border-b border-border last:border-b-0">
-      <td className="px-4 py-2 text-ink">{ligne.label}</td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.montantDebut)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.dotations)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.diminutions)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink">
-        {formatMoneyFr(ligne.montantFin)}
-      </td>
-    </tr>
+    <>
+      <tr className="border-b border-border last:border-b-0">
+        <td className="px-4 py-2 text-ink">{ligne.label}</td>
+        <MovementCell
+          value={ligne.montantDebut}
+          active={expanded === 'debut'}
+          onClick={() => toggle('debut')}
+        />
+        <MovementCell
+          value={ligne.dotations}
+          active={expanded === 'dotations'}
+          onClick={() => toggle('dotations')}
+        />
+        <MovementCell
+          value={ligne.diminutions}
+          active={expanded === 'diminutions'}
+          onClick={() => toggle('diminutions')}
+        />
+        <td className="px-4 py-2 text-right tabular-nums text-ink">
+          {formatMoneyFr(ligne.montantFin)}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={5} className="p-0">
+            <MovementTraceDrilldown
+              family="2055"
+              fiscalYearId={fiscalYearId}
+              code={ligne.code}
+              column={expanded}
+              journals={journals}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -1593,7 +1722,15 @@ function Tableau2056ArticulationBanner({
   );
 }
 
-function Tableau2056Section({ tableau2056 }: { tableau2056: Tableau2056 }) {
+function Tableau2056Section({
+  tableau2056,
+  fiscalYearId,
+  journals,
+}: {
+  tableau2056: Tableau2056;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
   const byCode = new Map(tableau2056.lignes.map((l) => [l.code, l]));
   const [search, setSearch] = useState('');
   const needle = search.trim().toLowerCase();
@@ -1633,7 +1770,14 @@ function Tableau2056Section({ tableau2056 }: { tableau2056: Tableau2056 }) {
                 {section.codes.map((code) => {
                   const ligne = byCode.get(code);
                   if (!ligne) return null;
-                  return <Tableau2056Row key={code} ligne={ligne} />;
+                  return (
+                    <Tableau2056Row
+                      key={code}
+                      ligne={ligne}
+                      fiscalYearId={fiscalYearId}
+                      journals={journals}
+                    />
+                  );
                 })}
                 <tr className="border-b border-border bg-bg">
                   <td className="px-4 py-2.5 font-semibold text-ink">{section.totalLabel}</td>
@@ -1672,23 +1816,55 @@ function Tableau2056Section({ tableau2056 }: { tableau2056: Tableau2056 }) {
   );
 }
 
-function Tableau2056Row({ ligne }: { ligne: Tableau2056Ligne }) {
+function Tableau2056Row({
+  ligne,
+  fiscalYearId,
+  journals,
+}: {
+  ligne: Tableau2056Ligne;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
+  const [expanded, setExpanded] = useState<'debut' | 'dotations' | 'reprises' | null>(null);
+  const toggle = (column: 'debut' | 'dotations' | 'reprises') =>
+    setExpanded((c) => (c === column ? null : column));
   return (
-    <tr className="border-b border-border last:border-b-0">
-      <td className="px-4 py-2 text-ink">{ligne.label}</td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.montantDebut)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.dotations)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-        {formatMoneyFr(ligne.reprises)}
-      </td>
-      <td className="px-4 py-2 text-right tabular-nums text-ink">
-        {formatMoneyFr(ligne.montantFin)}
-      </td>
-    </tr>
+    <>
+      <tr className="border-b border-border last:border-b-0">
+        <td className="px-4 py-2 text-ink">{ligne.label}</td>
+        <MovementCell
+          value={ligne.montantDebut}
+          active={expanded === 'debut'}
+          onClick={() => toggle('debut')}
+        />
+        <MovementCell
+          value={ligne.dotations}
+          active={expanded === 'dotations'}
+          onClick={() => toggle('dotations')}
+        />
+        <MovementCell
+          value={ligne.reprises}
+          active={expanded === 'reprises'}
+          onClick={() => toggle('reprises')}
+        />
+        <td className="px-4 py-2 text-right tabular-nums text-ink">
+          {formatMoneyFr(ligne.montantFin)}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={5} className="p-0">
+            <MovementTraceDrilldown
+              family="2056"
+              fiscalYearId={fiscalYearId}
+              code={ligne.code}
+              column={expanded}
+              journals={journals}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

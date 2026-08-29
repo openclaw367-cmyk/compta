@@ -57,6 +57,25 @@ import { ProvisionMovementLigne, Tableau2056, computeTableau2056 } from './table
 import { PROVISION_ACCOUNT_CLASS_PREFIXES } from './provision-categories';
 import { Tableau2057, Tableau2057RawLigne, computeTableau2057 } from './tableau-2057';
 import { Tableau2059AAsset, Tableau2059A, computeTableau2059A } from './tableau-2059';
+import {
+  ImmobilisationMovementAssetWithId,
+  Tableau2054TraceResult,
+  traceTableau2054Column,
+} from './tableau-2054-trace';
+import {
+  ImmobilisationDepreciationMovementWithId,
+  ImmobilisationDisposalWithId,
+  Tableau2055TraceResult,
+  traceTableau2055Column,
+} from './tableau-2055-trace';
+import {
+  ProvisionMovementLigneWithAccount,
+  Tableau2056TraceResult,
+  traceTableau2056Column,
+} from './tableau-2056-trace';
+import { Tableau2054TraceQueryDto } from './dto/tableau-2054-trace-query.dto';
+import { Tableau2055TraceQueryDto } from './dto/tableau-2055-trace-query.dto';
+import { Tableau2056TraceQueryDto } from './dto/tableau-2056-trace-query.dto';
 
 /** One contributing account in a traceability drill-down — see `liasse-line-trace.ts`. */
 export interface TracedAccountWithId {
@@ -208,6 +227,131 @@ export class LiasseService {
     const rules = dto.regime === 'REEL_SIMPLIFIE' ? CDR_RULES_2033 : CDR_RULES_2050;
     const traced = traceLine(dto.lineCode, ctx.compteResultatAccounts, rules);
     return this.withAccountIds(company, ctx.fiscalYear.id, traced);
+  }
+
+  /**
+   * Traceability drill-down, Tier 2 — 2054 (immobilisations, valeur
+   * brute movement). See CLAUDE.md "Traceability drill-down" and
+   * `tableau-2054-trace.ts`'s own doc comment for the design (including
+   * why "début" has no "→ écritures" hop). REEL_NORMAL only — 2054 has
+   * no 2033-series equivalent, same scope boundary `generate()` itself
+   * already enforces.
+   */
+  async traceTableau2054(
+    company: CompanyContext,
+    dto: Tableau2054TraceQueryDto,
+  ): Promise<Tableau2054TraceResult> {
+    const ctx = await this.fetchLedgerContext(company, dto);
+    this.assertReelNormalOnly(ctx.companyRecord.regime, '2054');
+    const assets = await this.fetchImmobilisations(company, ctx.fiscalYear);
+    const enriched: ImmobilisationMovementAssetWithId[] = assets.map((asset) => ({
+      accountNumber: asset.account.number,
+      acquisitionDate: asset.acquisitionDate,
+      acquisitionValue: Money.fromDecimal(asset.acquisitionValue),
+      cessionDate: asset.cessionDate,
+      assetId: asset.id,
+      assetLabel: asset.label,
+      accountId: asset.account.id,
+      accountLabel: asset.account.label,
+    }));
+    return traceTableau2054Column(enriched, ctx.fiscalYear, dto.rowCode, dto.column);
+  }
+
+  /**
+   * Traceability drill-down, Tier 2 — 2055 (amortissements movement).
+   * See `tableau-2055-trace.ts`'s own doc comment. REEL_NORMAL only,
+   * same reason as 2054 above.
+   */
+  async traceTableau2055(
+    company: CompanyContext,
+    dto: Tableau2055TraceQueryDto,
+  ): Promise<Tableau2055TraceResult> {
+    const ctx = await this.fetchLedgerContext(company, dto);
+    this.assertReelNormalOnly(ctx.companyRecord.regime, '2055');
+    const assets = await this.fetchImmobilisations(company, ctx.fiscalYear);
+    const assetsDisposedThisYear = assets.filter(
+      (asset) =>
+        asset.cessionDate &&
+        asset.cessionDate >= ctx.fiscalYear.startDate &&
+        asset.cessionDate <= ctx.fiscalYear.endDate,
+    );
+
+    const entries: ImmobilisationDepreciationMovementWithId[] = assets.flatMap((asset) =>
+      asset.depreciationEntries.map((entry) => ({
+        accountNumber: asset.account.number,
+        fiscalYearId: entry.fiscalYearId,
+        fiscalYearEndDate: entry.fiscalYear.endDate,
+        amount: Money.fromDecimal(entry.amount),
+        entryId: entry.id,
+        assetId: asset.id,
+        assetLabel: asset.label,
+        depreciationAccountId: asset.depreciationAccount.id,
+        depreciationAccountNumber: asset.depreciationAccount.number,
+        depreciationAccountLabel: asset.depreciationAccount.label,
+      })),
+    );
+    const disposals: ImmobilisationDisposalWithId[] = assetsDisposedThisYear.map((asset) => ({
+      accountNumber: asset.account.number,
+      amortissementsCumules: computeFixedAssetSummary(asset, asset.depreciationEntries)
+        .amortissementsCumules,
+      assetId: asset.id,
+      assetLabel: asset.label,
+      depreciationAccountId: asset.depreciationAccount.id,
+      depreciationAccountNumber: asset.depreciationAccount.number,
+      depreciationAccountLabel: asset.depreciationAccount.label,
+    }));
+
+    return traceTableau2055Column(
+      entries,
+      disposals,
+      { id: ctx.fiscalYear.id, endDate: ctx.fiscalYear.endDate },
+      dto.categoryCode,
+      dto.column,
+    );
+  }
+
+  /**
+   * Traceability drill-down, Tier 2 — 2056 (provisions). See
+   * `tableau-2056-trace.ts`'s own doc comment. REEL_NORMAL only, same
+   * reason as 2054/2055 above.
+   */
+  async traceTableau2056(
+    company: CompanyContext,
+    dto: Tableau2056TraceQueryDto,
+  ): Promise<Tableau2056TraceResult> {
+    const ctx = await this.fetchLedgerContext(company, dto);
+    this.assertReelNormalOnly(ctx.companyRecord.regime, '2056');
+    const lignes: ProvisionMovementLigneWithAccount[] = ctx.lignes
+      .filter((ligne) =>
+        PROVISION_ACCOUNT_CLASS_PREFIXES.some((prefix) => ligne.compte.number.startsWith(prefix)),
+      )
+      .map((ligne) => ({
+        accountNumber: ligne.compte.number,
+        isOpeningBalance: ligne.ecriture.journal.type === 'A_NOUVEAU',
+        debit: Money.fromDecimal(ligne.debit),
+        credit: Money.fromDecimal(ligne.credit),
+        accountId: ligne.compte.id,
+        accountLabel: ligne.compte.label,
+      }));
+    return traceTableau2056Column(lignes, ctx.fiscalYear.id, dto.categoryCode, dto.column);
+  }
+
+  /**
+   * 2054/2055/2056 have no régime réel simplifié equivalent — see
+   * CLAUDE.md "Liasse fiscale — régime réel simplifié (2033-series)".
+   * `fetchLedgerContext()` already refuses any regime OTHER than
+   * REEL_NORMAL/REEL_SIMPLIFIE; this refuses REEL_SIMPLIFIE
+   * specifically for these three trace endpoints, the same "throw
+   * rather than guess" a REEL_SIMPLIFIE company's own `generate()` call
+   * already applies by simply never computing these tableaux for it.
+   */
+  private assertReelNormalOnly(regime: string, tableauName: string): void {
+    if (regime !== 'REEL_NORMAL') {
+      throw new NotImplementedException(
+        `${tableauName} has no régime réel simplifié equivalent — this trace is only available for a ` +
+          'REEL_NORMAL company.',
+      );
+    }
   }
 
   /**
@@ -458,6 +602,15 @@ export class LiasseService {
       },
       include: {
         account: true,
+        // depreciationAccount is a real, previously-unused-here field on FixedAsset — added for the
+        // traceability drill-down's 2055 trace (Tier 2), which must expand a dotation/diminution
+        // contribution into ITS OWN écritures, and those post to the 28x contra-account, never the
+        // asset's own 21x/20x gross account (`account` above). Reusing the asset's OWN stored
+        // reference here (never guessing a 28x number from the gross account's own prefix, e.g. via
+        // string surgery) is exactly the "never guess" discipline this app holds elsewhere. Purely
+        // additive — no existing caller of fetchImmobilisations() reads this field, so nothing
+        // downstream changes behavior.
+        depreciationAccount: true,
         depreciationEntries: {
           where: {
             postedEcritureId: { not: null },

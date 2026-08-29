@@ -35,6 +35,33 @@ export interface ProvisionMovementLigne {
   credit: Money;
 }
 
+/**
+ * The reverse-trace primitive for 2056 (traceability drill-down, Tier
+ * 2) — see CLAUDE.md "Traceability drill-down". Extracted from
+ * `computeTableau2056()`'s own loop body, same discipline as
+ * tableau-2054.ts/tableau-2055.ts. A ligne contributes to exactly one
+ * column, never more than one — ledger integrity rule 4 ("one posting
+ * side per line") guarantees a non-opening ligne never has both a
+ * non-zero debit AND a non-zero credit, so 'dotations'/'reprises' can
+ * never both apply to the same ligne.
+ */
+export interface ProvisionLigneContribution {
+  categoryCode: string;
+  column: 'debut' | 'dotations' | 'reprises';
+  contribution: Money;
+}
+
+export function classifyProvisionLigne(ligne: ProvisionMovementLigne): ProvisionLigneContribution {
+  const categoryCode = resolveProvisionCategory(ligne.accountNumber).code;
+  if (ligne.isOpeningBalance) {
+    return { categoryCode, column: 'debut', contribution: ligne.credit.minus(ligne.debit) };
+  }
+  if (ligne.credit.isPositive()) {
+    return { categoryCode, column: 'dotations', contribution: ligne.credit };
+  }
+  return { categoryCode, column: 'reprises', contribution: ligne.debit };
+}
+
 export interface Tableau2056Ligne {
   code: string;
   label: string;
@@ -96,19 +123,14 @@ const TOTAL_III_CODES = [
 export function computeTableau2056(lignes: ProvisionMovementLigne[]): Tableau2056 {
   const byCategory = new Map<string, { debut: Money; dotations: Money; reprises: Money }>();
   for (const ligne of lignes) {
-    const category = resolveProvisionCategory(ligne.accountNumber);
-    const bucket = byCategory.get(category.code) ?? {
+    const { categoryCode, column, contribution } = classifyProvisionLigne(ligne);
+    const bucket = byCategory.get(categoryCode) ?? {
       debut: Money.zero(),
       dotations: Money.zero(),
       reprises: Money.zero(),
     };
-    if (ligne.isOpeningBalance) {
-      bucket.debut = bucket.debut.plus(ligne.credit).minus(ligne.debit);
-    } else {
-      bucket.dotations = bucket.dotations.plus(ligne.credit);
-      bucket.reprises = bucket.reprises.plus(ligne.debit);
-    }
-    byCategory.set(category.code, bucket);
+    bucket[column] = bucket[column].plus(contribution);
+    byCategory.set(categoryCode, bucket);
   }
 
   const lignesOut: Tableau2056Ligne[] = PROVISION_CATEGORIES.map((category) => {

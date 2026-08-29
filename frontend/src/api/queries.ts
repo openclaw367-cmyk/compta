@@ -35,6 +35,12 @@ import type {
   LocalModelAvailability,
   Regime,
   ResultatFiscalResult,
+  Tableau2054TraceColumn,
+  Tableau2054TraceResult,
+  Tableau2055TraceColumn,
+  Tableau2055TraceResult,
+  Tableau2056TraceColumn,
+  Tableau2056TraceResult,
   StatementLineMatchProposal,
   StatementPreviewResponse,
   TrialBalanceResponse,
@@ -556,6 +562,57 @@ export function useTraceCdrLine(
         `/liasse/cdr-line-trace?fiscalYearId=${encodeURIComponent(fiscalYearId!)}&lineCode=${encodeURIComponent(lineCode!)}&regime=${encodeURIComponent(regime!)}`,
       ),
     enabled: Boolean(fiscalYearId && lineCode && regime),
+  });
+}
+
+/**
+ * Traceability drill-down, Tier 2 — 2054/2055/2056. See CLAUDE.md
+ * "Traceability drill-down". Same GET/auto-fetched discipline as Tier
+ * 1's own hooks above, REEL_NORMAL only (no regime param — these
+ * annexes have no 2033-series equivalent to disambiguate).
+ */
+export function useTraceTableau2054(
+  fiscalYearId: string | null,
+  rowCode: string | null,
+  column: Tableau2054TraceColumn | null,
+) {
+  return useQuery({
+    queryKey: ['liasse-tableau-2054-trace', fiscalYearId, rowCode, column],
+    queryFn: () =>
+      api.get<Tableau2054TraceResult>(
+        `/liasse/tableau-2054-trace?fiscalYearId=${encodeURIComponent(fiscalYearId!)}&rowCode=${encodeURIComponent(rowCode!)}&column=${encodeURIComponent(column!)}`,
+      ),
+    enabled: Boolean(fiscalYearId && rowCode && column),
+  });
+}
+
+export function useTraceTableau2055(
+  fiscalYearId: string | null,
+  categoryCode: string | null,
+  column: Tableau2055TraceColumn | null,
+) {
+  return useQuery({
+    queryKey: ['liasse-tableau-2055-trace', fiscalYearId, categoryCode, column],
+    queryFn: () =>
+      api.get<Tableau2055TraceResult>(
+        `/liasse/tableau-2055-trace?fiscalYearId=${encodeURIComponent(fiscalYearId!)}&categoryCode=${encodeURIComponent(categoryCode!)}&column=${encodeURIComponent(column!)}`,
+      ),
+    enabled: Boolean(fiscalYearId && categoryCode && column),
+  });
+}
+
+export function useTraceTableau2056(
+  fiscalYearId: string | null,
+  categoryCode: string | null,
+  column: Tableau2056TraceColumn | null,
+) {
+  return useQuery({
+    queryKey: ['liasse-tableau-2056-trace', fiscalYearId, categoryCode, column],
+    queryFn: () =>
+      api.get<Tableau2056TraceResult>(
+        `/liasse/tableau-2056-trace?fiscalYearId=${encodeURIComponent(fiscalYearId!)}&categoryCode=${encodeURIComponent(categoryCode!)}&column=${encodeURIComponent(column!)}`,
+      ),
+    enabled: Boolean(fiscalYearId && categoryCode && column),
   });
 }
 

@@ -2833,9 +2833,186 @@ work.
   test synthétique... ne représente pas une transaction réelle"
   disclaimer on its face, same synthetic-fixture discipline as
   `test-invoice.pdf`/`test-invoice-laptop.pdf` elsewhere in this app.
-- **Deferred to Tier 2, not started**: whatever the user's own review
-  of this Tier 1 result surfaces. No scope for Tier 2 has been fixed
-  yet — this file will be updated again once that's decided.
+- **Tier 2 is now shipped too — see the section immediately below.**
+
+## Traceability drill-down (Tier 2)
+
+`backend/src/modules/liasse/tableau-2054-trace.ts` / `tableau-2055-trace.ts`
+/ `tableau-2056-trace.ts` (as of 2026-08-29, same day as Tier 1) extend
+the drill-down to the 2054/2055/2056 movement annexes — per the
+reconciled spec's own §3 step 3 ("simpler than tier 1, no dual-nature
+landmine at all"). Built and reviewed per the same discipline as Tier
+1: reverse reuses forward via a shared primitive, the sum-ties-to-line
+oracle gates the build, verified on both companies, stopped for review
+before Tier 3.
+
+- **Three genuinely different détail shapes, one per annexe — stated
+  up front so a future reader doesn't expect Tier 1's uniform
+  "account" shape to repeat.** 2054 is FixedAsset-rooted (its own
+  `classifyAssetContributions()`, extracted from
+  `computeTableau2054()`'s loop, returns an ARRAY per asset since an
+  asset can hit both "début-or-acquisitions" AND "cessions" in the
+  same year — a disposed asset that was carried in from a prior year).
+  2055 is `DepreciationEntry`-rooted (`classifyDepreciationEntry()`/
+  `classifyDisposal()`, extracted from `computeTableau2055()`'s two
+  loops). 2056 is account-ligne-rooted (`classifyProvisionLigne()`,
+  extracted from `computeTableau2056()`'s loop) — closest in shape to
+  Tier 1's own bilan/CDR trace. All three extractions are verified
+  zero-behavior-change: every pre-existing test for
+  `computeTableau2054/2055/2056()` (16 tests total) passes unmodified
+  after the refactor.
+- **The oracle, same non-negotiable discipline as Tier 1**: each of
+  the three new trace functions independently re-runs the FULL forward
+  `computeTableau205X()` and compares its own summed détail against
+  that SEPARATE derivation's own line value for the exact (row,
+  column) cell — not the same call checked against itself. 18 new
+  hand-traced oracle tests across the three `*-trace.spec.ts` files,
+  reusing the existing `tableau-2054-2055-oracle-fixture.ts` and
+  `tableau-2056-oracle-fixture.ts` (not new fixtures), covering: a
+  plain single-asset column, 2054's row-merge landmine (a displayed
+  row like `AUTRES_POSTES_INCORPORELLES` folding TWO finer
+  `IMMOBILISATION_CATEGORIES` codes — the trace sums both, reusing
+  `ROWS_2054` — now exported for this — rather than re-deriving the
+  grouping), a disposed asset hitting both "début" and "cessions" in
+  2054, 2055's cross-fiscal-year "début" (an asset's own PRIOR-year
+  entries, one row per entry, not merged per asset), 2055's
+  gross-vs-depreciation-account distinction, and 2056's à-nouveau vs.
+  movement split.
+- **The one genuinely new design question Tier 1 never had to answer:
+  which columns get a "→ écritures" hop at all, since a movement
+  table's "début" figure isn't necessarily dated within the reported
+  fiscal year the way every Tier 1 figure was.** Resolved per-annexe,
+  not by a blanket rule:
+  - **2054's "début" gets NO hop.** `FixedAsset` has no stored
+    reference to which fiscal year it was acquired in (only a raw
+    `acquisitionDate`) — resolving one via a date-range lookup was
+    considered and deliberately NOT built this pass (a real, if small,
+    query the reconciliation pass didn't flag as a prerequisite);
+    guessing the year from the date without that lookup would violate
+    this app's own "never guess" discipline. The détail list itself
+    (which DOES tie to the line via the oracle) is the honest bottom
+    of that specific chain — `Tableau2054TraceResult.drillableToEcritures`
+    is `false` only for "début", and the frontend disables the click
+    and shows an explanatory note rather than a dead ▸.
+    "Acquisitions"/"cessions" ARE fully drillable — both are dated
+    within the reported year by construction (the SAME date-range
+    checks `classifyAssetContributions()` already enforces).
+  - **2055's "début" gets a hop, and a MORE PRECISE one than
+    2054's** — `DepreciationEntry.fiscalYearId` is a real, stored
+    field on every entry, so each "début" détail row carries its OWN
+    correct fiscal year (not the reported one) and the frontend passes
+    THAT year to `AccountLedgerDrilldown`, never guessing. Verified
+    live on "Société Test Multi-Année": Bâtiment B's FY2026-reported
+    "début" row for `CONSTRUCTIONS_SOL_PROPRE` correctly carries
+    FY2025's own id, not FY2026's. "Dotations" and "diminutions" are
+    dated within the reported year by construction, same reasoning as
+    2054's own movement columns.
+  - **2056 needs no per-item resolution at all** — EVERY column,
+    "début" included, is dated within the reported fiscal year by
+    construction (à-nouveau posts a year's own opening balance at
+    exactly that year's `startDate`, a structural fact already
+    documented elsewhere in this file) — so all three columns simply
+    use the reported `fiscalYearId` uniformly.
+- **A real bug caught and fixed BEFORE presenting this for review, not
+  found live** — the same discipline as Tier 1's regime bug. The first
+  version of 2055's détail rows used `entry.accountNumber` (the
+  asset's own GROSS 21x/20x account, kept on the base interface only
+  for `resolveImmobilisationCategory()`'s classification) for the
+  détail row's displayed `accountId`/`accountNumber`, while separately
+  using `entry.depreciationAccountId`/`depreciationAccountLabel` for
+  the id/label — an internally INCONSISTENT row (an id/label pair
+  describing the 28x amortissements account, glued to a NUMBER
+  belonging to the 21x gross account). A test written specifically to
+  assert accountNumber/accountId/accountLabel together caught the
+  mismatch immediately, before any service-layer wiring existed. Fixed
+  by adding `depreciationAccountNumber` alongside the existing
+  `depreciationAccountId`/`depreciationAccountLabel` on
+  `ImmobilisationDepreciationMovementWithId`/`ImmobilisationDisposalWithId`,
+  and using it consistently. Verified live afterward, on the multi-year
+  fixture, that a disposed asset's "diminutions" détail correctly
+  resolves to `281800` (Amortissements des autres immobilisations
+  corporelles), never `214000` (the gross Entrepôt C account).
+- **A real, previously-unflagged prerequisite gap, found and closed as
+  part of this build, not discovered mid-way through wiring** — per the
+  build instruction's own "handle known prerequisites as part of the
+  work" directive. `LiasseService.fetchImmobilisations()`'s Prisma
+  query never fetched `FixedAsset.depreciationAccount` at all (only
+  `account` and `depreciationEntries`) — needed for 2055's own hop,
+  which must resolve the 28x contra-account, never the 21x gross one.
+  Fixed by adding `depreciationAccount: true` to the existing
+  `include` — purely additive, confirmed via the full pre-existing
+  test suite passing unmodified.
+- **New endpoints, same GET/auto-fetched discipline as Tier 1**: `GET
+  /liasse/tableau-2054-trace`, `GET /liasse/tableau-2055-trace`, `GET
+  /liasse/tableau-2056-trace` — `fiscalYearId` + a row/category code +
+  a column (`debut`/`acquisitions`/`cessions` for 2054;
+  `debut`/`dotations`/`diminutions` for 2055;
+  `debut`/`dotations`/`reprises` for 2056). REEL_NORMAL only — none of
+  these three annexes exist for a RÉEL_SIMPLIFIE company (no
+  2033-series equivalent), enforced by a new
+  `LiasseService.assertReelNormalOnly()` helper shared by all three
+  methods rather than three separate ad-hoc checks.
+- **Frontend**: `MovementTraceDrilldown` (new,
+  `components/ledger/MovementTraceDrilldown.tsx`) is ONE shared
+  component for all three annexes — it normalizes each backend's own
+  détail shape (assets / entries+disposals / accounts) into one common
+  row shape before rendering, specifically preserving the one thing
+  that must NOT be collapsed away: `fiscalYearId` is PER-ROW, not
+  fixed for the whole drill-down (see 2055's "début" above). Each of
+  `Tableau2054Row`/`Tableau2055Row`/`Tableau2056Row` in `LiassePage.tsx`
+  gained per-column click targets (`MovementCell`, a small shared
+  component) — up to 3 clickable cells per row (the 4th, "fin", stays
+  a plain non-clickable cell, same non-clickable-subtotal convention
+  as Tier 1's `CdrTotalRow`), each independently expanding its own
+  détail row beneath, mirroring `TrialBalanceTable.tsx`'s established
+  inline-expand idiom exactly like Tier 1 did.
+- **Verified two ways, on both required companies, plus a real browser
+  click-through.** 18 new hand-traced oracle tests across the three
+  `*-trace.spec.ts` files (see above) plus 5 new tests in
+  `liasse.service.spec.ts`'s own wiring block (including the
+  REEL_SIMPLIFIE refusal for all three, and a regression test
+  specifically proving 2055's dotations détail resolves the
+  DEPRECIATION account — the exact bug above — never the gross one) —
+  609 backend tests passing overall; `tsc`/`eslint`/`vite build` all
+  clean on both sides.
+  Live via curl on the FR demo company (2054
+  `AUTRES_CORP_MATERIEL_BUREAU`/acquisitions ties to 450,00 with the
+  real `Matériel informatique` asset resolved; the same row's "début"
+  correctly ties to 0,00 with `drillableToEcritures:false`; an unknown
+  row code correctly refused) and, for the harder cases requiring real
+  movement history, on "Société Test Multi-Année" (`x-company-id:
+  cmsm0x5cc0000o5j8z8a3rr53`, `fiscalYearId:
+  cmsm0xdlq0004o5j8ja1yc84k`): 2054's `CONSTRUCTIONS_SOL_PROPRE`/début
+  (200 000,00, Bâtiment B, not drillable) and
+  `CONSTRUCTIONS_SOL_AUTRUI`/cessions (80 000,00, Entrepôt C's real
+  disposal); 2055's cross-year "début" (confirmed the PRIOR fiscal
+  year id renders, not the reported one) and the disposed asset's
+  dotations/diminutions (both 1 677,78, resolving the depreciation
+  account 281800 correctly); 2056's `GARANTIES_CLIENTS`
+  dotations/reprises (5 000,00/2 000,00) and
+  `DEPREC_COMPTES_CLIENTS`/dotations (1 200,00) — every figure tying
+  exactly to the numbers already documented for this fixture elsewhere
+  in this file. Then, in a real browser on the FR demo company:
+  generated the liasse, confirmed every non-"fin" cell across all
+  three tables renders its own `▸` affordance, clicked the real
+  450,00 € acquisitions cell, confirmed the détail panel showed
+  "Matériel informatique" / `218300`, expanded that asset row, and
+  confirmed the real underlying écriture ("Achat immobilisation -
+  Matériel informatique", journal AC, pièce SAMPLE-AC-0003) rendered
+  via the unmodified `AccountLedgerDrilldown` — the full line → asset
+  → écriture chain, live, not just via API. Separately clicked an
+  EMPTY "début" cell on the same row and confirmed it renders "Aucune
+  contribution pour cette cellule." honestly rather than a blank or
+  broken state.
+- **Deferred to Tier 3, not started**: VAT ligne 08/09/9B/T6 (rate-
+  tagged, no shared classifier — a genuinely new query shape), 2058
+  `WJ`/`WG` (already ledger-suggested off one hardcoded account each,
+  low effort), and 2059-A (blocked on the `FixedAsset` cession-
+  écriture-reference schema decision the reconciled spec's §0 already
+  flagged — `ca3-declaration.ts`'s own constant exports
+  (`findImplementedRate()`, `IMPLEMENTED_RATES`, `COLLECTEE_PREFIX`,
+  etc.) are ALSO a stated Tier-3 prerequisite per that same §0, not yet
+  done). See the spec's own §3/§4 for the full build-order reasoning.
 
 ## Bank reconciliation — Layer 1a (statement import + matching + review)
 

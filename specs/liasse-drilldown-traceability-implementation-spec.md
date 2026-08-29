@@ -1,9 +1,10 @@
 # Drill-down traceability — "click any computed number, see what feeds it"
 
-**Status: Tier 1 SHIPPED (2026-08-29) — see the end of this file for the
-verification summary and CLAUDE.md's own "Traceability drill-down
-(Tier 1)" section for the permanent record. Tiers 2+ not started; no
-scope decided yet.** This was the gated item held back from the
+**Status: Tiers 1 AND 2 SHIPPED (both 2026-08-29) — see §4/§5 at the
+end of this file for the verification summaries and CLAUDE.md's own
+"Traceability drill-down (Tier 1)"/"(Tier 2)" sections for the
+permanent record. Tier 3+ not started; no scope decided yet.** This
+was the gated item held back from the
 2026-08-24 autonomous UX pass (see that session's proposal list) — a
 REVERSE computation (line → accounts → écritures) sitting on top of
 several FORWARD computations that were each independently verified in
@@ -397,6 +398,50 @@ a duplicate, to avoid the two drifting apart.
   verification summary. §2's non-negotiable oracle held throughout,
   across bilan lines, CDR lines, and both dual-nature branches
   (including the two-account `DU` case).
+- Per the build instruction, this stopped there for review before any
+  Tier 2 work began. See §5 below — Tier 2 is now shipped too.
+
+## 5. Tier 2 — SHIPPED (2026-08-29, same day)
+
+§3 step 3 above (2054/2055/2056 — "own category resolvers, no
+dual-nature landmine, independently low-risk") shipped as "Tier 2," per
+the build instruction. Steps 4–6 (VAT/2058, 2059-A, cash flow/analyse
+financière) remain Tier 3+ and NOT started. See CLAUDE.md's own
+"Traceability drill-down (Tier 2)" section for the permanent, detailed
+record — same pointer-not-duplicate discipline as §4 above.
+
+- Confirmed low-risk as predicted: no dual-nature landmine anywhere in
+  2054/2055/2056. A DIFFERENT real risk showed up instead — three
+  genuinely different détail shapes (FixedAsset-rooted, DepreciationEntry-
+  rooted, account-ligne-rooted) and a genuinely new question Tier 1
+  never faced (which movement columns can honestly offer a "→
+  écritures" hop, since a "début" figure isn't always dated within the
+  reported fiscal year). See CLAUDE.md for the full per-annexe
+  resolution.
+- Same "reverse reuses forward via one shared primitive" discipline —
+  `classifyAssetContributions()`/`classifyDepreciationEntry()`/
+  `classifyDisposal()`/`classifyProvisionLigne()`, each extracted from
+  its own `computeTableau205X()`'s existing loop body, zero behavior
+  change (16 pre-existing tests pass unmodified).
+- Same non-negotiable oracle — each trace function independently
+  re-runs the full forward compute and compares against that SEPARATE
+  derivation's own value for the exact cell, not the same call checked
+  against itself.
+- **Two real things found and fixed before this was presented for
+  review, not by the reviewer** (see CLAUDE.md for the full account):
+  an internally-inconsistent détail row (2055's own account
+  id/label/number pulled from two different accounts), caught by a
+  test written specifically to check the three fields together; and a
+  genuine prerequisite gap in `fetchImmobilisations()`'s own Prisma
+  query (never fetched `depreciationAccount` at all), found and closed
+  as part of this build rather than discovered mid-wiring — the
+  discipline the build instruction explicitly asked for.
+- Verified two ways (34 new backend tests: 18 oracle + 5 wiring + the
+  pre-existing 16 confirmed unmodified; plus live, on both the FR demo
+  company and "Société Test Multi-Année," including a real browser
+  click-through reaching a real underlying écriture) — see CLAUDE.md
+  for the full verification summary.
 - Per the build instruction, this stops here for review before any
-  Tier 2 work begins. §3's numbered build order above is the candidate
-  shape for Tier 2, not yet confirmed.
+  Tier 3 work begins. §3's numbered build order above (VAT rate lines,
+  2058 `WJ`/`WG`, 2059-A once its schema decision is resolved) is the
+  candidate shape for Tier 3, not yet confirmed.

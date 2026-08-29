@@ -35,7 +35,11 @@ interface FakeFixedAsset {
   id: string;
   companyId: string;
   accountId: string;
-  account: { number: string };
+  account: { id?: string; number: string; label?: string };
+  /** Optional — the Tier-2 trace tests set it explicitly; every pre-existing test ignores it. */
+  label?: string;
+  /** Optional — same reasoning; a default is supplied by makeFixedAssetFindMany() below. */
+  depreciationAccount?: { id: string; number: string; label: string };
   acquisitionDate: Date;
   acquisitionValue: Prisma.Decimal;
   residualValue: Prisma.Decimal;
@@ -66,7 +70,18 @@ function makeFixedAssetFindMany(assets: FakeFixedAsset[]) {
         filtered = filtered.filter((a) => !a.cessionDate || a.cessionDate >= cessionGte.gte);
       }
       return Promise.resolve(
-        filtered.map((a) => ({ cessionDate: null, cessionPrice: null, ...a })),
+        filtered.map((a) => ({
+          cessionDate: null,
+          cessionPrice: null,
+          label: 'Actif',
+          depreciationAccount: { id: 'dep-default', number: '280000', label: 'Amortissements' },
+          ...a,
+          account: {
+            id: `acc-${a.account.number}`,
+            label: `Compte ${a.account.number}`,
+            ...a.account,
+          },
+        })),
       );
     },
   );
@@ -765,6 +780,157 @@ describe('LiasseService.traceBilanLine / traceCdrLine', () => {
         regime: 'REEL_NORMAL',
       }),
     ).rejects.toThrow(/no longer exists/);
+  });
+});
+
+describe('LiasseService.traceTableau2054 / traceTableau2055 / traceTableau2056', () => {
+  const entriesByAccount = new Map<string, typeof ORACLE_DEPRECIATION_ENTRIES>();
+  for (const entry of ORACLE_DEPRECIATION_ENTRIES) {
+    const list = entriesByAccount.get(entry.accountNumber) ?? [];
+    list.push(entry);
+    entriesByAccount.set(entry.accountNumber, list);
+  }
+  const DEP_ACCOUNT_NUMBER: Record<string, string> = {
+    '213000': '281300',
+    '215400': '281540',
+    '218200': '281820',
+    '218300': '281830',
+  };
+
+  function immobilisationFixture(): {
+    prisma: ReturnType<typeof makePrismaMock>;
+    svc: LiasseService;
+  } {
+    const fixedAssets: FakeFixedAsset[] = ORACLE_ASSETS.map((asset, i) => ({
+      id: `asset-${i}`,
+      companyId: company.companyId,
+      accountId: `account-${asset.accountNumber}`,
+      account: { number: asset.accountNumber },
+      label: `Actif ${asset.accountNumber}`,
+      depreciationAccount: DEP_ACCOUNT_NUMBER[asset.accountNumber]
+        ? {
+            id: `dep-${asset.accountNumber}`,
+            number: DEP_ACCOUNT_NUMBER[asset.accountNumber],
+            label: `Amortissements ${asset.accountNumber}`,
+          }
+        : { id: 'dep-none', number: '280000', label: 'Amortissements' },
+      acquisitionDate: asset.acquisitionDate,
+      acquisitionValue: new Prisma.Decimal(asset.acquisitionValue.toApiString()),
+      residualValue: new Prisma.Decimal('0.00'),
+      depreciationEntries: (entriesByAccount.get(asset.accountNumber) ?? []).map((entry) => ({
+        id: `entry-${asset.accountNumber}-${entry.fiscalYearId}`,
+        fiscalYearId: entry.fiscalYearId,
+        fiscalYear: { endDate: entry.fiscalYearEndDate },
+        amount: new Prisma.Decimal(entry.amount.toApiString()),
+        postedEcritureId: 'some-ecriture-id',
+      })),
+    }));
+    const prisma = makePrismaMock(fixedAssets);
+    prisma.fiscalYear.findFirst.mockResolvedValue({
+      id: ORACLE_FY_2026.id,
+      companyId: company.companyId,
+      label: '2026',
+      startDate: ORACLE_FY_2026.startDate,
+      endDate: ORACLE_FY_2026.endDate,
+      closedAt: null,
+    });
+    return { prisma, svc: new LiasseService(prisma as unknown as PrismaService) };
+  }
+
+  it('traceTableau2054: TERRAINS/debut ties to Terrain A, resolving real asset/account ids', async () => {
+    const { svc } = immobilisationFixture();
+    const result = await svc.traceTableau2054(company, {
+      fiscalYearId: ORACLE_FY_2026.id,
+      rowCode: 'TERRAINS',
+      column: 'debut',
+    });
+    expect(result.columnValue).toBe('50000.00');
+    expect(result.drillableToEcritures).toBe(false);
+    expect(result.assets).toEqual([
+      expect.objectContaining({
+        assetId: 'asset-0',
+        accountId: 'acc-211000',
+        accountNumber: '211000',
+        contribution: '50000.00',
+      }),
+    ]);
+  });
+
+  it('traceTableau2055: dotations resolves the DEPRECIATION account (281300), never the gross one (213000) — the exact bug caught while building this', async () => {
+    const { svc } = immobilisationFixture();
+    const result = await svc.traceTableau2055(company, {
+      fiscalYearId: ORACLE_FY_2026.id,
+      categoryCode: 'CONSTRUCTIONS_SOL_PROPRE',
+      column: 'dotations',
+    });
+    expect(result.columnValue).toBe('10000.00');
+    expect(result.details).toEqual([
+      expect.objectContaining({
+        accountId: 'dep-213000',
+        accountNumber: '281300',
+        fiscalYearId: ORACLE_FY_2026.id,
+        contribution: '10000.00',
+      }),
+    ]);
+  });
+
+  it("traceTableau2055: début resolves each entry's OWN fiscal year, not the reported one", async () => {
+    const { svc } = immobilisationFixture();
+    const result = await svc.traceTableau2055(company, {
+      fiscalYearId: ORACLE_FY_2026.id,
+      categoryCode: 'CONSTRUCTIONS_SOL_PROPRE',
+      column: 'debut',
+    });
+    expect(result.columnValue).toBe('10000.00');
+    expect(result.details[0].fiscalYearId).toBe('fy-2025');
+  });
+
+  it('traceTableau2056: a fresh dotation on a provision account ties, resolving real account ids', async () => {
+    const prisma = makePrismaMock();
+    prisma.ecritureLigne.findMany = jest.fn().mockResolvedValue([
+      {
+        compteId: 'acc-151200',
+        compte: {
+          id: 'acc-151200',
+          number: '151200',
+          label: 'Provisions garanties clients',
+          pcgClass: 1,
+        },
+        ecriture: { journal: { type: 'OD' } },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('5000.00'),
+      },
+    ]);
+    const svc = new LiasseService(prisma as unknown as PrismaService);
+    const result = await svc.traceTableau2056(company, {
+      fiscalYearId: FY_2026.id,
+      categoryCode: 'GARANTIES_CLIENTS',
+      column: 'dotations',
+    });
+    expect(result.columnValue).toBe('5000.00');
+    expect(result.accounts).toEqual([
+      expect.objectContaining({
+        accountId: 'acc-151200',
+        accountNumber: '151200',
+        contribution: '5000.00',
+      }),
+    ]);
+  });
+
+  it('refuses all three for a REEL_SIMPLIFIE company — no 2033-series equivalent exists', async () => {
+    const prisma = makePrismaMock();
+    prisma.company.findFirst.mockResolvedValue({ id: company.companyId, regime: 'REEL_SIMPLIFIE' });
+    const svc = new LiasseService(prisma as unknown as PrismaService);
+    const dto = { fiscalYearId: FY_2026.id };
+    await expect(
+      svc.traceTableau2054(company, { ...dto, rowCode: 'TERRAINS', column: 'debut' }),
+    ).rejects.toThrow(/régime réel simplifié/);
+    await expect(
+      svc.traceTableau2055(company, { ...dto, categoryCode: 'TERRAINS', column: 'debut' }),
+    ).rejects.toThrow(/régime réel simplifié/);
+    await expect(
+      svc.traceTableau2056(company, { ...dto, categoryCode: 'GARANTIES_CLIENTS', column: 'debut' }),
+    ).rejects.toThrow(/régime réel simplifié/);
   });
 });
 

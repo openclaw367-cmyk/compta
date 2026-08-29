@@ -43,6 +43,69 @@ export interface ImmobilisationDisposal {
   amortissementsCumules: Money;
 }
 
+/**
+ * The reverse-trace primitives for 2055 (traceability drill-down, Tier
+ * 2) — see CLAUDE.md "Traceability drill-down". Extracted from
+ * `computeTableau2055()`'s own loop bodies so both directions share the
+ * IDENTICAL classification, same discipline as tableau-2054.ts's
+ * `classifyAssetContributions()`. Two functions, not one, because
+ * `entries` and `disposals` are genuinely separate input lists here
+ * (unlike 2054, where a single asset list drives every column).
+ */
+export interface DepreciationEntryContribution {
+  categoryCode: string;
+  column: 'debut' | 'dotations';
+  contribution: Money;
+}
+
+export function classifyDepreciationEntry(
+  entry: ImmobilisationDepreciationMovement,
+  reportedFiscalYear: { id: string; endDate: Date },
+): DepreciationEntryContribution {
+  if (entry.fiscalYearEndDate > reportedFiscalYear.endDate) {
+    throw new ConflictException(
+      `A depreciation entry for account "${entry.accountNumber}" belongs to a fiscal year ending ` +
+        `${entry.fiscalYearEndDate.toISOString().slice(0, 10)}, after the reported fiscal year ends ` +
+        `(${reportedFiscalYear.endDate.toISOString().slice(0, 10)}) — it must be excluded by the ` +
+        'caller before computing 2055, not passed in.',
+    );
+  }
+  const category = resolveImmobilisationCategory(entry.accountNumber);
+  if (!ROW_CODES.has(category.code)) {
+    throw new ConflictException(
+      `Account "${entry.accountNumber}" has a posted depreciation entry but its category ` +
+        `(${category.code}) has no 2055 row — immobilisations en cours, avances, and financières ` +
+        'are never amortized. This usually means an asset was assigned the wrong account.',
+    );
+  }
+  return {
+    categoryCode: category.code,
+    column: entry.fiscalYearId === reportedFiscalYear.id ? 'dotations' : 'debut',
+    contribution: entry.amount,
+  };
+}
+
+export interface DisposalContribution {
+  categoryCode: string;
+  column: 'diminutions';
+  contribution: Money;
+}
+
+export function classifyDisposal(disposal: ImmobilisationDisposal): DisposalContribution {
+  const category = resolveImmobilisationCategory(disposal.accountNumber);
+  if (!ROW_CODES.has(category.code)) {
+    throw new ConflictException(
+      `Account "${disposal.accountNumber}" has a disposal but its category (${category.code}) has ` +
+        'no 2055 row — immobilisations en cours, avances, and financières are never amortized.',
+    );
+  }
+  return {
+    categoryCode: category.code,
+    column: 'diminutions',
+    contribution: disposal.amortissementsCumules,
+  };
+}
+
 export interface Tableau2055Ligne {
   code: string;
   label: string;
@@ -154,50 +217,28 @@ export function computeTableau2055(
 ): Tableau2055 {
   const byCategory = new Map<string, { debut: Money; dotations: Money; diminutions: Money }>();
   for (const entry of entries) {
-    if (entry.fiscalYearEndDate > reportedFiscalYear.endDate) {
-      throw new ConflictException(
-        `A depreciation entry for account "${entry.accountNumber}" belongs to a fiscal year ending ` +
-          `${entry.fiscalYearEndDate.toISOString().slice(0, 10)}, after the reported fiscal year ends ` +
-          `(${reportedFiscalYear.endDate.toISOString().slice(0, 10)}) — it must be excluded by the ` +
-          'caller before computing 2055, not passed in.',
-      );
-    }
-    const category = resolveImmobilisationCategory(entry.accountNumber);
-    if (!ROW_CODES.has(category.code)) {
-      throw new ConflictException(
-        `Account "${entry.accountNumber}" has a posted depreciation entry but its category ` +
-          `(${category.code}) has no 2055 row — immobilisations en cours, avances, and financières ` +
-          'are never amortized. This usually means an asset was assigned the wrong account.',
-      );
-    }
-    const bucket = byCategory.get(category.code) ?? {
+    const { categoryCode, column, contribution } = classifyDepreciationEntry(
+      entry,
+      reportedFiscalYear,
+    );
+    const bucket = byCategory.get(categoryCode) ?? {
       debut: Money.zero(),
       dotations: Money.zero(),
       diminutions: Money.zero(),
     };
-    if (entry.fiscalYearId === reportedFiscalYear.id) {
-      bucket.dotations = bucket.dotations.plus(entry.amount);
-    } else {
-      bucket.debut = bucket.debut.plus(entry.amount);
-    }
-    byCategory.set(category.code, bucket);
+    bucket[column] = bucket[column].plus(contribution);
+    byCategory.set(categoryCode, bucket);
   }
 
   for (const disposal of disposals) {
-    const category = resolveImmobilisationCategory(disposal.accountNumber);
-    if (!ROW_CODES.has(category.code)) {
-      throw new ConflictException(
-        `Account "${disposal.accountNumber}" has a disposal but its category (${category.code}) has ` +
-          'no 2055 row — immobilisations en cours, avances, and financières are never amortized.',
-      );
-    }
-    const bucket = byCategory.get(category.code) ?? {
+    const { categoryCode, contribution } = classifyDisposal(disposal);
+    const bucket = byCategory.get(categoryCode) ?? {
       debut: Money.zero(),
       dotations: Money.zero(),
       diminutions: Money.zero(),
     };
-    bucket.diminutions = bucket.diminutions.plus(disposal.amortissementsCumules);
-    byCategory.set(category.code, bucket);
+    bucket.diminutions = bucket.diminutions.plus(contribution);
+    byCategory.set(categoryCode, bucket);
   }
 
   const lignes: Tableau2055Ligne[] = ROWS_2055.map((row) => {

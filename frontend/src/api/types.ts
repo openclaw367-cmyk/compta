@@ -1178,3 +1178,69 @@ export interface LineTraceResult {
   fiscalYearId: string;
   accounts: TracedAccount[];
 }
+
+/**
+ * Traceability drill-down, Tier 2 — 2054/2055/2056 movement-table
+ * traces. See CLAUDE.md "Traceability drill-down". Three genuinely
+ * different détail shapes (FixedAsset-rooted, DepreciationEntry-
+ * rooted, Account-rooted) — see each backend trace module's own doc
+ * comment for why.
+ */
+export type Tableau2054TraceColumn = 'debut' | 'acquisitions' | 'cessions';
+export type Tableau2055TraceColumn = 'debut' | 'dotations' | 'diminutions';
+export type Tableau2056TraceColumn = 'debut' | 'dotations' | 'reprises';
+
+export interface Tableau2054AssetTrace {
+  assetId: string;
+  assetLabel: string;
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  contribution: string;
+}
+
+export interface Tableau2054TraceResult {
+  rowCode: string;
+  rowLabel: string;
+  column: Tableau2054TraceColumn;
+  columnValue: string;
+  fiscalYearId: string;
+  /** False only for "debut" — see tableau-2054-trace.ts's own doc comment for why. */
+  drillableToEcritures: boolean;
+  assets: Tableau2054AssetTrace[];
+}
+
+export interface Tableau2055DetailTrace {
+  assetId: string;
+  assetLabel: string;
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  /** The real fiscal year this specific contribution's own écriture is dated in — may differ from the reported year for "debut". */
+  fiscalYearId: string;
+  contribution: string;
+}
+
+export interface Tableau2055TraceResult {
+  categoryCode: string;
+  categoryLabel: string;
+  column: Tableau2055TraceColumn;
+  columnValue: string;
+  details: Tableau2055DetailTrace[];
+}
+
+export interface Tableau2056AccountTrace {
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  contribution: string;
+}
+
+export interface Tableau2056TraceResult {
+  categoryCode: string;
+  categoryLabel: string;
+  column: Tableau2056TraceColumn;
+  columnValue: string;
+  fiscalYearId: string;
+  accounts: Tableau2056AccountTrace[];
+}

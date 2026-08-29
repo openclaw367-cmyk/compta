@@ -32,6 +32,67 @@ export interface ImmobilisationMovementAsset {
   cessionDate: Date | null;
 }
 
+/**
+ * One asset's contribution to one (category, column) cell — 'debut' and
+ * 'acquisitions' are mutually exclusive (an asset is either carried
+ * forward or newly acquired this year), but 'cessions' is independent:
+ * an asset acquired in a PRIOR year and disposed THIS year contributes
+ * to both 'debut' (its brut value was still carried in) AND 'cessions'
+ * (it left this year) — so this returns an array, never a single value.
+ */
+export interface AssetColumnContribution {
+  categoryCode: string;
+  column: 'debut' | 'acquisitions' | 'cessions';
+  contribution: Money;
+}
+
+/**
+ * The reverse-trace primitive for 2054 (traceability drill-down, Tier
+ * 2) — see CLAUDE.md "Traceability drill-down". Extracted from
+ * `computeTableau2054()`'s own loop body so both directions share the
+ * IDENTICAL per-asset classification, never a separately-written
+ * reverse mapping — the same discipline `resolveLineContribution()`
+ * established for Tier 1. `computeTableau2054()` below now calls this
+ * too; its own 20 pre-existing tests are the regression check that the
+ * refactor changed nothing externally observable.
+ *
+ * Returns an empty array for an asset that contributes nothing at all
+ * (disposed in a strictly earlier fiscal year) — same skip the forward
+ * loop already applied.
+ */
+export function classifyAssetContributions(
+  asset: ImmobilisationMovementAsset,
+  fiscalYear: { startDate: Date; endDate: Date },
+): AssetColumnContribution[] {
+  if (asset.acquisitionDate > fiscalYear.endDate) {
+    throw new ConflictException(
+      `Asset with account "${asset.accountNumber}" was acquired on ` +
+        `${asset.acquisitionDate.toISOString().slice(0, 10)}, after the reported fiscal year ends ` +
+        `(${fiscalYear.endDate.toISOString().slice(0, 10)}) — it must be excluded by the caller ` +
+        'before computing 2054, not passed in.',
+    );
+  }
+  if (asset.cessionDate && asset.cessionDate < fiscalYear.startDate) {
+    return [];
+  }
+
+  const categoryCode = resolveImmobilisationCategory(asset.accountNumber).code;
+  const contributions: AssetColumnContribution[] = [];
+  contributions.push({
+    categoryCode,
+    column: asset.acquisitionDate < fiscalYear.startDate ? 'debut' : 'acquisitions',
+    contribution: asset.acquisitionValue,
+  });
+  if (
+    asset.cessionDate &&
+    asset.cessionDate >= fiscalYear.startDate &&
+    asset.cessionDate <= fiscalYear.endDate
+  ) {
+    contributions.push({ categoryCode, column: 'cessions', contribution: asset.acquisitionValue });
+  }
+  return contributions;
+}
+
 export interface Tableau2054Ligne {
   /** Internal category code (not a literal cerfa code — see module doc comment). */
   code: string;
@@ -64,7 +125,18 @@ export interface Tableau2054 {
  * does — see specs/liasse-2054-2055-implementation-spec.md §3d for why
  * the two forms are deliberately not mapped with forced parity.
  */
-const ROWS_2054: { code: string; label: string; categories: string[] }[] = [
+/**
+ * Exported (2026-08-29, for the traceability drill-down's Tier 2) so the
+ * reverse trace can reuse the SAME row-to-category grouping the forward
+ * computation below uses — a displayed 2054 row's own code (e.g.
+ * "AUTRES_POSTES_INCORPORELLES") can fold MULTIPLE finer
+ * `IMMOBILISATION_CATEGORIES` codes together (see this row's own
+ * comment above), so a reverse trace keyed on the wrong granularity
+ * would silently miss assets. Re-deriving this mapping in the trace
+ * module instead of importing it would be exactly the "separately-
+ * written reverse mapping" this feature's own discipline forbids.
+ */
+export const ROWS_2054: { code: string; label: string; categories: string[] }[] = [
   {
     code: 'FRAIS_ETABLISSEMENT_DEV',
     label: "Frais d'établissement et de développement",
@@ -173,40 +245,20 @@ export function computeTableau2054(
 ): Tableau2054 {
   const byCategory = new Map<string, { debut: Money; acquisitions: Money; cessions: Money }>();
   for (const asset of assets) {
-    if (asset.acquisitionDate > fiscalYear.endDate) {
-      throw new ConflictException(
-        `Asset with account "${asset.accountNumber}" was acquired on ` +
-          `${asset.acquisitionDate.toISOString().slice(0, 10)}, after the reported fiscal year ends ` +
-          `(${fiscalYear.endDate.toISOString().slice(0, 10)}) — it must be excluded by the caller ` +
-          'before computing 2054, not passed in.',
-      );
+    // classifyAssetContributions() re-checks the out-of-period guard and the
+    // strictly-earlier-disposal skip itself — see that function's own doc comment.
+    for (const { categoryCode, column, contribution } of classifyAssetContributions(
+      asset,
+      fiscalYear,
+    )) {
+      const bucket = byCategory.get(categoryCode) ?? {
+        debut: Money.zero(),
+        acquisitions: Money.zero(),
+        cessions: Money.zero(),
+      };
+      bucket[column] = bucket[column].plus(contribution);
+      byCategory.set(categoryCode, bucket);
     }
-    // Disposed in a strictly earlier fiscal year — gone before this year even starts, no
-    // contribution to début/acquisitions/cessions at all. The caller's fetch already excludes
-    // this case at the query level; this is a defensive re-check, not the load-bearing filter.
-    if (asset.cessionDate && asset.cessionDate < fiscalYear.startDate) {
-      continue;
-    }
-
-    const category = resolveImmobilisationCategory(asset.accountNumber);
-    const bucket = byCategory.get(category.code) ?? {
-      debut: Money.zero(),
-      acquisitions: Money.zero(),
-      cessions: Money.zero(),
-    };
-    if (asset.acquisitionDate < fiscalYear.startDate) {
-      bucket.debut = bucket.debut.plus(asset.acquisitionValue);
-    } else {
-      bucket.acquisitions = bucket.acquisitions.plus(asset.acquisitionValue);
-    }
-    if (
-      asset.cessionDate &&
-      asset.cessionDate >= fiscalYear.startDate &&
-      asset.cessionDate <= fiscalYear.endDate
-    ) {
-      bucket.cessions = bucket.cessions.plus(asset.acquisitionValue);
-    }
-    byCategory.set(category.code, bucket);
   }
 
   const lignes: Tableau2054Ligne[] = ROWS_2054.map((row) => {

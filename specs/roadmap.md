@@ -54,7 +54,7 @@ reordered):
 1. **Bank reconciliation — Layer 1a (local statement import + matching engine)** — SHIPPED 2026-08-25
 2. **Bank reconciliation — Layer 1b (live aggregator connectivity)** — SHIPPED 2026-08-29, with a pre-ship blocker (real Bridge sandbox verification still needed)
 3. **Batch invoice review queue** — SHIPPED 2026-08-29. No technical dependency on 1/2; reused document attachment + `InvoiceExtractionService` + `propose_ecriture`'s validation gate, all already shipped — no new backend code needed at all.
-4. **Traceability drill-down — Tier 1 SHIPPED 2026-08-29.** No dependency on 1–3; already has its own detailed spec (folded in below); the "→ justificatif" extension (document attachments, shipped) is done as part of Tier 1. Tiers 2+ not started, no scope decided yet — see the spec's own §4 and CLAUDE.md's "Traceability drill-down (Tier 1)" section.
+4. **Traceability drill-down — Tiers 1 AND 2 SHIPPED (both 2026-08-29).** No dependency on 1–3; already has its own detailed spec (folded in below); the "→ justificatif" extension (document attachments, shipped) is done as part of Tier 1. Tier 3+ not started, no scope decided yet — see the spec's own §4/§5 and CLAUDE.md's "Traceability drill-down (Tier 1)"/"(Tier 2)" sections.
 5. **Anomaly surfacing** — benefits from bank-rec (lettrage/matching data) and drill-down (to explain *why* something's flagged) existing first, though not hard-blocked by either.
 6. **Recurring entries / templates** — no dependency on anything above. Genuinely independent; flagged as the lowest-complexity gated item on this list, worth considering as a filler/quick-win if a later item stalls on a decision.
 7. **Reporting/export flexibility** — no dependency on anything above; enhances every report already shipped. Could run anytime.
@@ -313,12 +313,13 @@ here.
 
 ## 3. Traceability drill-down
 
-**Classification: GATED. Tier 1 SHIPPED 2026-08-29** — see the spec's
-own §4 and CLAUDE.md's "Traceability drill-down (Tier 1)" section for
-the verification record. Reverse computation (line → accounts →
-écritures) sitting on top of several independently-forward-verified
-computations — a wrong reverse mapping is a wrong compliance artifact,
-not a cosmetic bug. Tiers 2+ below remain unbuilt and unscheduled.
+**Classification: GATED. Tiers 1 AND 2 SHIPPED (both 2026-08-29)** —
+see the spec's own §4/§5 and CLAUDE.md's "Traceability drill-down
+(Tier 1)"/"(Tier 2)" sections for the verification records. Reverse
+computation (line → accounts → écritures) sitting on top of several
+independently-forward-verified computations — a wrong reverse mapping
+is a wrong compliance artifact, not a cosmetic bug. Tier 3+ below
+remains unbuilt and unscheduled.
 
 **Already fully scoped** in
 `specs/liasse-drilldown-traceability-implementation-spec.md` — that
