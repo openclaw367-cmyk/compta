@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Journal } from '../../api/types';
+import type { FiscalYear, Journal } from '../../api/types';
 import {
   useTraceTableau2054,
   useTraceTableau2055,
@@ -43,12 +43,14 @@ interface NormalizedRow {
 export function MovementTraceDrilldown({
   family,
   fiscalYearId,
+  fiscalYears,
   code,
   column,
   journals,
 }: {
   family: '2054' | '2055' | '2056';
   fiscalYearId: string;
+  fiscalYears: FiscalYear[];
   code: string;
   column: string;
   journals: Journal[];
@@ -111,7 +113,14 @@ export function MovementTraceDrilldown({
     rows = q2055.data.details.map((d) => ({
       key: `${d.assetId}-${d.fiscalYearId}`,
       label: d.assetLabel,
-      sublabel: d.fiscalYearId === fiscalYearId ? '' : `exercice ${d.fiscalYearId}`,
+      // Resolved to the real fiscal-year label (e.g. "2025"), never the raw id — fiscalYears comes
+      // from the same app-wide list the year picker itself uses. "exercice antérieur" is the honest
+      // fallback if a year genuinely isn't in that list (shouldn't happen in practice), not a guess
+      // at which one it is.
+      sublabel:
+        d.fiscalYearId === fiscalYearId
+          ? ''
+          : `exercice ${fiscalYears.find((fy) => fy.id === d.fiscalYearId)?.label ?? 'antérieur'}`,
       accountId: d.accountId,
       accountNumber: d.accountNumber,
       accountLabel: d.accountLabel,

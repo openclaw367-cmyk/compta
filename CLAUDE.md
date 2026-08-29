@@ -3004,6 +3004,22 @@ before Tier 3.
   EMPTY "début" cell on the same row and confirmed it renders "Aucune
   contribution pour cette cellule." honestly rather than a blank or
   broken state.
+- **A real polish bug found by the user's own review pass, not by
+  inspection — fixed the same day.** The 2055 "début" sublabel (see
+  above — the one place a détail row's own fiscal year can genuinely
+  differ from the reported one) rendered the raw `fiscalYearId`
+  (e.g. "exercice cmsm0xdk80002o5j89nbzom2a") instead of a real label.
+  `MovementTraceDrilldown` never had the app's own fiscal-year list to
+  resolve against — fixed by threading the SAME `fiscalYears` array
+  `LiassePage()` already gets from `useAppContext()` down through
+  `Tableau2054Row`/`Tableau2055Row`/`Tableau2056Row` into the
+  component, which now renders `fiscalYears.find((fy) => fy.id ===
+  d.fiscalYearId)?.label` (falling back to the honest "antérieur," not
+  a guessed year, if a year genuinely isn't in that list). Verified:
+  the exact fiscal year id from the live Bâtiment B/CONSTRUCTIONS_SOL_PROPRE
+  trace above resolves to `label: "2025"` via the same `GET
+  /fiscal-years` endpoint the fix reads from, and the user confirmed
+  "exercice 2025" now renders correctly in the browser.
 - **Deferred to Tier 3, not started**: VAT ligne 08/09/9B/T6 (rate-
   tagged, no shared classifier — a genuinely new query shape), 2058
   `WJ`/`WG` (already ledger-suggested off one hardcoded account each,

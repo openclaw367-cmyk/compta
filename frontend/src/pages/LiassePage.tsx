@@ -14,6 +14,7 @@ import type {
   CompteResultat2033B,
   CompteResultat2052_2053,
   CompteResultatLigne,
+  FiscalYear,
   Journal,
   LiasseAnyResult,
   Regime,
@@ -330,10 +331,10 @@ export function LiassePage() {
                 tableau2054={result.tableau2054}
                 tableau2055={result.tableau2055}
               />
-              <Tableau2054Section tableau2054={result.tableau2054} fiscalYearId={fiscalYearId!} journals={journals} />
-              <Tableau2055Section tableau2055={result.tableau2055} fiscalYearId={fiscalYearId!} journals={journals} />
+              <Tableau2054Section tableau2054={result.tableau2054} fiscalYearId={fiscalYearId!} fiscalYears={fiscalYears} journals={journals} />
+              <Tableau2055Section tableau2055={result.tableau2055} fiscalYearId={fiscalYearId!} fiscalYears={fiscalYears} journals={journals} />
               <Tableau2056ArticulationBanner bilan={result.bilan} tableau2056={result.tableau2056} />
-              <Tableau2056Section tableau2056={result.tableau2056} fiscalYearId={fiscalYearId!} journals={journals} />
+              <Tableau2056Section tableau2056={result.tableau2056} fiscalYearId={fiscalYearId!} fiscalYears={fiscalYears} journals={journals} />
               <Tableau2057ArticulationBanner bilan={result.bilan} tableau2057={result.tableau2057} />
               <Tableau2057Section tableau2057={result.tableau2057} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
               <Tableau2059Section tableau2059={result.tableau2059} />
@@ -1374,10 +1375,12 @@ function MovementCell({
 function Tableau2054Section({
   tableau2054,
   fiscalYearId,
+  fiscalYears,
   journals,
 }: {
   tableau2054: Tableau2054;
   fiscalYearId: string;
+  fiscalYears: FiscalYear[];
   journals: Journal[];
 }) {
   const byCode = new Map(tableau2054.lignes.map((l) => [l.code, l]));
@@ -1424,6 +1427,7 @@ function Tableau2054Section({
                       key={code}
                       ligne={ligne}
                       fiscalYearId={fiscalYearId}
+                      fiscalYears={fiscalYears}
                       journals={journals}
                     />
                   );
@@ -1456,10 +1460,12 @@ function Tableau2054Section({
 function Tableau2054Row({
   ligne,
   fiscalYearId,
+  fiscalYears,
   journals,
 }: {
   ligne: Tableau2054Ligne;
   fiscalYearId: string;
+  fiscalYears: FiscalYear[];
   journals: Journal[];
 }) {
   const [expanded, setExpanded] = useState<'debut' | 'acquisitions' | 'cessions' | null>(null);
@@ -1494,6 +1500,7 @@ function Tableau2054Row({
             <MovementTraceDrilldown
               family="2054"
               fiscalYearId={fiscalYearId}
+              fiscalYears={fiscalYears}
               code={ligne.code}
               column={expanded}
               journals={journals}
@@ -1508,10 +1515,12 @@ function Tableau2054Row({
 function Tableau2055Section({
   tableau2055,
   fiscalYearId,
+  fiscalYears,
   journals,
 }: {
   tableau2055: Tableau2055;
   fiscalYearId: string;
+  fiscalYears: FiscalYear[];
   journals: Journal[];
 }) {
   const byCode = new Map(tableau2055.lignes.map((l) => [l.code, l]));
@@ -1558,6 +1567,7 @@ function Tableau2055Section({
                       key={code}
                       ligne={ligne}
                       fiscalYearId={fiscalYearId}
+                      fiscalYears={fiscalYears}
                       journals={journals}
                     />
                   );
@@ -1591,10 +1601,12 @@ function Tableau2055Section({
 function Tableau2055Row({
   ligne,
   fiscalYearId,
+  fiscalYears,
   journals,
 }: {
   ligne: Tableau2055Ligne;
   fiscalYearId: string;
+  fiscalYears: FiscalYear[];
   journals: Journal[];
 }) {
   const [expanded, setExpanded] = useState<'debut' | 'dotations' | 'diminutions' | null>(null);
@@ -1629,6 +1641,7 @@ function Tableau2055Row({
             <MovementTraceDrilldown
               family="2055"
               fiscalYearId={fiscalYearId}
+              fiscalYears={fiscalYears}
               code={ligne.code}
               column={expanded}
               journals={journals}
@@ -1725,10 +1738,12 @@ function Tableau2056ArticulationBanner({
 function Tableau2056Section({
   tableau2056,
   fiscalYearId,
+  fiscalYears,
   journals,
 }: {
   tableau2056: Tableau2056;
   fiscalYearId: string;
+  fiscalYears: FiscalYear[];
   journals: Journal[];
 }) {
   const byCode = new Map(tableau2056.lignes.map((l) => [l.code, l]));
@@ -1775,6 +1790,7 @@ function Tableau2056Section({
                       key={code}
                       ligne={ligne}
                       fiscalYearId={fiscalYearId}
+                      fiscalYears={fiscalYears}
                       journals={journals}
                     />
                   );
@@ -1819,10 +1835,12 @@ function Tableau2056Section({
 function Tableau2056Row({
   ligne,
   fiscalYearId,
+  fiscalYears,
   journals,
 }: {
   ligne: Tableau2056Ligne;
   fiscalYearId: string;
+  fiscalYears: FiscalYear[];
   journals: Journal[];
 }) {
   const [expanded, setExpanded] = useState<'debut' | 'dotations' | 'reprises' | null>(null);
@@ -1857,6 +1875,7 @@ function Tableau2056Row({
             <MovementTraceDrilldown
               family="2056"
               fiscalYearId={fiscalYearId}
+              fiscalYears={fiscalYears}
               code={ligne.code}
               column={expanded}
               journals={journals}
