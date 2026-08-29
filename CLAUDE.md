@@ -2938,6 +2938,26 @@ seam"), this was designed and approved via plan mode before any code
 was written — and confirmed, by research before design, to be an
 assembly of already-shipped pieces rather than new domain logic.
 
+- **⚠️ Do NOT batch the per-invoice `extract()`/`suggest()` calls into a
+  single multi-file call — the one-file-per-call structure is a SAFETY
+  property, not an inefficiency to optimize away.** This queue
+  deliberately calls `POST /documents/extract` and `POST
+  /documents/suggest-accounts` once per invoice, independently, never
+  assembling more than one file into a single prelude/model turn. That
+  isolation is exactly what sidesteps this app's own documented
+  multi-invoice chaining reliability gap (see "AI chatbot Phase 2"
+  above: the model mishandles account resolution — guessed literal
+  account numbers, HT/TTC mismatches — when several files are handed to
+  it in one turn). The cross-contamination-free extraction this pass
+  verified live (below: two fixture invoices, completely independent
+  numbers/dates/amounts, zero bleed between them) depends on this exact
+  structure holding. A future "optimization" pass that merges these into
+  one batched multi-file request would silently reintroduce the
+  cross-invoice contamination this design was built specifically to
+  avoid — don't do it without redesigning around the chaining gap first,
+  and re-verifying live the way this pass did, not just assuming it's
+  fine because extraction alone is deterministic (the account-suggestion
+  half is where the model reliability failure actually lives).
 - **The headline finding this design pass confirmed, not assumed: no
   new backend code was needed at all.** `POST /documents/extract` and
   `POST /documents/suggest-accounts` already operate on exactly one file
