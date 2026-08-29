@@ -273,7 +273,10 @@ enforced by code review:
    from the journal grid via the "Contre-passer" action on a validated
    row, not just `POST /entries/:id/reverse` directly. Draft (unvalidated)
    entries, e.g. freshly imported from Excel, may still be edited before
-   validation.
+   validation. **One deliberate, narrow exception**:
+   `EntriesService.setLettrage()` — see "Bank reconciliation" below. It
+   exists precisely because this rule is otherwise absolute; don't widen
+   it or treat it as precedent for any other field.
 4. **One posting side per line.** A journal entry line has either a debit
    or a credit amount, never both, and the amount is always positive.
 5. **Chart of accounts (PCG) structure.** Account numbers follow the Plan
@@ -2571,6 +2574,164 @@ its own beyond what those services already expose.
   other test-tiers in this demo company already lives with; the
   écriture itself was reversed and the reversal validated, restoring
   the exact original figures.
+
+## Bank reconciliation — Layer 1a (statement import + matching + review)
+
+`src/modules/bank-accounts/` + `src/modules/bank-reconciliation/`
+(as of 2026-08-25) import a CAMT.053 bank statement, propose matches
+against the ledger, and let a human confirm/clear/ignore each line or
+post a missing écriture straight from an unmatched line. Built the
+same review-first-then-post discipline as every other GATED feature
+here: the design was reviewed and confirmed (`AskUserQuestion` — three
+questions, all resolved to the recommended option: CAMT.053-only for
+v1, tiered match confidence, a real `BankAccount` model) before any
+code was written.
+
+- **The central compliance decision: `EntriesService.setLettrage()`,
+  a deliberate, NARROW exception to rule 3 (Immutability after
+  validation) above — record why so it's never "fixed" as a hole or
+  widened as precedent.** Real-world reconciliation is almost always
+  done against écritures that are already validated (you validate
+  purchases/sales through the month, then reconcile against the
+  statement afterward) — before this feature, `lettrage`/
+  `dateLettrage` could only be set on a draft (`assertDraft()` blocked
+  it), which meant bank reconciliation was structurally impossible
+  against real data, not just unbuilt.
+  - **Why this is safe to exempt from immutability**: `lettrage`/
+    `dateLettrage` are a reconciliation CROSS-REFERENCE, not part of
+    the écriture's own financial content — they never touch `debit`,
+    `credit`, `compteId`, `ecritureDate`, or anything that affects the
+    entry's balance or its FEC export shape. Rule 3's immutability is
+    about *correcting* an entry's content via a reversing écriture;
+    marking a line as bank-matched isn't a correction, it's bookkeeping
+    metadata layered on top of a fact that stays true regardless.
+  - **What `setLettrage()` does NOT do**: it never calls
+    `assertDraft()`, never touches any other field on the line, and is
+    looked up by `ecritureLigneId` directly (scoped to company),
+    independent of the parent écriture's `validatedAt`. It's the ONE
+    write path in this codebase that bypasses immutability — every
+    other mutation on a validated écriture still goes through the
+    normal reversing-entry flow.
+  - **What closes the resulting audit gap**: every `setLettrage()`
+    call against an ALREADY-VALIDATED line writes one row to the new
+    append-only `LettrageAuditLog` (companyId, ecritureLigneId, action
+    `SET`/`CLEARED`, the lettrage code, occurredAt — no "who" column,
+    same honest reason as the document-attachment audit log: this app
+    has zero auth/user-identity model anywhere). A draft line's
+    lettrage change is NOT audited — matches how a draft is freely
+    editable today with no log at all.
+  - **If a future pass is tempted to widen this** (e.g. "let's also
+    allow editing the label on a validated line the same way"): don't,
+    without an equally explicit review. The narrowness — exactly two
+    fields, both non-financial, both audit-logged when touched on a
+    validated line — is what makes this safe, not a general "small
+    edits are fine" principle.
+  - Reused by bank-reconciliation's confirm-match/clear-match; also
+    finally gives this app its first-ever manual "un-letter a line"
+    capability (`PATCH /entries/lignes/:id/lettrage`), on both draft
+    and validated lines.
+- **CAMT.053 (ISO 20022 Bank-to-Customer Statement) only, for v1** —
+  OFX/QIF/CSV explicitly deferred, decided up front rather than
+  discovered as a gap later. New dependency: `fast-xml-parser`, this
+  backend's first XML parser, configured with `parseTagValue: false`
+  (load-bearing for the money-handling rule above — without it, amount
+  strings would silently auto-coerce to JS `number`s the moment they're
+  parsed, before any `Decimal` boundary even sees them) and
+  `ignoreAttributes: true`. Label extraction falls back through three
+  paths (`RmtInf/Ustrd` → `NtryDtls/TxDtls/AddtlTxInf` →
+  `AddtlNtryInf` → a placeholder) since banks nest the free-text
+  description inconsistently — amount/date/credit-debit-indicator are
+  always in a fixed, reliable location and are never guessed, only the
+  label has this fallback chain, same "found and parsed, or simply
+  absent, never guessed" discipline as `InvoiceExtractionService`.
+- **A new reconciliation oracle, same discipline as
+  `assertVncTiesToLedger`/`assertCashFlowReconciles`**:
+  `assertBalancesReconcile()` throws unless opening balance +
+  Σ(entry amounts) exactly equals the statement's own closing balance
+  — caught a real arithmetic error in this project's own hand-built
+  test fixture during development (the fixture's closing balance
+  didn't actually add up), exactly the kind of bug this class of check
+  exists to catch.
+- **⚠️ PRE-SHIP ITEM, not just a note — do not ship this feature to a
+  real user before closing it.** The CAMT.053 parser is verified only
+  against a hand-built, spec-compliant synthetic fixture
+  (`__fixtures__/sample-camt053.xml`), never against a real
+  bank-exported file. Banks are known to interpret the ISO 20022
+  standard loosely (inconsistent label nesting is the documented
+  example above, but structural surprises elsewhere in a real export
+  are plausible too and haven't been exercised at all). **Get at least
+  one real CAMT.053 export from an actual bank and re-run
+  `camt053-parser.service.spec.ts`-style verification against it
+  before this reaches a real user's real statement** — the same
+  "verified against a real sample, not just a hand-built one" bar this
+  project already held itself to for `InvoiceExtractionService`'s PDF
+  fixtures and the FEC export's Test Compta Demat run (see "Known scope
+  boundaries" below). Until then, treat this feature as verified
+  against the SPEC, not against real bank behavior.
+- **Matching engine is pure and stateless, never persisted** — mirrors
+  `propose_ecriture`'s own "never persists" discipline exactly. Three
+  confidence tiers (HIGH: exactly one exact-amount candidate in the
+  date window; AMBIGUOUS: 2+, ranked by date-proximity then a simple
+  label-similarity tiebreak; NO_CANDIDATE: zero). `DATE_WINDOW_DAYS =
+  15` and exact-amount-only (no tolerance) are documented in code as a
+  first cut, not precision-tuned against real data — worth revisiting
+  once real statements are available, same spirit as the pre-ship item
+  above.
+- **`BankAccount` is a real model, not an implicit "whichever 512/514
+  account"** — `compteId` validated bank-eligible via
+  `isBankAccount()` (pcgClass 5, `51[2467]` prefix, the same family
+  `liasse-line-rules.ts`'s own `DualNatureRule` already treats as
+  banking) and unique per company. Create + list only, no delete — same
+  "no delete/deactivate on a reference entity" pattern as
+  `Journal`/`Account`/`VatRate`/`FiscalYear` (see "Known scope
+  boundaries" below).
+- **Nothing here auto-posts or auto-reconciles.** A match proposal is
+  always a proposal; `confirmMatch()` requires an explicit
+  `ecritureLigneId` from a human. `createEcritureFromLine()` posts
+  through the ORDINARY `EntriesService.create()` — no privileged write
+  path — then auto-confirms only against whichever of the new
+  écriture's own lines actually landed on the bank account, refusing
+  (naming the count) if that isn't exactly one line.
+- **A real bug found live, not by inspection, and fixed the same
+  day**: `BankStatementLine.matchedLigneId` is an OPTIONAL relation, so
+  Prisma generated `ON DELETE SET NULL` for it automatically (unlike
+  `EcritureDocument.ecriture`'s REQUIRED relation, which needed an
+  explicit `onDelete: Cascade` fix in the document-attachments
+  feature). Deleting a draft écriture whose line had been bank-matched
+  correctly nulls `matchedLigneId` at the DB level — but nothing reset
+  `status` away from `CONFIRMED`, leaving a real orphaned-match state:
+  the statement line would show as permanently "already reconciled"
+  with no way to fix it. Deliberately NOT fixed by coupling
+  `EntriesModule` to `bank-reconciliation` (would create a circular
+  module dependency and violate the module-boundary discipline this
+  app already follows). Fixed instead with `healOrphanedMatches()` — a
+  private method run at the start of both `listStatementLines()` and
+  `getProposals()` that resets any `CONFIRMED` line whose
+  `matchedLigneId` has gone `null` back to `UNMATCHED` — a self-healing
+  read, not a cross-module write. Re-verified live after the fix.
+- **Verified two ways.** Unit: `camt053-parser.service.spec.ts` (11
+  tests, including the reconciliation-oracle and a test proving amounts
+  never become JS numbers), `matching-engine.spec.ts` (9 hand-traced
+  oracle tests), `entries.service.spec.ts`'s new `setLettrage`
+  describe block (5 tests: draft/validated, exactly-one-audit-row,
+  clearing, wrong-company rejection), `bank-reconciliation.service.spec.ts`
+  (14 tests including the self-heal regression) — 62 suites / 532
+  backend tests passing overall, `tsc`/`eslint` clean on both sides,
+  frontend `vite build` clean. Live against the FR demo company: created
+  a real `BankAccount`, imported the fixture statement, confirmed a
+  HIGH-confidence match set `lettrage`/`dateLettrage` on an
+  ALREADY-VALIDATED line with `validatedAt` provably untouched,
+  confirmed the audit log row, cleared the match (undo), created a
+  draft écriture from a genuinely unmatched line with auto-confirm,
+  found and fixed the orphaned-status bug above, re-verified the fix
+  live, then cleaned up every piece of test data (reversed+validated
+  the test écriture, deleted the test `BankAccount`/`BankStatementImport`/
+  `BankStatementLine`/`LettrageAuditLog` rows via a temporary script)
+  and confirmed the ledger balance returned to its exact known baseline.
+- **Not built this pass**: OFX/QIF/CSV import formats, Layer 1b (live
+  bank-aggregator connectivity — Plaid/Bridge/Budget Insight-style),
+  and the pre-ship real-CAMT.053-export verification flagged above. See
+  `specs/roadmap.md` for how this fits the rest of the roadmap.
 
 ## Known scope boundaries
 

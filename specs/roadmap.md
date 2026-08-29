@@ -79,17 +79,29 @@ parsing, the tiered matching engine, preview-then-confirm import,
 propose/confirm/clear/ignore/create-écriture) + `src/modules/
 bank-accounts/` (the new `BankAccount` model) + `EntriesService.
 setLettrage()` (the compliance-aware decision below, resolved: allowed
-on a validated line, audited via `LettrageAuditLog`). CAMT.053 only, as
-decided; tiered confidence (HIGH/AMBIGUOUS/NO_CANDIDATE) as decided; a
-real `BankAccount` model as decided. One real gap found live and
-fixed: deleting a bank-matched draft's line silently orphaned its
-statement line's `CONFIRMED` status (the FK correctly nulls
-`matchedLigneId`, Prisma's own default for an optional relation, but
-nothing reset `status`) — self-heals on every read now. The CAMT.053
-parser is still verified only against a hand-built, spec-compliant
-sample, not a real bank export — flagged honestly in that file's own
-doc comment, worth revisiting the day a real one is available. OFX/
-QIF/CSV and Layer 1b (live aggregator connectivity) remain unbuilt.
+on a validated line, audited via `LettrageAuditLog` — see CLAUDE.md's
+"Bank reconciliation" section for why this narrow immutability
+exception is safe and must stay narrow). CAMT.053 only, as decided;
+tiered confidence (HIGH/AMBIGUOUS/NO_CANDIDATE) as decided; a real
+`BankAccount` model as decided. One real gap found live and fixed:
+deleting a bank-matched draft's line silently orphaned its statement
+line's `CONFIRMED` status (the FK correctly nulls `matchedLigneId`,
+Prisma's own default for an optional relation, but nothing reset
+`status`) — self-heals on every read now.
+
+**⚠️ PRE-SHIP BLOCKER, not a passive note.** The CAMT.053 parser is
+verified only against a hand-built, spec-compliant sample
+(`__fixtures__/sample-camt053.xml`) — never against a real
+bank-exported file. Banks interpret the ISO 20022 standard loosely (the
+parser's own 3-deep label fallback chain is already evidence of that);
+a real export could easily surprise it in ways the synthetic fixture
+can't. **Do not let this feature reach a real user's real bank
+statement before getting at least one genuine CAMT.053 export and
+re-running verification against it** — same bar this project already
+held for `InvoiceExtractionService`'s PDF fixtures and the FEC export's
+Test Compta Demat run. Track this as a gating item on this feature's
+ship checklist, not a someday-nice-to-have. OFX/QIF/CSV and Layer 1b
+(live aggregator connectivity) remain unbuilt.
 
 ### Layer 1a (original scope note, below) — statement import + matching engine (local, build first)
 
