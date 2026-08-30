@@ -4,7 +4,7 @@ import { useCompany, useUpdateCompany } from '../api/queries';
 import { SettingsBackLink } from '../components/layout/SettingsBackLink';
 import type { UpdateCompanyDto } from '../api/dto';
 import { ApiError } from '../api/client';
-import type { Company } from '../api/types';
+import type { Company, RegimeTvaServices } from '../api/types';
 
 interface Draft {
   name: string;
@@ -16,6 +16,10 @@ interface Draft {
   postalCode: string;
   city: string;
   country: string;
+  regimeTvaServices: RegimeTvaServices;
+  bankName: string;
+  iban: string;
+  bic: string;
 }
 
 function toDraft(company: Company): Draft {
@@ -29,6 +33,10 @@ function toDraft(company: Company): Draft {
     postalCode: company.postalCode ?? '',
     city: company.city ?? '',
     country: company.country,
+    regimeTvaServices: company.regimeTvaServices,
+    bankName: company.bankName ?? '',
+    iban: company.iban ?? '',
+    bic: company.bic ?? '',
   };
 }
 
@@ -88,6 +96,10 @@ export function CompanyProfilePage() {
       postalCode: optional(draft.postalCode),
       city: optional(draft.city),
       country: optional(draft.country),
+      regimeTvaServices: draft.regimeTvaServices,
+      bankName: optional(draft.bankName),
+      iban: optional(draft.iban),
+      bic: optional(draft.bic),
     };
     try {
       await updateCompany.mutateAsync(dto);
@@ -256,6 +268,86 @@ export function CompanyProfilePage() {
                 />
               ) : (
                 <Value>{companyQuery.data?.country}</Value>
+              )}
+            </Row>
+          </div>
+        </section>
+
+        {(companyQuery.data?.jurisdiction === 'FR' || draft.jurisdiction === 'FR') && (
+          <section className="flex flex-col gap-3 border-t border-border pt-4">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              TVA — Prestations de services
+            </h2>
+            <div className="grid grid-cols-2 gap-4">
+              <Row
+                label="Régime d'exigibilité"
+                hint="CGI art. 269 — régime par défaut pour les prestations de services (compte 706). Sans effet sur les ventes de biens."
+              >
+                {editing ? (
+                  <select
+                    value={draft.regimeTvaServices}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        regimeTvaServices: e.target.value as RegimeTvaServices,
+                      })
+                    }
+                    className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent"
+                  >
+                    <option value="ENCAISSEMENTS">TVA sur les encaissements</option>
+                    <option value="DEBITS">TVA sur les débits (sur option)</option>
+                  </select>
+                ) : (
+                  <Value>
+                    {companyQuery.data?.regimeTvaServices === 'DEBITS'
+                      ? 'TVA sur les débits (sur option)'
+                      : 'TVA sur les encaissements'}
+                  </Value>
+                )}
+              </Row>
+            </div>
+          </section>
+        )}
+
+        <section className="flex flex-col gap-3 border-t border-border pt-4">
+          <h2 className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+            Coordonnées bancaires
+          </h2>
+          <p className="text-[11.5px] text-ink-faint">
+            Affichées sur les devis et factures lorsqu&apos;elles sont renseignées.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <Row label="Banque" span2>
+              {editing ? (
+                <TextInput
+                  value={draft.bankName}
+                  onChange={(v) => setDraft({ ...draft, bankName: v })}
+                  placeholder="Banque Populaire"
+                />
+              ) : (
+                <Value>{companyQuery.data?.bankName}</Value>
+              )}
+            </Row>
+            <Row label="IBAN">
+              {editing ? (
+                <TextInput
+                  value={draft.iban}
+                  onChange={(v) => setDraft({ ...draft, iban: v })}
+                  placeholder="FR7630006000011234567890189"
+                />
+              ) : (
+                <Value>{companyQuery.data?.iban}</Value>
+              )}
+            </Row>
+            <Row label="BIC">
+              {editing ? (
+                <TextInput
+                  value={draft.bic}
+                  onChange={(v) => setDraft({ ...draft, bic: v })}
+                  placeholder="BNPAFRPPXXX"
+                />
+              ) : (
+                <Value>{companyQuery.data?.bic}</Value>
               )}
             </Row>
           </div>

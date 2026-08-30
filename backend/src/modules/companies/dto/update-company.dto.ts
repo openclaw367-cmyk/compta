@@ -1,6 +1,6 @@
 import { IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Jurisdiction } from '@prisma/client';
+import { Jurisdiction, RegimeTvaServices } from '@prisma/client';
 
 /** All fields optional — a profile edit may touch just one at a time. */
 export class UpdateCompanyDto {
@@ -58,4 +58,32 @@ export class UpdateCompanyDto {
   @IsOptional()
   @IsString()
   country?: string;
+
+  @ApiPropertyOptional({
+    enum: RegimeTvaServices,
+    description:
+      'TVA exigibilité regime for services revenue (compte 706) — CGI art. 269, 2-c. Goods ' +
+      'revenue (every other 70x account) is unaffected by this field. FR only; inert for MC.',
+  })
+  @IsOptional()
+  @IsEnum(RegimeTvaServices)
+  regimeTvaServices?: RegimeTvaServices;
+
+  @ApiPropertyOptional({
+    description: 'Bank name shown on devis/facture payment instructions, when configured.',
+    example: 'Banque Populaire',
+  })
+  @IsOptional()
+  @IsString()
+  bankName?: string;
+
+  @ApiPropertyOptional({ example: 'FR7630006000011234567890189' })
+  @IsOptional()
+  @IsString()
+  iban?: string;
+
+  @ApiPropertyOptional({ example: 'BNPAFRPPXXX' })
+  @IsOptional()
+  @IsString()
+  bic?: string;
 }

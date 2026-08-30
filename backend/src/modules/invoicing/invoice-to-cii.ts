@@ -65,6 +65,11 @@ const VAT_CATEGORY_STANDARD = 'S';
 // a stated simplification, not a guess about the actual unit.
 const DEFAULT_UNIT_CODE = 'C62';
 
+// UNTDID 4461 payment-means code — '58' is SEPA credit transfer, the only
+// method this app's Company.iban/bic fields represent (see invoicing.
+// service.ts's buildCompanyMentionsInput()).
+const PAYMENT_MEANS_SEPA_CREDIT_TRANSFER = '58';
+
 const GUIDELINE_EN16931 = 'urn:cen.eu:en16931:2017';
 
 /**
@@ -218,6 +223,22 @@ export async function buildCrossIndustryInvoice(
               }),
             }),
         ),
+        specifiedTradeSettlementPaymentMeans: mentions.paymentInstructions
+          ? [
+              new M.TradeSettlementPaymentMeansType({
+                typeCode: new M.PaymentMeansCodeType({
+                  value: PAYMENT_MEANS_SEPA_CREDIT_TRANSFER,
+                }),
+                payeePartyCreditorFinancialAccount: new M.CreditorFinancialAccountType({
+                  ibanID: new M.IDType({ value: mentions.paymentInstructions.iban }),
+                  accountName: new M.TextType({ value: mentions.paymentInstructions.bankName }),
+                }),
+                payeeSpecifiedCreditorFinancialInstitution: new M.CreditorFinancialInstitutionType({
+                  bicID: new M.IDType({ value: mentions.paymentInstructions.bic }),
+                }),
+              }),
+            ]
+          : undefined,
         specifiedTradePaymentTerms: [
           new M.TradePaymentTermsType({
             description: new M.TextType({ value: paymentTermsDescription }),

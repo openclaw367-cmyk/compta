@@ -140,6 +140,24 @@ async function requestFileBlob(path: string): Promise<DownloadableBlob> {
   return { filename, blob };
 }
 
+/** Same shape as requestFileBlob(), but POSTs a JSON body first — for the devis PDF
+ *  endpoint, which needs the ephemeral client-identity form in its request body. */
+async function requestFileBlobPost(path: string, data: unknown): Promise<DownloadableBlob> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...companyHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const body: unknown = await response.json();
+    throw new ApiError(body as ApiErrorBody);
+  }
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'download';
+  const blob = await response.blob();
+  return { filename, blob };
+}
+
 export const api = {
   get: <T>(path: string): Promise<T> => request<T>(path),
   post: <T>(path: string, data: unknown): Promise<T> =>
@@ -156,4 +174,6 @@ export const api = {
   getFile: (path: string): Promise<DownloadableFile> => requestFile(path),
   getBlob: (path: string): Promise<Blob> => requestBlob(path),
   getFileBlob: (path: string): Promise<DownloadableBlob> => requestFileBlob(path),
+  postFileBlob: (path: string, data: unknown): Promise<DownloadableBlob> =>
+    requestFileBlobPost(path, data),
 };

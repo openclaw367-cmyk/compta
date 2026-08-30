@@ -90,6 +90,20 @@ describe('computeBilan2033A', () => {
     expect(() => computeBilan2033A(trialBalance, Money.zero())).toThrow();
   });
 
+  // TVA sur les encaissements (CGI art. 269) — see bilan-2050.spec.ts's identical test and
+  // CLAUDE.md "Invoicing — cash-basis VAT" for the real bug this closes.
+  it('maps 445800 (TVA sur encaissements non exigible) to 172, alongside 445710', () => {
+    const ligne = {
+      compteNumber: '445800',
+      pcgClass: 4,
+      debit: Money.fromString('0.00').toDecimal(),
+      credit: Money.fromString('100.00').toDecimal(),
+    };
+    const trialBalance = buildTrialBalance([ligne]);
+    const result = computeBilan2033A(trialBalance, Money.zero());
+    expect(passifMontant(result, '172')).toBe('100.00');
+  });
+
   it('assertBilan2033ABalances throws when Actif ≠ Passif', () => {
     expect(() =>
       assertBilan2033ABalances({

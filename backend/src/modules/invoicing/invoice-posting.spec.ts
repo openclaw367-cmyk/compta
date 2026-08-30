@@ -5,6 +5,7 @@ describe('buildInvoicePostingLignes', () => {
     const result = buildInvoicePostingLignes(
       'client-411',
       'tva-445710',
+      null,
       [
         {
           revenueAccountId: 'revenue-707',
@@ -12,6 +13,7 @@ describe('buildInvoicePostingLignes', () => {
           unitPriceHT: '500.00',
           vatRateId: 'rate-20',
           vatRatePercent: '20.00',
+          isCashBasisVat: false,
         },
       ],
       'SALE',
@@ -28,6 +30,7 @@ describe('buildInvoicePostingLignes', () => {
     const result = buildInvoicePostingLignes(
       'client-411',
       'tva-445710',
+      null,
       [
         {
           revenueAccountId: 'revenue-707',
@@ -35,6 +38,7 @@ describe('buildInvoicePostingLignes', () => {
           unitPriceHT: '100.00',
           vatRateId: 'rate-20',
           vatRatePercent: '20.00',
+          isCashBasisVat: false,
         },
       ],
       'CREDIT_NOTE',
@@ -51,6 +55,7 @@ describe('buildInvoicePostingLignes', () => {
     const result = buildInvoicePostingLignes(
       'client-411',
       'tva-445710',
+      null,
       [
         {
           revenueAccountId: 'revenue-707',
@@ -58,6 +63,7 @@ describe('buildInvoicePostingLignes', () => {
           unitPriceHT: '100.00',
           vatRateId: 'rate-20',
           vatRatePercent: '20.00',
+          isCashBasisVat: false,
         },
         {
           revenueAccountId: 'revenue-707',
@@ -65,6 +71,7 @@ describe('buildInvoicePostingLignes', () => {
           unitPriceHT: '50.00',
           vatRateId: 'rate-20',
           vatRatePercent: '20.00',
+          isCashBasisVat: false,
         },
         {
           revenueAccountId: 'revenue-707',
@@ -72,6 +79,7 @@ describe('buildInvoicePostingLignes', () => {
           unitPriceHT: '200.00',
           vatRateId: 'rate-10',
           vatRatePercent: '10.00',
+          isCashBasisVat: false,
         },
       ],
       'SALE',
@@ -91,6 +99,7 @@ describe('buildInvoicePostingLignes', () => {
     const result = buildInvoicePostingLignes(
       'client-411',
       'tva-445710',
+      null,
       [
         {
           revenueAccountId: 'revenue-707',
@@ -98,6 +107,7 @@ describe('buildInvoicePostingLignes', () => {
           unitPriceHT: '1000.00',
           vatRateId: null,
           vatRatePercent: null,
+          isCashBasisVat: false,
         },
       ],
       'SALE',
@@ -112,6 +122,7 @@ describe('buildInvoicePostingLignes', () => {
     const result = buildInvoicePostingLignes(
       'client-411',
       'tva-445710',
+      null,
       [
         {
           revenueAccountId: 'revenue-706',
@@ -119,6 +130,7 @@ describe('buildInvoicePostingLignes', () => {
           unitPriceHT: '100.00',
           vatRateId: 'rate-20',
           vatRatePercent: '20.00',
+          isCashBasisVat: false,
         },
         {
           revenueAccountId: 'revenue-707',
@@ -126,6 +138,7 @@ describe('buildInvoicePostingLignes', () => {
           unitPriceHT: '100.00',
           vatRateId: 'rate-20',
           vatRatePercent: '20.00',
+          isCashBasisVat: false,
         },
       ],
       'SALE',
@@ -137,5 +150,112 @@ describe('buildInvoicePostingLignes', () => {
       { compteId: 'revenue-707', credit: '100.00' },
       { compteId: 'tva-445710', credit: '20.00', vatRateId: 'rate-20' },
     ]);
+  });
+
+  // TVA sur les encaissements (CGI art. 269) — see CLAUDE.md "Invoicing — cash-basis VAT".
+  describe('cash-basis VAT (TVA sur les encaissements)', () => {
+    it('credits the encaissements suspense account instead of 445710 for a cash-basis (706, ENCAISSEMENTS) line', () => {
+      const result = buildInvoicePostingLignes(
+        'client-411',
+        'tva-445710',
+        'tva-445800',
+        [
+          {
+            revenueAccountId: 'revenue-706',
+            quantity: '1.00',
+            unitPriceHT: '500.00',
+            vatRateId: 'rate-20',
+            vatRatePercent: '20.00',
+            isCashBasisVat: true,
+          },
+        ],
+        'SALE',
+      );
+      expect(result.lignes).toEqual([
+        { compteId: 'client-411', debit: '600.00' },
+        { compteId: 'revenue-706', credit: '500.00' },
+        { compteId: 'tva-445800', credit: '100.00', vatRateId: 'rate-20' },
+      ]);
+    });
+
+    it('a non-cash-basis line always credits 445710, regardless of account', () => {
+      const result = buildInvoicePostingLignes(
+        'client-411',
+        'tva-445710',
+        'tva-445800',
+        [
+          {
+            revenueAccountId: 'revenue-706',
+            quantity: '1.00',
+            unitPriceHT: '500.00',
+            vatRateId: 'rate-20',
+            vatRatePercent: '20.00',
+            isCashBasisVat: false,
+          },
+        ],
+        'SALE',
+      );
+      expect(result.lignes).toEqual([
+        { compteId: 'client-411', debit: '600.00' },
+        { compteId: 'revenue-706', credit: '500.00' },
+        { compteId: 'tva-445710', credit: '100.00', vatRateId: 'rate-20' },
+      ]);
+    });
+
+    it('splits a mixed invoice (one 706 cash-basis line + one 707 débits line) across both TVA accounts in the same écriture', () => {
+      const result = buildInvoicePostingLignes(
+        'client-411',
+        'tva-445710',
+        'tva-445800',
+        [
+          {
+            revenueAccountId: 'revenue-706',
+            quantity: '1.00',
+            unitPriceHT: '500.00',
+            vatRateId: 'rate-20',
+            vatRatePercent: '20.00',
+            isCashBasisVat: true,
+          },
+          {
+            revenueAccountId: 'revenue-707',
+            quantity: '1.00',
+            unitPriceHT: '100.00',
+            vatRateId: 'rate-20',
+            vatRatePercent: '20.00',
+            isCashBasisVat: false,
+          },
+        ],
+        'SALE',
+      );
+      expect(result.totalTTC).toBe('720.00');
+      expect(result.lignes).toEqual([
+        { compteId: 'client-411', debit: '720.00' },
+        { compteId: 'revenue-706', credit: '500.00' },
+        { compteId: 'tva-445800', credit: '100.00', vatRateId: 'rate-20' },
+        { compteId: 'revenue-707', credit: '100.00' },
+        { compteId: 'tva-445710', credit: '20.00', vatRateId: 'rate-20' },
+      ]);
+    });
+
+    it('throws if a cash-basis line is passed with no tvaEncaissementsAccountId — an internal-consistency guard, never silently falls back', () => {
+      expect(() =>
+        buildInvoicePostingLignes(
+          'client-411',
+          'tva-445710',
+          null,
+          [
+            {
+              revenueAccountId: 'revenue-706',
+              quantity: '1.00',
+              unitPriceHT: '500.00',
+              vatRateId: 'rate-20',
+              vatRatePercent: '20.00',
+              isCashBasisVat: true,
+            },
+          ],
+          'SALE',
+        ),
+      ).toThrow('tvaEncaissementsAccountId');
+    });
   });
 });

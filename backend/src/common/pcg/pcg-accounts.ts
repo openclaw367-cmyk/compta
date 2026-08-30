@@ -84,6 +84,7 @@ export const PCG_ACCOUNTS: readonly { number: string; label: string }[] = [
   { number: '445660', label: 'TVA déductible sur autres biens et services' },
   { number: '445662', label: 'TVA déductible sur immobilisations' },
   { number: '445710', label: 'TVA collectée' },
+  { number: '445800', label: 'TVA collectée sur encaissements non exigible' },
   { number: '447000', label: 'Autres impôts, taxes et versements assimilés' },
   { number: '455000', label: 'Associés - Comptes courants' },
   { number: '462000', label: "Créances sur cessions d'immobilisations" },

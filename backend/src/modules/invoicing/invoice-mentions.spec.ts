@@ -1,5 +1,9 @@
 import { ConflictException, NotImplementedException } from '@nestjs/common';
-import { assertInvoiceMentionsTieToPosting, computeInvoiceMentions } from './invoice-mentions';
+import {
+  assertInvoiceMentionsTieToPosting,
+  computeDevisMentions,
+  computeInvoiceMentions,
+} from './invoice-mentions';
 
 const COMPANY = {
   name: 'Société Démo SARL',
@@ -10,6 +14,7 @@ const COMPANY = {
   siren: '123456789',
   rci: null,
   vatNumber: 'FR12123456789',
+  paymentInstructions: null,
 };
 
 const CLIENT = {
@@ -75,6 +80,56 @@ describe('computeInvoiceMentions — FR', () => {
     });
     expect(mentions.isCreditNote).toBe(true);
     expect(mentions.correctsInvoiceNumber).toBe('1');
+    expect(mentions.documentKind).toBe('AVOIR');
+  });
+
+  it('documentKind is FACTURE for an ordinary (non-credit-note) invoice', () => {
+    const mentions = computeInvoiceMentions('FR', COMPANY, CLIENT, INVOICE);
+    expect(mentions.documentKind).toBe('FACTURE');
+  });
+
+  it('paymentInstructions is null when the company has not configured bank details', () => {
+    const mentions = computeInvoiceMentions('FR', COMPANY, CLIENT, INVOICE);
+    expect(mentions.paymentInstructions).toBeNull();
+  });
+
+  it('paymentInstructions carries the configured bank details through', () => {
+    const mentions = computeInvoiceMentions(
+      'FR',
+      {
+        ...COMPANY,
+        paymentInstructions: { bankName: 'Banque Populaire', iban: 'FR76...', bic: 'BPXXFRPP' },
+      },
+      CLIENT,
+      INVOICE,
+    );
+    expect(mentions.paymentInstructions).toEqual({
+      bankName: 'Banque Populaire',
+      iban: 'FR76...',
+      bic: 'BPXXFRPP',
+    });
+  });
+});
+
+describe('computeDevisMentions', () => {
+  const DEVIS_INVOICE = { invoiceDate: '2026-08-30', lines: INVOICE.lines };
+
+  it('produces a DEVIS with no invoice number, priced identically to a facture', () => {
+    const mentions = computeDevisMentions('FR', COMPANY, CLIENT, DEVIS_INVOICE);
+    expect(mentions.documentKind).toBe('DEVIS');
+    expect(mentions.invoiceNumber).toBe('');
+    expect(mentions.isCreditNote).toBe(false);
+    expect(mentions.correctsInvoiceNumber).toBeNull();
+    // Same arithmetic as computeInvoiceMentions on the identical line set.
+    expect(mentions.totalHT).toBe('1700.00');
+    expect(mentions.totalVAT).toBe('300.00');
+    expect(mentions.totalTTC).toBe('2000.00');
+  });
+
+  it('throws NotImplementedException for MC, the same gate as computeInvoiceMentions', () => {
+    expect(() => computeDevisMentions('MC', COMPANY, CLIENT, DEVIS_INVOICE)).toThrow(
+      NotImplementedException,
+    );
   });
 });
 

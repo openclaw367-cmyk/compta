@@ -69,6 +69,7 @@ import type {
   CreateJournalDto,
   CreateTiersDto,
   CreateVatRateDto,
+  DevisRequestDto,
   FinalizeInvoiceDto,
   SendChatMessageDto,
   SetCloudCredentialDto,
@@ -1274,5 +1275,33 @@ export function useDownloadFacturX() {
       const { filename, blob } = await api.getFileBlob(`/invoicing/invoices/${invoiceId}/factur-x`);
       downloadBlob(filename, blob);
     },
+  });
+}
+
+/**
+ * Downloads a devis (quote) PDF for a DRAFT invoice — see CLAUDE.md
+ * "Invoicing — devis (quote) PDF". Client identity is EPHEMERAL
+ * (DevisRequestDto) — never saved or locked, unlike finalize().
+ */
+export function useDownloadDevis() {
+  return useMutation({
+    mutationFn: async ({ id, dto }: { id: string; dto: DevisRequestDto }) => {
+      const { filename, blob } = await api.postFileBlob(`/invoicing/invoices/${id}/devis`, dto);
+      downloadBlob(filename, blob);
+    },
+  });
+}
+
+/**
+ * TVA sur les encaissements (CGI art. 269) — see CLAUDE.md "Invoicing —
+ * cash-basis VAT". Reclassifies a SALE invoice's suspense VAT (445800)
+ * into TVA collectée (445710), making it exigible.
+ */
+export function useMarkAsEncaisse() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (invoiceId: string) =>
+      api.post<Invoice>(`/invoicing/invoices/${invoiceId}/mark-encaisse`, {}),
+    onSuccess: () => invalidateInvoices(queryClient),
   });
 }

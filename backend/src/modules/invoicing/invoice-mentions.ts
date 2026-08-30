@@ -67,8 +67,26 @@ export interface InvoiceMentionsVatBreakdown {
   vatAmount: string;
 }
 
+/** Payment instructions shown on devis/facture PDFs — see invoicing.controller.ts /
+ *  invoice-to-cii.ts. Null (not a placeholder) when the company hasn't configured any of
+ *  bankName/iban/bic — "flag, don't fake". */
+export interface InvoicePaymentInstructions {
+  bankName: string;
+  iban: string;
+  bic: string;
+}
+
+/** FACTURE/AVOIR are real fiscal documents (CGI Annexe II art. 242 nonies A / Code de
+ *  commerce art. L441-10 both apply). DEVIS is a quote — no legal sequential numbering, no
+ *  L441-10 late-payment notices (that regime governs invoices, not quotes) — see
+ *  computeDevisMentions(). renderInvoicePdf() branches its title/footer on this field rather
+ *  than overloading isCreditNote, which stays FACTURE/AVOIR-only. */
+export type InvoiceDocumentKind = 'FACTURE' | 'AVOIR' | 'DEVIS';
+
 export interface InvoiceMentions {
   jurisdiction: 'FR';
+  documentKind: InvoiceDocumentKind;
+  /** Empty string for a DEVIS — a quote has no legal sequential-numbering requirement. */
   invoiceNumber: string;
   invoiceDate: string;
   isCreditNote: boolean;
@@ -80,10 +98,13 @@ export interface InvoiceMentions {
   totalHT: string;
   totalVAT: string;
   totalTTC: string;
-  /** Code de commerce art. L441-10 — static, sourced wording, not user-editable. */
+  /** Code de commerce art. L441-10 — static, sourced wording, not user-editable. Present even
+   *  on a DEVIS's own data (it's still accurate FACTURE-only text); renderInvoicePdf() is what
+   *  decides whether to print it, based on documentKind. */
   latePaymentPenaltyNotice: string;
   forfeitIndemnityNotice: string;
   escompteNotice: string;
+  paymentInstructions: InvoicePaymentInstructions | null;
 }
 
 export interface InvoiceMentionsCompanyInput {
@@ -97,6 +118,8 @@ export interface InvoiceMentionsCompanyInput {
   siren: string | null;
   rci: string | null;
   vatNumber: string | null;
+  /** Null when bankName/iban/bic aren't all configured — see InvoicePaymentInstructions. */
+  paymentInstructions: InvoicePaymentInstructions | null;
 }
 
 export interface InvoiceMentionsClientInput {
@@ -161,21 +184,30 @@ export function computeInvoiceMentions(
   );
 }
 
-function computeInvoiceMentionsFR(
-  company: InvoiceMentionsCompanyInput,
-  client: InvoiceMentionsClientInput,
-  invoice: InvoiceMentionsInvoiceInput,
-): InvoiceMentions {
-  const lines: InvoiceMentionsLine[] = [];
+/**
+ * The line-items/VAT-by-rate/totals computation shared by
+ * computeInvoiceMentionsFR() and computeDevisMentionsFR() — a devis and
+ * a facture price identically, they only differ in numbering/L441-10
+ * applicability (see documentKind). Extracted so that arithmetic is
+ * never duplicated between the two.
+ */
+function computeLinesAndTotals(lines: InvoiceMentionsLineInput[]): {
+  lines: InvoiceMentionsLine[];
+  vatByRate: InvoiceMentionsVatBreakdown[];
+  totalHT: string;
+  totalVAT: string;
+  totalTTC: string;
+} {
+  const outLines: InvoiceMentionsLine[] = [];
   const vatGroups = new Map<string, { ratePercent: string; baseHT: Money; vatAmount: Money }>();
   let totalHT = Money.zero();
   let totalVAT = Money.zero();
 
-  for (const line of invoice.lines) {
+  for (const line of lines) {
     const amounts = computeInvoiceLineAmounts(line.quantity, line.unitPriceHT, line.vatRatePercent);
     totalHT = totalHT.plus(amounts.totalHT);
     totalVAT = totalVAT.plus(amounts.vatAmount);
-    lines.push({
+    outLines.push({
       description: line.description,
       quantity: line.quantity,
       unitPriceHT: line.unitPriceHT,
@@ -197,46 +229,7 @@ function computeInvoiceMentionsFR(
   }
 
   return {
-    jurisdiction: 'FR',
-    invoiceNumber: invoice.invoiceNumber,
-    invoiceDate: invoice.invoiceDate,
-    isCreditNote: invoice.isCreditNote,
-    correctsInvoiceNumber: invoice.correctsInvoiceNumber,
-    seller: {
-      name: company.name,
-      address: {
-        addressLine: company.addressLine,
-        postalCode: company.postalCode,
-        city: company.city,
-        countryCode: company.countryCode,
-      },
-      formattedAddress: formatAddress({
-        addressLine: company.addressLine,
-        postalCode: company.postalCode,
-        city: company.city,
-        countryCode: company.countryCode,
-      }),
-      vatNumber: company.vatNumber,
-      sirenOrRci: company.siren,
-    },
-    buyer: {
-      name: client.name,
-      address: {
-        addressLine: client.addressLine,
-        postalCode: client.postalCode,
-        city: client.city,
-        countryCode: client.countryCode,
-      },
-      formattedAddress: formatAddress({
-        addressLine: client.addressLine,
-        postalCode: client.postalCode,
-        city: client.city,
-        countryCode: client.countryCode,
-      }),
-      vatNumber: client.vatNumber,
-      sirenOrRci: client.sirenOrRci,
-    },
-    lines,
+    lines: outLines,
     vatByRate: [...vatGroups.values()].map((g) => ({
       ratePercent: g.ratePercent,
       baseHT: g.baseHT.toApiString(),
@@ -245,9 +238,65 @@ function computeInvoiceMentionsFR(
     totalHT: totalHT.toApiString(),
     totalVAT: totalVAT.toApiString(),
     totalTTC: totalHT.plus(totalVAT).toApiString(),
+  };
+}
+
+function buildParty(
+  input:
+    | InvoiceMentionsCompanyInput
+    | InvoiceMentionsClientInput
+    | {
+        name: string;
+        addressLine: string | null;
+        postalCode: string | null;
+        city: string | null;
+        countryCode: string;
+        siren?: string | null;
+        rci?: string | null;
+        sirenOrRci?: string | null;
+        vatNumber: string | null;
+      },
+): InvoiceMentionsPartyIdentity {
+  const address = {
+    addressLine: input.addressLine,
+    postalCode: input.postalCode,
+    city: input.city,
+    countryCode: input.countryCode,
+  };
+  return {
+    name: input.name,
+    address,
+    formattedAddress: formatAddress(address),
+    vatNumber: input.vatNumber,
+    sirenOrRci: 'sirenOrRci' in input ? (input.sirenOrRci ?? null) : (input.siren ?? null),
+  };
+}
+
+function computeInvoiceMentionsFR(
+  company: InvoiceMentionsCompanyInput,
+  client: InvoiceMentionsClientInput,
+  invoice: InvoiceMentionsInvoiceInput,
+): InvoiceMentions {
+  const { lines, vatByRate, totalHT, totalVAT, totalTTC } = computeLinesAndTotals(invoice.lines);
+
+  return {
+    jurisdiction: 'FR',
+    documentKind: invoice.isCreditNote ? 'AVOIR' : 'FACTURE',
+    invoiceNumber: invoice.invoiceNumber,
+    invoiceDate: invoice.invoiceDate,
+    isCreditNote: invoice.isCreditNote,
+    correctsInvoiceNumber: invoice.correctsInvoiceNumber,
+    seller: buildParty(company),
+    buyer: buildParty(client),
+    lines,
+    vatByRate,
+    totalHT,
+    totalVAT,
+    totalTTC,
     latePaymentPenaltyNotice: LATE_PAYMENT_PENALTY_NOTICE,
     forfeitIndemnityNotice: FORFEIT_INDEMNITY_NOTICE,
     escompteNotice: ESCOMPTE_NOTICE,
+    paymentInstructions: company.paymentInstructions,
   };
 }
 
@@ -275,6 +324,61 @@ function computeInvoiceMentionsMC(): never {
       'Services Fiscaux de Monaco) against a cited Monaco legal source before implementing ' +
       'computeInvoiceMentionsMC().',
   );
+}
+
+export interface DevisMentionsInvoiceInput {
+  invoiceDate: string;
+  lines: InvoiceMentionsLineInput[];
+}
+
+/**
+ * A devis (quote) — a DRAFT invoice's content, priced identically to a
+ * real facture (computeLinesAndTotals()), but with NO legal
+ * sequential-numbering requirement (CGI Annexe II art. 242 nonies A
+ * governs invoices, not quotes) and NO L441-10 late-payment/indemnity/
+ * escompte applicability (that regime is specific to invoices too) —
+ * documentKind: 'DEVIS' is what tells renderInvoicePdf() to omit both.
+ * `invoiceNumber` is deliberately an empty string, not a fabricated
+ * reference. Gated to FR the same way computeInvoiceMentions() is —
+ * Monaco's own devis/quote conventions are just as unconfirmed as its
+ * invoice numbering regime, so this throws the identical
+ * NotImplementedException for MC rather than guessing a lighter-weight
+ * document needs no such gate.
+ */
+export function computeDevisMentions(
+  jurisdiction: InvoiceJurisdiction,
+  company: InvoiceMentionsCompanyInput,
+  client: InvoiceMentionsClientInput,
+  invoice: DevisMentionsInvoiceInput,
+): InvoiceMentions {
+  if (jurisdiction === 'MC') {
+    return computeInvoiceMentionsMC();
+  }
+  if (jurisdiction !== 'FR') {
+    throw new NotImplementedException(
+      `Invoicing is not implemented for jurisdiction "${String(jurisdiction)}".`,
+    );
+  }
+  const { lines, vatByRate, totalHT, totalVAT, totalTTC } = computeLinesAndTotals(invoice.lines);
+  return {
+    jurisdiction: 'FR',
+    documentKind: 'DEVIS',
+    invoiceNumber: '',
+    invoiceDate: invoice.invoiceDate,
+    isCreditNote: false,
+    correctsInvoiceNumber: null,
+    seller: buildParty(company),
+    buyer: buildParty(client),
+    lines,
+    vatByRate,
+    totalHT,
+    totalVAT,
+    totalTTC,
+    latePaymentPenaltyNotice: LATE_PAYMENT_PENALTY_NOTICE,
+    forfeitIndemnityNotice: FORFEIT_INDEMNITY_NOTICE,
+    escompteNotice: ESCOMPTE_NOTICE,
+    paymentInstructions: company.paymentInstructions,
+  };
 }
 
 /**

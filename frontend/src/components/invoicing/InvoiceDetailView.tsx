@@ -1,5 +1,5 @@
 import type { Invoice, InvoiceMentionsPartyIdentity } from '../../api/types';
-import { useDownloadFacturX, useInvoiceMentions } from '../../api/queries';
+import { useDownloadFacturX, useInvoiceMentions, useMarkAsEncaisse } from '../../api/queries';
 import { ApiError } from '../../api/client';
 import { formatMoneyFr } from '../../lib/money';
 import { useState } from 'react';
@@ -16,13 +16,21 @@ import { useState } from 'react';
 export function InvoiceDetailView({
   invoice,
   onCreateCreditNote,
+  onEncaisseMarked,
 }: {
   invoice: Invoice;
   onCreateCreditNote: () => void;
+  /** Called with the freshly-updated Invoice after markAsEncaisse() succeeds — the caller
+   *  (InvoicingPage) holds `invoice` as local state, not a live query result, so without
+   *  this the encaissée confirmation never appears until the page is reloaded. Same
+   *  "flow the mutation's own return value back up" pattern as onSaved/onFinalized. */
+  onEncaisseMarked: (invoice: Invoice) => void;
 }) {
   const mentionsQuery = useInvoiceMentions(invoice.id);
   const downloadFacturX = useDownloadFacturX();
+  const markAsEncaisse = useMarkAsEncaisse();
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [encaisseError, setEncaisseError] = useState<string | null>(null);
 
   async function handleDownload() {
     setDownloadError(null);
@@ -30,6 +38,24 @@ export function InvoiceDetailView({
       await downloadFacturX.mutateAsync(invoice.id);
     } catch (e) {
       setDownloadError(e instanceof ApiError ? e.message : 'Le téléchargement a échoué.');
+    }
+  }
+
+  async function handleMarkAsEncaisse() {
+    if (
+      !window.confirm(
+        'Marquer cette facture comme encaissée ? La TVA sur encaissements sera reclassifiée en ' +
+          'TVA collectée (exigible) — cette action est irréversible.',
+      )
+    ) {
+      return;
+    }
+    setEncaisseError(null);
+    try {
+      const updated = await markAsEncaisse.mutateAsync(invoice.id);
+      onEncaisseMarked(updated);
+    } catch (e) {
+      setEncaisseError(e instanceof ApiError ? e.message : "L'opération a échoué.");
     }
   }
 
@@ -65,6 +91,16 @@ export function InvoiceDetailView({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {!mentions.isCreditNote && !invoice.encaissementConfirmedAt && (
+            <button
+              type="button"
+              onClick={() => void handleMarkAsEncaisse()}
+              disabled={markAsEncaisse.isPending}
+              className="rounded-md border border-border px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:bg-bg disabled:cursor-not-allowed disabled:text-ink-faint"
+            >
+              {markAsEncaisse.isPending ? 'Traitement…' : 'Marquer comme encaissée'}
+            </button>
+          )}
           {!mentions.isCreditNote && (
             <button
               type="button"
@@ -85,9 +121,22 @@ export function InvoiceDetailView({
         </div>
       </div>
 
+      {!mentions.isCreditNote && invoice.encaissementConfirmedAt && (
+        <div className="rounded-md bg-positive-soft px-3.5 py-2.5 text-[13px] text-positive">
+          Encaissée le {new Date(invoice.encaissementConfirmedAt).toLocaleDateString('fr-FR')} — la
+          TVA sur encaissements a été reclassifiée en TVA collectée.
+        </div>
+      )}
+
       {downloadError && (
         <div className="rounded-md bg-negative-soft px-3.5 py-2.5 text-[13px] text-negative">
           {downloadError}
+        </div>
+      )}
+
+      {encaisseError && (
+        <div className="rounded-md bg-negative-soft px-3.5 py-2.5 text-[13px] text-negative">
+          {encaisseError}
         </div>
       )}
 
@@ -149,6 +198,17 @@ export function InvoiceDetailView({
           <span className="tabular-nums">{formatMoneyFr(mentions.totalTTC)}</span>
         </div>
       </div>
+
+      {mentions.paymentInstructions && (
+        <div className="flex flex-col gap-0.5 border-t border-border pt-3 text-[13px]">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-ink-faint">
+            Coordonnées bancaires
+          </span>
+          <span className="text-ink">{mentions.paymentInstructions.bankName}</span>
+          <span className="text-ink-muted">IBAN : {mentions.paymentInstructions.iban}</span>
+          <span className="text-ink-muted">BIC : {mentions.paymentInstructions.bic}</span>
+        </div>
+      )}
 
       <div className="flex flex-col gap-1 border-t border-border pt-3 text-[11px] text-ink-faint">
         <p>{mentions.latePaymentPenaltyNotice}</p>

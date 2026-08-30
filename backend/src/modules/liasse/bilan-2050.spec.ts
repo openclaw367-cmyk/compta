@@ -151,6 +151,18 @@ describe('computeBilan2050', () => {
       /no liasse line mapping/,
     );
   });
+
+  // TVA sur les encaissements (CGI art. 269) — see CLAUDE.md "Invoicing — cash-basis VAT".
+  // A real bug found live: 445800 was seeded/posted without a bilan mapping at all, breaking
+  // liasse generation the moment the account had ANY ledger activity (even net-zero) — fixed
+  // by adding it to DY alongside 445710, same "dette fiscale" family.
+  it('maps 445800 (TVA sur encaissements non exigible) to DY, alongside 445710', () => {
+    const lignes: LiasseLigne[] = [
+      { compteNumber: '445800', pcgClass: 4, debit: d('0.00'), credit: d('100.00') },
+    ];
+    const result = computeBilan2050(buildTrialBalance(lignes), Money.zero());
+    expect(passifMontant(result, 'DY')).toBe('100.00');
+  });
 });
 
 describe('resolveImmobilisationLineCode', () => {

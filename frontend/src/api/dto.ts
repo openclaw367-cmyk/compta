@@ -29,3 +29,4 @@ export type { CreateBankAccountDto } from '../../../backend/src/modules/bank-acc
 export type { CreateInvoiceDto } from '../../../backend/src/modules/invoicing/dto/create-invoice.dto';
 export type { CreateInvoiceLineDto } from '../../../backend/src/modules/invoicing/dto/create-invoice-line.dto';
 export type { FinalizeInvoiceDto } from '../../../backend/src/modules/invoicing/dto/finalize-invoice.dto';
+export type { DevisRequestDto } from '../../../backend/src/modules/invoicing/dto/devis-request.dto';

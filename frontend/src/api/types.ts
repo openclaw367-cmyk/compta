@@ -32,6 +32,10 @@ export interface Account {
 /** Shared alias — used wherever a regime needs to be named explicitly, e.g. the line-trace query params. */
 export type Regime = 'REEL_NORMAL' | 'REEL_SIMPLIFIE';
 
+/** TVA exigibilité regime for services revenue (compte 706) — CGI art. 269, 2-c. See
+ *  CLAUDE.md "Invoicing — cash-basis VAT". Goods revenue is unaffected. */
+export type RegimeTvaServices = 'ENCAISSEMENTS' | 'DEBITS';
+
 export interface Company {
   id: string;
   name: string;
@@ -45,6 +49,10 @@ export interface Company {
   postalCode: string | null;
   city: string | null;
   country: string;
+  regimeTvaServices: RegimeTvaServices;
+  bankName: string | null;
+  iban: string | null;
+  bic: string | null;
 }
 
 export interface VatRate {
@@ -1341,6 +1349,10 @@ export interface Invoice {
   clientVatNumber: string | null;
   correctsInvoiceId: string | null;
   postedEcritureId: string | null;
+  /** TVA sur les encaissements (CGI art. 269) — see CLAUDE.md "Invoicing — cash-basis VAT".
+   *  Null until "Marquer comme encaissée" reclassifies the invoice's suspense VAT. */
+  encaissementConfirmedAt: string | null;
+  encaissementEcritureId: string | null;
   createdAt: string;
   updatedAt: string;
   lines: InvoiceLine[];
@@ -1380,9 +1392,22 @@ export interface InvoiceMentionsVatBreakdown {
   vatAmount: string;
 }
 
-/** The mandatory-mentions data for a FINALIZED invoice — CGI 242 nonies A + Code de commerce L441-10. */
+/** FACTURE/AVOIR are real fiscal documents; DEVIS is a quote (no legal numbering, no
+ *  L441-10 notices) — see CLAUDE.md "Invoicing — devis (quote) PDF". */
+export type InvoiceDocumentKind = 'FACTURE' | 'AVOIR' | 'DEVIS';
+
+export interface InvoicePaymentInstructions {
+  bankName: string;
+  iban: string;
+  bic: string;
+}
+
+/** The mandatory-mentions data for a FINALIZED invoice, or the priced content of a
+ *  DEVIS — CGI 242 nonies A + Code de commerce L441-10. */
 export interface InvoiceMentions {
   jurisdiction: 'FR';
+  documentKind: InvoiceDocumentKind;
+  /** Empty string for a DEVIS. */
   invoiceNumber: string;
   invoiceDate: string;
   isCreditNote: boolean;
@@ -1397,4 +1422,5 @@ export interface InvoiceMentions {
   latePaymentPenaltyNotice: string;
   forfeitIndemnityNotice: string;
   escompteNotice: string;
+  paymentInstructions: InvoicePaymentInstructions | null;
 }

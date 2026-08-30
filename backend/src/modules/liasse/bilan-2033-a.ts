@@ -27,6 +27,9 @@ import { DualNatureRule, LineRule, classifyAccounts } from './liasse-line-rules'
 const DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT = '445662';
 const DEDUCTIBLE_AUTRES_ACCOUNT = '445660';
 const TVA_COLLECTEE_ACCOUNT = '445710';
+/** TVA sur les encaissements suspense account (CGI art. 269) — see
+ *  invoice-posting.ts / bilan-2050.ts's own identical constant. */
+const TVA_ENCAISSEMENTS_ACCOUNT = '445800';
 
 /**
  * Exported (2026-08-29) so the traceability drill-down's reverse
@@ -234,7 +237,18 @@ export const PASSIF_RULES: LineRule[] = [
   {
     code: '172',
     label: 'Dettes fiscales et sociales',
-    prefixes: ['421', '427', '431', '437', '444', TVA_COLLECTEE_ACCOUNT, '4455', '446', '447'],
+    prefixes: [
+      '421',
+      '427',
+      '431',
+      '437',
+      '444',
+      TVA_COLLECTEE_ACCOUNT,
+      TVA_ENCAISSEMENTS_ACCOUNT,
+      '4455',
+      '446',
+      '447',
+    ],
     direction: 'credit',
   },
   // 173 "Comptes courants d'associés" — unlike bilan-2050 (which folds 455

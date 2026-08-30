@@ -18,6 +18,10 @@ import { DualNatureRule, LineRule, classifyAccounts } from './liasse-line-rules'
 const DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT = '445662';
 const DEDUCTIBLE_AUTRES_ACCOUNT = '445660';
 const TVA_COLLECTEE_ACCOUNT = '445710';
+/** TVA sur les encaissements suspense account (CGI art. 269) — see
+ *  invoice-posting.ts. Genuinely a dette fiscale (VAT owed, just not yet
+ *  exigible), same DY line as TVA_COLLECTEE_ACCOUNT. */
+const TVA_ENCAISSEMENTS_ACCOUNT = '445800';
 
 /**
  * Actif rows: each has a Brut rule and (usually) a matching
@@ -379,7 +383,18 @@ export const PASSIF_RULES: LineRule[] = [
   {
     code: 'DY',
     label: 'Dettes fiscales et sociales',
-    prefixes: ['421', '427', '431', '437', '444', TVA_COLLECTEE_ACCOUNT, '4455', '446', '447'],
+    prefixes: [
+      '421',
+      '427',
+      '431',
+      '437',
+      '444',
+      TVA_COLLECTEE_ACCOUNT,
+      TVA_ENCAISSEMENTS_ACCOUNT,
+      '4455',
+      '446',
+      '447',
+    ],
     direction: 'credit',
   },
   {

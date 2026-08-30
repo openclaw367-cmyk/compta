@@ -38,8 +38,11 @@ export async function renderInvoicePdf(mentions: InvoiceMentions): Promise<Uint8
     y -= lineHeight * n;
   };
 
-  const title = mentions.isCreditNote ? 'AVOIR' : 'FACTURE';
-  draw(`${title} n° ${mentions.invoiceNumber}`, MARGIN, 18, bold);
+  const titleLine =
+    mentions.documentKind === 'DEVIS'
+      ? 'DEVIS'
+      : `${mentions.documentKind} n° ${mentions.invoiceNumber}`;
+  draw(titleLine, MARGIN, 18, bold);
   newLine(1.5);
   draw(`Date d'émission : ${mentions.invoiceDate}`, MARGIN, 10);
   if (mentions.isCreditNote && mentions.correctsInvoiceNumber) {
@@ -120,16 +123,32 @@ export async function renderInvoicePdf(mentions: InvoiceMentions): Promise<Uint8
   draw(`${mentions.totalTTC} €`, summaryColX + 90, 12, bold);
   newLine(2.5);
 
-  // Mandatory L441-10 notices footer.
-  const footerLines = [
-    mentions.latePaymentPenaltyNotice,
-    mentions.forfeitIndemnityNotice,
-    mentions.escompteNotice,
-  ];
-  y = MARGIN + lineHeight * footerLines.length;
-  for (const notice of footerLines) {
-    drawWrapped(page, notice, MARGIN, y, PAGE_WIDTH - 2 * MARGIN, font, 7, rgb(0.35, 0.35, 0.35));
-    y -= lineHeight * 0.9;
+  // Payment instructions — shown on FACTURE/AVOIR/DEVIS alike, whenever the company has
+  // configured them ("flag, don't fake" — see Company.bankName/iban/bic's own doc comment).
+  if (mentions.paymentInstructions) {
+    draw('Coordonnées bancaires', MARGIN, 10, bold);
+    newLine(1.3);
+    draw(mentions.paymentInstructions.bankName, MARGIN, 9);
+    newLine();
+    draw(`IBAN : ${mentions.paymentInstructions.iban}`, MARGIN, 9);
+    newLine();
+    draw(`BIC : ${mentions.paymentInstructions.bic}`, MARGIN, 9);
+    newLine(1.5);
+  }
+
+  // Mandatory L441-10 notices footer — FACTURE/AVOIR only (Code de commerce art. L441-10
+  // governs invoices, not devis/quotes — see invoice-mentions.ts's own doc comment).
+  if (mentions.documentKind !== 'DEVIS') {
+    const footerLines = [
+      mentions.latePaymentPenaltyNotice,
+      mentions.forfeitIndemnityNotice,
+      mentions.escompteNotice,
+    ];
+    y = MARGIN + lineHeight * footerLines.length;
+    for (const notice of footerLines) {
+      drawWrapped(page, notice, MARGIN, y, PAGE_WIDTH - 2 * MARGIN, font, 7, rgb(0.35, 0.35, 0.35));
+      y -= lineHeight * 0.9;
+    }
   }
 
   return doc.save();

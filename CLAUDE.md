@@ -4059,7 +4059,232 @@ in a real Chrome tab against the running dev server, not just
   suite (661 tests, after the `@HttpCode` fix) passing.
 - **Deferred, explicitly, same as the backend passes above**:
   VAT-exempt Factur-X support, Monaco's actual rule content, `Account`
-  address/SIREN/RCI fields, Phase B (PA/e-transmission).
+  address/SIREN/RCI fields, Phase B (PA/e-transmission). **Cash-basis
+  VAT (TVA sur les encaissements), devis PDF, and bank payment details
+  — all listed here as deferred — are now real, see immediately
+  below.**
+
+## Invoicing — cash-basis VAT (TVA sur les encaissements), devis PDF, bank payment details
+
+`src/modules/invoicing/`, `src/modules/liasse/bilan-2050.ts`/
+`bilan-2033-a.ts` (2026-08-30) closes three real gaps a user directly
+asked about: whether TVA sur les encaissements was handled at all (it
+wasn't), whether a DRAFT invoice could produce a devis (quote) PDF (it
+couldn't), and whether devis/facture could show bank payment details
+(they didn't). Built the same design-then-verify discipline as every
+other VAT/invoicing pass — regulatory grounding fetched directly
+(CGI art. 269, legifrance.gouv.fr) before any code, four scoping
+decisions resolved via `AskUserQuestion` (all to the recommended
+option), a written plan reviewed and approved before implementation.
+
+- **The regulatory anchor, confirmed directly, not recalled**: CGI
+  art. 269, 2-c — a **livraison de biens** (goods) is exigible "lors de
+  la réalisation du fait générateur" (delivery/invoicing — this app's
+  pre-existing behaviour, unaffected); a **prestation de services** is
+  exigible, BY DEFAULT, "lors de l'encaissement des acomptes, du prix,
+  de la rémunération" (payment collection) — "ou, sur option du
+  redevable, d'après les débits" (a company MAY formally elect
+  invoicing-date exigibilité instead). `RegimeTvaServices`
+  (`ENCAISSEMENTS` | `DEBITS`, `@default(ENCAISSEMENTS)` — the legal
+  default) is a new `Company` field; it only affects account `706000`
+  (Prestations de services, the one dedicated PCG services-revenue
+  account in this app's seed) — every other 70x account (goods) is
+  unaffected regardless of regime.
+- **Mechanics: a suspense account, reclassified on an explicit human
+  action — deliberately NOT query-time filtering of
+  `ca3-declaration.ts` by payment date.** New account `445800` ("TVA
+  collectée sur encaissements non exigible", PCG family `4458` "Taxes
+  sur le chiffre d'affaires à régulariser ou en attente" — confirmed
+  via a second, independent web search, same "don't guess a suspense
+  account number" discipline as everywhere else in this app).
+  `buildInvoicePostingLignes()` (`invoice-posting.ts`) now takes a
+  `tvaEncaissementsAccountId` and each line's own `isCashBasisVat`
+  flag (resolved by the caller — the module itself never touches
+  Prisma or knows account NUMBERS, only ids, same purity discipline as
+  before): a 706-class line under `ENCAISSEMENTS` credits `445800`
+  instead of `445710` at `finalize()` time. **This is why
+  `ca3-declaration.ts` needed ZERO changes** — confirmed directly from
+  its own source, not assumed: `COLLECTEE_PREFIX = '4457'` and
+  `DEDUCTIBLE_PREFIX = '4456'`, so a `445800` ledger line falls
+  straight into the "has no bearing on this declaration" branch and is
+  silently skipped. `445710`'s balance already means "TVA exigible
+  this period" once non-yet-exigible VAT is parked in a different
+  account at invoice time — a materially less invasive design than
+  teaching the already-verified CA3 engine about payment dates.
+- **`InvoicingService.markAsEncaisse()`** (new, `POST
+  /invoicing/invoices/:id/mark-encaisse`) is the explicit, human-
+  triggered reclassification — "Marquer comme encaissée" on
+  `InvoiceDetailView`, `window.confirm()`-then-mutate, same discipline
+  as cession/dotation. Whole-invoice granularity only — **no
+  partial-payment proration this pass**, a stated, documented scope
+  boundary (same "flag, don't fake" precedent as 2059-A's court/
+  long-terme qualification staying null). Reads the exact `445800`
+  amount off the invoice's own posted écriture (never re-derived from
+  `InvoiceLine`s independently — same "read the real ledger" tie-out
+  discipline as `getMentions()`), groups by `vatRateId` (a mixed-rate
+  invoice has one suspense ligne per rate — see
+  `invoice-posting.ts`'s own grouping), and posts one balanced
+  débit-445800/crédit-445710 écriture PER RATE through the ordinary
+  `EntriesService.create()`/`.validate()` path — never a privileged
+  write. Preserving the per-rate `vatRateId` tag on the reclassified
+  445710 credit is load-bearing, not cosmetic: `ca3-declaration.ts`'s
+  own untagged-collectée-line guard would otherwise throw the moment
+  that period's CA3 is generated. **Deliberately `SALE`-only, not
+  `CREDIT_NOTE`** — whether an avoir reversing a services sale should
+  debit 445800 (never yet encaissée) or 445710 (already was) is a
+  genuinely separate question this pass doesn't attempt; an avoir's
+  own lines always post against 445710 directly, unchanged from before
+  this feature existed, a stated scope boundary, not an oversight.
+  Guards: must be `FINALIZED`, `SALE`, not already `encaissementConfirmedAt`,
+  and must actually have a 445800-credited ligne to reclassify (else a
+  named `BadRequestException`, never a silent no-op).
+- **A real bug found live, not by inspection, and fixed the same
+  pass**: the new `445800` account had no bilan line mapping at all in
+  either `bilan-2050.ts`'s `PASSIF_RULES` or `bilan-2033-a.ts`'s —
+  the moment the account had ANY ledger activity (even net-zero, after
+  a test reversal), `classifyAccounts()`'s own exhaustive-mapping guard
+  threw "Account ... has no liasse line mapping", breaking liasse
+  generation entirely for any company that had ever posted to it.
+  Fixed by adding `TVA_ENCAISSEMENTS_ACCOUNT` (`445800`) alongside
+  `TVA_COLLECTEE_ACCOUNT` (`445710`) to the SAME line both files
+  already routed 445710 to — `DY` "Dettes fiscales et sociales"
+  (2050-series) / `172` (2033-series) — a real dette fiscale (VAT
+  owed, just not yet exigible), not a new line. Confirmed live: liasse
+  generation failed with the exact guard message before the fix,
+  succeeded (Actif=Passif holding) immediately after. Two new unit
+  tests (`bilan-2050.spec.ts`, `bilan-2033-a.spec.ts`) lock this
+  mapping in for both regimes.
+- **A second real bug found live, in the frontend this time**: after
+  `markAsEncaisse()` succeeds, `InvoiceDetailView`'s "Encaissée le..."
+  confirmation banner never appeared until the page was reloaded —
+  `InvoicingPage` holds the currently-viewed invoice as local
+  `EditorState`, not derived live from the invalidated query, so
+  invalidating `['invoices']` alone never touched the stale `Invoice`
+  object still being rendered. Fixed with an `onEncaisseMarked`
+  callback on `InvoiceDetailView` (mirrors the pre-existing `onSaved`/
+  `onFinalized` pattern exactly — flow the mutation's own fresh return
+  value back up to the parent) that `InvoicingPage` uses to replace
+  `editor.invoice`. Confirmed live, twice: reproduced the stale-banner
+  bug first (the API call itself succeeded, 201, but the UI didn't
+  update), then confirmed the fix makes the banner appear immediately,
+  with no reload, on a second test invoice.
+- **Devis (quote) PDF, from a DRAFT — reuses the existing plain-PDF
+  renderer verbatim.** `factur-x-pdf.ts`'s `renderInvoicePdf(mentions)`
+  was ALREADY a clean, Factur-X-independent function (only
+  `FacturXService.render()` called it before this pass) — no new PDF
+  layer was needed. New `computeDevisMentions()` (`invoice-mentions.ts`)
+  produces the same `InvoiceMentions` shape with `documentKind: 'DEVIS'`
+  and `invoiceNumber: ''` (a devis has no legal sequential-numbering
+  requirement — CGI Annexe II art. 242 nonies A governs invoices, not
+  quotes) instead of overloading `isCreditNote`.
+  `InvoiceMentions.documentKind: 'FACTURE' | 'AVOIR' | 'DEVIS'` is the
+  one clean discriminator `renderInvoicePdf()`'s title/footer logic
+  now branches on. `POST /invoicing/invoices/:id/devis` (POST, not
+  GET — it takes the ephemeral client-identity body) is guarded to
+  `status === 'DRAFT'` only, calls `computeDevisMentions()` then
+  `renderInvoicePdf()` DIRECTLY — never touches
+  `FacturXService`/CII/XSD/Schematron, since a devis isn't a fiscal
+  document. Gated to FR the same way `computeInvoiceMentions()` is
+  (throws the identical `NotImplementedException` for MC — Monaco's
+  own devis conventions are just as unconfirmed as its invoice
+  numbering regime, never assumed lighter-weight and therefore exempt).
+  L441-10 late-payment/indemnity/escompte notices (Code de commerce,
+  invoice-specific) are omitted on a `DEVIS` PDF — the data itself
+  still carries them (still accurate FACTURE/AVOIR text), it's
+  `renderInvoicePdf()` that decides whether to print them, keeping
+  `InvoiceMentions` a pure data model, not a renderer.
+- **Frontend**: `InvoiceEditor.tsx` gained a `DevisSection` sibling to
+  the existing `FinalizeSection`, EPHEMERAL by design (client-identity
+  form fields reset every time the section mounts — nothing is ever
+  saved or snapshotted, unlike `finalize()`). The two sections' ~80
+  lines of identical client-identity-field markup were extracted into
+  a shared `ClientIdentityFields` component (`isClientIdentityValid()`/
+  `emptyClientIdentityDraft()` alongside it) rather than duplicated —
+  `FinalizeSection` was refactored onto it too, verified zero visual/
+  behavioral change. `useDownloadDevis()` mirrors
+  `useDownloadFacturX()`'s `api.getFileBlob`+`downloadBlob` shape,
+  using a new `api.postFileBlob()` client helper (`client.ts`) since
+  the devis endpoint needs a JSON body, unlike the GET-only Factur-X
+  download.
+- **Bank payment details (IBAN/BIC), shown on BOTH the plain PDF and
+  the Factur-X structured XML.** New `Company.bankName`/`iban`/`bic`
+  (all nullable — a company that hasn't configured them gets no block
+  at all, "flag, don't fake", never a placeholder). Threaded through
+  `InvoiceMentionsCompanyInput`/`InvoiceMentions` as one
+  `paymentInstructions: { bankName, iban, bic } | null` shape, built
+  once by `InvoicingService.buildCompanyMentionsInput()` and reused by
+  `finalize()`, `getMentions()`, and the new devis path — one producer,
+  not three independently-written ones. `renderInvoicePdf()` gained a
+  "Coordonnées bancaires" block (shown on FACTURE/AVOIR/DEVIS alike).
+  `invoice-to-cii.ts` gained a real EN16931
+  `specifiedTradeSettlementPaymentMeans` block (`typeCode: '58'`, SEPA
+  credit transfer) inside the existing `applicableHeaderTradeSettlement`
+  — **every class/field name confirmed directly against the installed
+  `@stafyniaksacha/facturx` package's own `.d.mts` type definitions
+  before writing the code** (`CreditorFinancialAccountType.ibanID`,
+  `CreditorFinancialInstitutionType.bicID`, `PaymentMeansCodeType`),
+  same "never guess a type shape from memory" discipline as the rest
+  of this file. Re-verified the whole XSD/Schematron round-trip check
+  still passes with this new block present (see below) — the same
+  class of regression the original empty-delivery-element Schematron
+  bug this app already found once could recur for.
+- **Verified two ways, live against the FR demo company, with real
+  cleanup afterward.** New/extended unit tests:
+  `invoice-posting.spec.ts` (706/ENCAISSEMENTS → 445800; 706/DEBITS →
+  445710; a mixed 706+707 invoice splitting correctly across both TVA
+  accounts in one écriture; an internal-consistency guard test), a new
+  `describe('InvoicingService.finalize — cash-basis VAT ...')` block
+  and `describe('InvoicingService.markAsEncaisse')` block in
+  `invoicing.service.spec.ts`, a dedicated CA3 oracle test in
+  `ca3-declaration.spec.ts` proving the "unchanged" design claim (a
+  445800-only period shows zero collectée; a period containing the
+  reclassification's own 445710 credit shows the full amount),
+  `computeDevisMentions()`/`paymentInstructions` tests in
+  `invoice-mentions.spec.ts`, and the two new bilan-mapping tests
+  above — 680 backend tests passing overall (up from 661);
+  `tsc`/`eslint` clean both sides, `vite build` clean.
+  **Live**: configured bank details on the FR demo company; created +
+  finalized a real 706-line SALE invoice under `ENCAISSEMENTS`
+  (invoice n°10) — confirmed the posted écriture credited `445800`
+  (not `445710`), confirmed CA3 for that period (ligne16) did NOT
+  include its 100,00 € VAT; called `markAsEncaisse()` — confirmed the
+  débit-445800/crédit-445710 reclassification posted, confirmed CA3
+  for the reclassification's own period NOW included the 100,00 €.
+  Downloaded a devis PDF for the same invoice while still DRAFT —
+  confirmed "DEVIS" title (no number), the bank-details block, and NO
+  L441-10 footer (byte-verified via `pypdf` text extraction). Downloaded
+  the finalized invoice's real Factur-X file — HTTP 200 (proving the
+  full XSD/Schematron round-trip passed with the new payment-means
+  block); extracted the embedded CII XML via a temporary `ts-node`
+  script (deleted after use, same discipline as every other one-off
+  verification script in this project) and confirmed
+  `SpecifiedTradeSettlementPaymentMeans`/`IBANID`/`BICID` are present
+  with the real configured values. Confirmed the MC devis gate refuses
+  with the identical `NotImplementedException` message finalize() uses.
+  Then, in a REAL BROWSER (not just curl): confirmed
+  `CompanyProfilePage`'s new "TVA — Prestations de services" and
+  "Coordonnées bancaires" sections render and edit correctly; created,
+  saved, and finalized a real 706-line invoice through the actual UI;
+  downloaded its devis (confirmed via network inspection, HTTP 201);
+  finalized it and confirmed "Marquer comme encaissée" reclassified it
+  live end to end (this is where the stale-banner bug above was found
+  and fixed, then re-confirmed working with no reload needed on a
+  second invoice). All test écritures (two SALE postings, two
+  reclassifications, all four reversed and validated) and both test
+  `Invoice` rows removed afterward; confirmed via the liasse's own
+  Actif=Passif check AND `GET /vat/declaration` for the affected
+  period that both the ledger and CA3 returned to their exact
+  pre-test baselines (39 441,00 = 39 441,00; ligne16 back to 11,00).
+- **Deferred, explicitly**: partial-payment proration for cash-basis
+  VAT (whole-invoice only, this pass); cash-basis VAT for a `706`-class
+  écriture posted OUTSIDE the invoicing module (direct journal-grid
+  entries bypass this entirely — a real, pre-existing-shaped gap,
+  same class as the orphaned-immobilisation warning only covering
+  `EntriesService.create()`/`update()`); Monaco cash-basis VAT (CGI
+  art. 269 is a French text; Monaco's own regime symmetry is
+  unconfirmed, matching this app's standing Monaco-compliance
+  discipline) and Monaco devis (same gate as Monaco invoicing
+  generally).
 
 ## Known scope boundaries
 

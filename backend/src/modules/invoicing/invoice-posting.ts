@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Money } from '../../common/decimal';
 import { CreateEcritureLigneDto } from '../entries/dto/create-ecriture-ligne.dto';
 import { computeInvoiceLineAmounts } from './invoice-line-math';
@@ -20,6 +21,17 @@ import { computeInvoiceLineAmounts } from './invoice-line-math';
  * TVA ligne at all. Any zero-amount group/side is omitted entirely —
  * `EntriesService` rejects a 0,00 line, same as everywhere else in this
  * app.
+ *
+ * TVA sur les encaissements (CGI art. 269) — see CLAUDE.md "Invoicing —
+ * cash-basis VAT". A line whose caller-resolved `isCashBasisVat` is true
+ * (services revenue, account 706x, under Company.regimeTvaServices =
+ * ENCAISSEMENTS) credits `tvaEncaissementsAccountId` (445800, "TVA
+ * collectée sur encaissements non exigible") instead of
+ * `tvaCollecteeAccountId` (445710) — the VAT only moves into 445710 once
+ * `InvoicingService.markAsEncaisse()` posts the reclassification. The
+ * caller resolves which lines qualify (this module never touches Prisma
+ * or knows about account NUMBERS, only ids); `tvaEncaissementsAccountId`
+ * may be null only when no line sets `isCashBasisVat`.
  */
 
 export interface InvoicePostingLineInput {
@@ -29,6 +41,8 @@ export interface InvoicePostingLineInput {
   vatRateId: string | null;
   /** Resolved by the caller from VatRate.ratePercent — null iff vatRateId is null. */
   vatRatePercent: string | null;
+  /** True iff this line's VAT is not yet exigible — see the module doc comment above. */
+  isCashBasisVat: boolean;
 }
 
 export interface InvoicePostingResult {
@@ -41,12 +55,14 @@ export interface InvoicePostingResult {
 export function buildInvoicePostingLignes(
   clientAccountId: string,
   tvaCollecteeAccountId: string,
+  tvaEncaissementsAccountId: string | null,
   lines: InvoicePostingLineInput[],
   direction: 'SALE' | 'CREDIT_NOTE',
 ): InvoicePostingResult {
   interface Group {
     revenueAccountId: string;
     vatRateId: string | null;
+    tvaAccountId: string;
     ht: Money;
     vat: Money;
   }
@@ -57,10 +73,21 @@ export function buildInvoicePostingLignes(
     const amounts = computeInvoiceLineAmounts(line.quantity, line.unitPriceHT, line.vatRatePercent);
     totalTTC = totalTTC.plus(amounts.totalTTC);
 
-    const key = `${line.revenueAccountId}::${line.vatRateId ?? 'NONE'}`;
+    let tvaAccountId = tvaCollecteeAccountId;
+    if (line.isCashBasisVat) {
+      if (!tvaEncaissementsAccountId) {
+        throw new BadRequestException(
+          'A cash-basis (TVA sur les encaissements) line requires tvaEncaissementsAccountId.',
+        );
+      }
+      tvaAccountId = tvaEncaissementsAccountId;
+    }
+
+    const key = `${line.revenueAccountId}::${line.vatRateId ?? 'NONE'}::${tvaAccountId}`;
     const group = groups.get(key) ?? {
       revenueAccountId: line.revenueAccountId,
       vatRateId: line.vatRateId,
+      tvaAccountId,
       ht: Money.zero(),
       vat: Money.zero(),
     };
@@ -83,7 +110,7 @@ export function buildInvoicePostingLignes(
     }
     if (!group.vat.isZero()) {
       lignes.push({
-        compteId: tvaCollecteeAccountId,
+        compteId: group.tvaAccountId,
         [revenueTvaSide]: group.vat.toApiString(),
         vatRateId: group.vatRateId ?? undefined,
       });

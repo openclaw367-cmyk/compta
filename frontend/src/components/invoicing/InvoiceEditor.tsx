@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import type { Account, Invoice, VatRate } from '../../api/types';
-import type { CreateInvoiceDto, FinalizeInvoiceDto } from '../../api/dto';
-import { useCreateInvoice, useFinalizeInvoice, useUpdateInvoice } from '../../api/queries';
+import type { CreateInvoiceDto, DevisRequestDto, FinalizeInvoiceDto } from '../../api/dto';
+import {
+  useCreateInvoice,
+  useDownloadDevis,
+  useFinalizeInvoice,
+  useUpdateInvoice,
+} from '../../api/queries';
 import { ApiError } from '../../api/client';
 import { AccountCombobox } from '../journal/AccountCombobox';
 import { InvoiceLinesEditor } from './InvoiceLinesEditor';
@@ -151,8 +156,195 @@ export function InvoiceEditor({
       )}
 
       {existing && existing.status === 'DRAFT' && !creditNoteFor && (
+        <DevisSection invoice={existing} />
+      )}
+
+      {existing && existing.status === 'DRAFT' && !creditNoteFor && (
         <FinalizeSection invoice={existing} onFinalized={onSaved} />
       )}
+    </div>
+  );
+}
+
+/**
+ * The client name/address/SIREN/VAT fields shared by FinalizeSection and
+ * DevisSection — a devis and the eventual facture describe the client
+ * identically, they just do different things with it afterward (one
+ * persists a snapshot + posts an écriture, the other renders a PDF and
+ * forgets). Account has no address/SIREN/RCI fields yet — a stated,
+ * deferred scope boundary, see CLAUDE.md.
+ */
+interface ClientIdentityDraft {
+  invoiceDate: string;
+  clientName: string;
+  clientAddressLine: string;
+  clientPostalCode: string;
+  clientCity: string;
+  clientCountryCode: string;
+  clientSirenOrRci: string;
+  clientVatNumber: string;
+}
+
+function emptyClientIdentityDraft(): ClientIdentityDraft {
+  return {
+    invoiceDate: new Date().toISOString().slice(0, 10),
+    clientName: '',
+    clientAddressLine: '',
+    clientPostalCode: '',
+    clientCity: '',
+    clientCountryCode: 'FR',
+    clientSirenOrRci: '',
+    clientVatNumber: '',
+  };
+}
+
+function isClientIdentityValid(draft: ClientIdentityDraft): boolean {
+  return draft.clientName.trim() !== '' && /^[A-Z]{2}$/.test(draft.clientCountryCode);
+}
+
+const CLIENT_IDENTITY_INPUT_CLASS =
+  'rounded-md border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent';
+
+function ClientIdentityFields({
+  value,
+  onChange,
+  dateLabel,
+}: {
+  value: ClientIdentityDraft;
+  onChange: (patch: Partial<ClientIdentityDraft>) => void;
+  dateLabel: string;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
+        {dateLabel}
+        <input
+          type="date"
+          value={value.invoiceDate}
+          onChange={(e) => onChange({ invoiceDate: e.target.value })}
+          className={CLIENT_IDENTITY_INPUT_CLASS}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
+        Nom du client
+        <input
+          type="text"
+          value={value.clientName}
+          onChange={(e) => onChange({ clientName: e.target.value })}
+          placeholder="Client Petit SARL"
+          className={CLIENT_IDENTITY_INPUT_CLASS}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
+        Adresse
+        <input
+          type="text"
+          value={value.clientAddressLine}
+          onChange={(e) => onChange({ clientAddressLine: e.target.value })}
+          placeholder="5 avenue des Champs"
+          className={CLIENT_IDENTITY_INPUT_CLASS}
+        />
+      </label>
+      <div className="grid grid-cols-[1fr_1fr_70px] gap-2">
+        <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
+          Code postal
+          <input
+            type="text"
+            value={value.clientPostalCode}
+            onChange={(e) => onChange({ clientPostalCode: e.target.value })}
+            className={CLIENT_IDENTITY_INPUT_CLASS}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
+          Ville
+          <input
+            type="text"
+            value={value.clientCity}
+            onChange={(e) => onChange({ clientCity: e.target.value })}
+            className={CLIENT_IDENTITY_INPUT_CLASS}
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
+          Pays (ISO)
+          <input
+            type="text"
+            value={value.clientCountryCode}
+            onChange={(e) => onChange({ clientCountryCode: e.target.value.toUpperCase().slice(0, 2) })}
+            className={CLIENT_IDENTITY_INPUT_CLASS}
+          />
+        </label>
+      </div>
+      <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
+        SIREN / RCI (optionnel)
+        <input
+          type="text"
+          value={value.clientSirenOrRci}
+          onChange={(e) => onChange({ clientSirenOrRci: e.target.value })}
+          className={CLIENT_IDENTITY_INPUT_CLASS}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
+        N° TVA (optionnel)
+        <input
+          type="text"
+          value={value.clientVatNumber}
+          onChange={(e) => onChange({ clientVatNumber: e.target.value })}
+          className={CLIENT_IDENTITY_INPUT_CLASS}
+        />
+      </label>
+    </div>
+  );
+}
+
+/**
+ * Devis (quote) PDF — see CLAUDE.md "Invoicing — devis (quote) PDF".
+ * EPHEMERAL: unlike FinalizeSection, nothing here is ever saved or
+ * snapshotted onto the Invoice row — closing this section and reopening
+ * it starts from a blank client-identity form again, every time.
+ */
+function DevisSection({ invoice }: { invoice: Invoice }) {
+  const downloadDevis = useDownloadDevis();
+  const [draft, setDraft] = useState<ClientIdentityDraft>(emptyClientIdentityDraft());
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleDownload() {
+    setError(null);
+    const dto: DevisRequestDto = {
+      invoiceDate: draft.invoiceDate,
+      clientName: draft.clientName,
+      clientAddressLine: draft.clientAddressLine || undefined,
+      clientPostalCode: draft.clientPostalCode || undefined,
+      clientCity: draft.clientCity || undefined,
+      clientCountryCode: draft.clientCountryCode,
+      clientSirenOrRci: draft.clientSirenOrRci || undefined,
+      clientVatNumber: draft.clientVatNumber || undefined,
+    };
+    try {
+      await downloadDevis.mutateAsync({ id: invoice.id, dto });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'La génération du devis a échoué.');
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-border-strong bg-bg p-4">
+      <h3 className="text-[13px] font-semibold text-ink">Devis</h3>
+      {error && (
+        <div className="rounded-md bg-negative-soft px-3 py-2 text-[13px] text-negative">{error}</div>
+      )}
+      <ClientIdentityFields
+        value={draft}
+        onChange={(patch) => setDraft({ ...draft, ...patch })}
+        dateLabel="Date du devis"
+      />
+      <button
+        type="button"
+        onClick={handleDownload}
+        disabled={!isClientIdentityValid(draft) || downloadDevis.isPending}
+        className="self-end rounded-md border border-border-strong px-3.5 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-surface disabled:cursor-not-allowed disabled:text-ink-faint"
+      >
+        {downloadDevis.isPending ? 'Génération…' : 'Télécharger le devis (PDF)'}
+      </button>
     </div>
   );
 }
@@ -172,17 +364,8 @@ function FinalizeSection({
   onFinalized: (invoice: Invoice) => void;
 }) {
   const finalizeInvoice = useFinalizeInvoice();
-  const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [clientName, setClientName] = useState('');
-  const [clientAddressLine, setClientAddressLine] = useState('');
-  const [clientPostalCode, setClientPostalCode] = useState('');
-  const [clientCity, setClientCity] = useState('');
-  const [clientCountryCode, setClientCountryCode] = useState('FR');
-  const [clientSirenOrRci, setClientSirenOrRci] = useState('');
-  const [clientVatNumber, setClientVatNumber] = useState('');
+  const [draft, setDraft] = useState<ClientIdentityDraft>(emptyClientIdentityDraft());
   const [error, setError] = useState<string | null>(null);
-
-  const canFinalize = clientName.trim() !== '' && /^[A-Z]{2}$/.test(clientCountryCode);
 
   async function handleFinalize() {
     if (
@@ -196,14 +379,14 @@ function FinalizeSection({
     }
     setError(null);
     const dto: FinalizeInvoiceDto = {
-      invoiceDate,
-      clientName,
-      clientAddressLine: clientAddressLine || undefined,
-      clientPostalCode: clientPostalCode || undefined,
-      clientCity: clientCity || undefined,
-      clientCountryCode,
-      clientSirenOrRci: clientSirenOrRci || undefined,
-      clientVatNumber: clientVatNumber || undefined,
+      invoiceDate: draft.invoiceDate,
+      clientName: draft.clientName,
+      clientAddressLine: draft.clientAddressLine || undefined,
+      clientPostalCode: draft.clientPostalCode || undefined,
+      clientCity: draft.clientCity || undefined,
+      clientCountryCode: draft.clientCountryCode,
+      clientSirenOrRci: draft.clientSirenOrRci || undefined,
+      clientVatNumber: draft.clientVatNumber || undefined,
     };
     try {
       const result = await finalizeInvoice.mutateAsync({ id: invoice.id, dto });
@@ -213,97 +396,21 @@ function FinalizeSection({
     }
   }
 
-  const inputClass =
-    'rounded-md border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent';
-
   return (
     <div className="flex flex-col gap-3 rounded-md border border-border-strong bg-bg p-4">
       <h3 className="text-[13px] font-semibold text-ink">Finaliser</h3>
       {error && (
         <div className="rounded-md bg-negative-soft px-3 py-2 text-[13px] text-negative">{error}</div>
       )}
-      <div className="grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
-          Date de la facture
-          <input
-            type="date"
-            value={invoiceDate}
-            onChange={(e) => setInvoiceDate(e.target.value)}
-            className={inputClass}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
-          Nom du client
-          <input
-            type="text"
-            value={clientName}
-            onChange={(e) => setClientName(e.target.value)}
-            placeholder="Client Petit SARL"
-            className={inputClass}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
-          Adresse
-          <input
-            type="text"
-            value={clientAddressLine}
-            onChange={(e) => setClientAddressLine(e.target.value)}
-            placeholder="5 avenue des Champs"
-            className={inputClass}
-          />
-        </label>
-        <div className="grid grid-cols-[1fr_1fr_70px] gap-2">
-          <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
-            Code postal
-            <input
-              type="text"
-              value={clientPostalCode}
-              onChange={(e) => setClientPostalCode(e.target.value)}
-              className={inputClass}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
-            Ville
-            <input
-              type="text"
-              value={clientCity}
-              onChange={(e) => setClientCity(e.target.value)}
-              className={inputClass}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
-            Pays (ISO)
-            <input
-              type="text"
-              value={clientCountryCode}
-              onChange={(e) => setClientCountryCode(e.target.value.toUpperCase().slice(0, 2))}
-              className={inputClass}
-            />
-          </label>
-        </div>
-        <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
-          SIREN / RCI (optionnel)
-          <input
-            type="text"
-            value={clientSirenOrRci}
-            onChange={(e) => setClientSirenOrRci(e.target.value)}
-            className={inputClass}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-muted">
-          N° TVA (optionnel)
-          <input
-            type="text"
-            value={clientVatNumber}
-            onChange={(e) => setClientVatNumber(e.target.value)}
-            className={inputClass}
-          />
-        </label>
-      </div>
+      <ClientIdentityFields
+        value={draft}
+        onChange={(patch) => setDraft({ ...draft, ...patch })}
+        dateLabel="Date de la facture"
+      />
       <button
         type="button"
         onClick={handleFinalize}
-        disabled={!canFinalize || finalizeInvoice.isPending}
+        disabled={!isClientIdentityValid(draft) || finalizeInvoice.isPending}
         className="self-end rounded-md bg-ink px-3.5 py-2 text-[13px] font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
       >
         {finalizeInvoice.isPending ? 'Finalisation…' : 'Finaliser (irréversible)'}

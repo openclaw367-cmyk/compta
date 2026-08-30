@@ -49,6 +49,20 @@ enum InvoiceType {
   CREDIT_NOTE
 }
 
+/// TVA exigibilité regime for services (prestations de services, PCG
+/// account 706) — CGI art. 269, 2-c: by default a service is taxable
+/// "lors de l'encaissement" (payment collection), unless the taxable
+/// person opts ("sur option du redevable") for exigibilité "d'après les
+/// débits" (invoicing date) instead. Goods (livraisons de biens, every
+/// other 70x account) are always exigible on delivery/invoicing and are
+/// UNAFFECTED by this field — see invoice-posting.ts. FR only; inert
+/// for an MC company (Monaco's own VAT regime symmetry with this rule is
+/// unconfirmed — see CLAUDE.md "Monaco compliance").
+enum RegimeTvaServices {
+  ENCAISSEMENTS
+  DEBITS
+}
+
 /// DRAFT = freely editable, no invoiceNumber/postedEcritureId yet.
 /// FINALIZED = numbered and posted to the ledger, immutable — mirrors
 /// Ecriture's own draft/validated split. Never transitions back to DRAFT.
@@ -137,6 +151,21 @@ model Company {
   postalCode  String?
   city        String?
   country     String  @default("France")
+
+  /// See RegimeTvaServices doc comment (CGI art. 269). Defaults to the
+  /// legal default (ENCAISSEMENTS) so an existing company isn't silently
+  /// switched to DEBITS by this migration.
+  regimeTvaServices RegimeTvaServices @default(ENCAISSEMENTS)
+
+  /// Payment instructions shown on devis/facture PDFs and (when set)
+  /// the Factur-X CII payment-means block — see invoice-mentions.ts's
+  /// `paymentInstructions` and invoice-to-cii.ts. All three null
+  /// together means "not configured" — the PDF/CII layers omit the
+  /// block entirely rather than showing a placeholder ("flag, don't
+  /// fake" — see CLAUDE.md).
+  bankName String?
+  iban     String?
+  bic      String?
 
   /// Next value to assign as Ecriture.ecritureNum (single global sequence —
   /// see CLAUDE.md "Ledger integrity" and EntriesService.validate). Never
@@ -927,6 +956,21 @@ model Invoice {
   /// decision 1's accepted-risk note (same two-step shape as
   /// FixedAsset.cessionEcritureId). Null while DRAFT.
   postedEcritureId String?
+
+  /// TVA sur les encaissements (CGI art. 269) — see
+  /// InvoicingService.markAsEncaisse(). Null until a human explicitly
+  /// confirms the WHOLE invoice was paid (no partial-payment proration
+  /// this pass); only meaningful for a SALE invoice with at least one
+  /// 706-class (services) line finalized under
+  /// Company.regimeTvaServices = ENCAISSEMENTS. Deliberately NOT a new
+  /// InvoiceStatus value — this is VAT-exigibility metadata, orthogonal
+  /// to the DRAFT/FINALIZED document lifecycle.
+  encaissementConfirmedAt DateTime?
+  /// The débit-445800/crédit-445710 reclassification écriture
+  /// markAsEncaisse() posted — same two-step accepted-risk shape as
+  /// postedEcritureId itself. Null until set alongside
+  /// encaissementConfirmedAt.
+  encaissementEcritureId  String?
 
   lines InvoiceLine[]
 

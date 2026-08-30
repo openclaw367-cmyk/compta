@@ -388,23 +388,27 @@ design pass starts.
 
 **Classification: GATED — and STATUS: Phase A SHIPPED — generation +
 gated posting (2026-08-30), Factur-X rendering (2026-08-31), frontend
-(2026-08-31).** Moved up from "noted, not planned" — per the standing
-instruction, this is a key feature, not a nice-to-have — but
-French/Monaco invoicing is entangled with the phasing e-invoicing
-reform (facturation électronique), so the regulatory ground was
-established against primary sources first, the same discipline this
-app already applies to FEC/CA3/Monaco VAT/liasse, before any code was
-written. **Full regulatory findings (cited) and the phased plan are in
-`specs/invoicing-plan.md`; the two build-then-verify passes are in
-`specs/invoicing-phase-a-implementation-spec.md` (generation + ledger
-posting) and `specs/invoicing-factur-x-implementation-spec.md` (the
-real Factur-X 1.09/EN16931 file, validated against the official XSD +
-Schematron); the full verification record for both is in CLAUDE.md
-"Invoicing — Phase A", "Invoicing — Factur-X rendering", and "Invoicing
-— frontend" — this section is a summary, not a replacement, same
-pointer-not-duplicate convention as every other detailed spec
-referenced from this roadmap. The frontend (`/factures`) is now built
-and live-verified for both the generation and Factur-X passes.**
+(2026-08-31), cash-basis VAT + devis PDF + bank payment details
+(2026-08-30, a later same-day pass).** Moved up from "noted, not
+planned" — per the standing instruction, this is a key feature, not a
+nice-to-have — but French/Monaco invoicing is entangled with the
+phasing e-invoicing reform (facturation électronique), so the
+regulatory ground was established against primary sources first, the
+same discipline this app already applies to FEC/CA3/Monaco VAT/liasse,
+before any code was written. **Full regulatory findings (cited) and
+the phased plan are in `specs/invoicing-plan.md`; the two build-then-
+verify passes are in `specs/invoicing-phase-a-implementation-spec.md`
+(generation + ledger posting) and
+`specs/invoicing-factur-x-implementation-spec.md` (the real Factur-X
+1.09/EN16931 file, validated against the official XSD + Schematron);
+the full verification record for all of it is in CLAUDE.md "Invoicing
+— Phase A", "Invoicing — Factur-X rendering", "Invoicing — frontend",
+and "Invoicing — cash-basis VAT (TVA sur les encaissements), devis
+PDF, bank payment details" — this section is a summary, not a
+replacement, same pointer-not-duplicate convention as every other
+detailed spec referenced from this roadmap. The frontend (`/factures`)
+is now built and live-verified for generation, Factur-X, devis, and
+cash-basis VAT alike.**
 
 - **The headline regulatory finding**: compliant invoice *generation*
   (correct legal mentions, a real data model, PDF/Factur-X output, and

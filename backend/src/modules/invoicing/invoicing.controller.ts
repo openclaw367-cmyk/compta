@@ -18,6 +18,8 @@ import { InvoicingService } from './invoicing.service';
 import { FacturXService } from './factur-x.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { FinalizeInvoiceDto } from './dto/finalize-invoice.dto';
+import { DevisRequestDto } from './dto/devis-request.dto';
+import { renderInvoicePdf } from './factur-x-pdf';
 
 @ApiTags('invoicing')
 @ApiHeader({
@@ -97,6 +99,44 @@ export class InvoicingController {
   @Get(':id/mentions')
   getMentions(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
     return this.invoicingService.getMentions(company, id);
+  }
+
+  @ApiOperation({
+    summary: 'Download a devis (quote) PDF for a DRAFT invoice — never touches Factur-X/CII/XSD.',
+    description:
+      'Client identity is EPHEMERAL (DevisRequestDto) — nothing is saved or locked, unlike ' +
+      "finalize()'s snapshot. No legal sequential number, no L441-10 late-payment notices (those " +
+      'apply to invoices, not quotes). Guarded to a DRAFT invoice only — same jurisdiction gate ' +
+      'as finalize() (throws for MC).',
+  })
+  @ApiParam({ name: 'id' })
+  @ApiProduces('application/pdf')
+  @Post(':id/devis')
+  async downloadDevis(
+    @CurrentCompany() company: CompanyContext,
+    @Param('id') id: string,
+    @Body() dto: DevisRequestDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const mentions = await this.invoicingService.generateDevisMentions(company, id, dto);
+    const pdf = await renderInvoicePdf(mentions);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="devis-${id}.pdf"`);
+    res.send(Buffer.from(pdf));
+  }
+
+  @ApiOperation({
+    summary:
+      'Marque une facture SALE comme encaissée — reclassifie sa TVA sur encaissements (445800) ' +
+      'vers TVA collectée (445710), la rendant exigible. Voir CLAUDE.md "Invoicing — cash-basis VAT".',
+    description:
+      'Whole-invoice granularity only (no partial-payment proration). Refuses a non-FINALIZED, ' +
+      'CREDIT_NOTE, already-encaissée, or no-cash-basis-VAT invoice.',
+  })
+  @ApiParam({ name: 'id' })
+  @Post(':id/mark-encaisse')
+  markAsEncaisse(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
+    return this.invoicingService.markAsEncaisse(company, id);
   }
 
   @ApiOperation({

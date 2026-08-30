@@ -152,6 +152,7 @@ export function InvoicingPage() {
         <InvoiceDetailView
           invoice={editor.invoice}
           onCreateCreditNote={() => setEditor({ mode: 'credit-note', invoice: editor.invoice })}
+          onEncaisseMarked={(updated) => setEditor({ mode: 'edit', invoice: updated })}
         />
       )}
 

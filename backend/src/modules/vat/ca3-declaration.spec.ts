@@ -381,4 +381,78 @@ describe('computeCa3Declaration', () => {
     expect(result.ligne23).toBe('0.00');
     expect(result.collecteeByRate.every((r) => r.baseHT === '0.00')).toBe(true);
   });
+
+  // TVA sur les encaissements (CGI art. 269) — see CLAUDE.md "Invoicing — cash-basis VAT".
+  // The whole point of the suspense-account design (invoice-posting.ts / 445800) is that THIS
+  // function needs zero changes: 445800 doesn't start with COLLECTEE_PREFIX ('4457') or
+  // DEDUCTIBLE_PREFIX ('4456'), so it falls straight into the "has no bearing on this
+  // declaration" branch and is silently ignored — proven here, not assumed.
+  it('ignores a 445800 (TVA sur encaissements non exigible) ligne entirely — proves the "CA3 unchanged" design claim', () => {
+    const servicesRevenueLignes: Ca3Ligne[] = [
+      {
+        compteNumber: '706000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('500.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '445800',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('100.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '411000',
+        pcgClass: 4,
+        debit: d('600.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+    ];
+    // "Before markAsEncaisse" — the invoice's own period still only has the 445800 ligne. The
+    // base HT is also revenue-side and IS counted (706 is an ordinary class-7 account), but the
+    // TVA itself must be zero since 445800 is invisible to this function.
+    const before = computeCa3Declaration(
+      servicesRevenueLignes,
+      VAT_RATES,
+      '2026-01-01',
+      '2026-01-31',
+    );
+    expect(before.ligne16).toBe('0.00');
+    const rate20Before = before.collecteeByRate.find((r) => r.ratePercent === '20.00')!;
+    expect(rate20Before.taxe).toBe('0.00');
+    expect(rate20Before.baseHT).toBe('500.00');
+
+    // "After markAsEncaisse" — a later period containing the reclassification's own 445710
+    // credit ligne (débit 445800 / crédit 445710, same vatRateId — see
+    // InvoicingService.markAsEncaisse()). No revenue ligne this time, since the reclassification
+    // écriture never touches a class-7 account.
+    const reclassificationLignes: Ca3Ligne[] = [
+      {
+        compteNumber: '445800',
+        pcgClass: 4,
+        debit: d('100.00'),
+        credit: d('0.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('100.00'),
+        vatRateId: RATE_20,
+      },
+    ];
+    const after = computeCa3Declaration(
+      reclassificationLignes,
+      VAT_RATES,
+      '2026-02-01',
+      '2026-02-28',
+    );
+    expect(after.ligne16).toBe('100.00');
+    const rate20After = after.collecteeByRate.find((r) => r.ratePercent === '20.00')!;
+    expect(rate20After.taxe).toBe('100.00');
+  });
 });

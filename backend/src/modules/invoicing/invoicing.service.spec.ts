@@ -28,6 +28,26 @@ const TVA_ACCOUNT = {
   isAuxiliary: false,
   pcgClass: 4,
 };
+const TVA_ENCAISSEMENTS_ACCOUNT = {
+  id: 'acc-445800',
+  companyId: 'company-1',
+  number: '445800',
+  isAuxiliary: false,
+  pcgClass: 4,
+};
+const REVENUE_ACCOUNT_706 = {
+  id: 'acc-706000',
+  companyId: 'company-1',
+  number: '706000',
+  isAuxiliary: false,
+  pcgClass: 7,
+};
+const JOURNAL_OD = {
+  id: 'journal-od',
+  companyId: 'company-1',
+  code: 'OD',
+  type: 'OPERATIONS_DIVERSES',
+};
 const VAT_RATE_20 = {
   id: 'rate-20',
   companyId: 'company-1',
@@ -46,8 +66,10 @@ const COMPANY_FR = {
   rci: null,
   vatNumber: 'FR12123456789',
   nextInvoiceNum: 1,
+  regimeTvaServices: 'ENCAISSEMENTS',
 };
 const COMPANY_MC = { ...COMPANY_FR, jurisdiction: 'MC' };
+const COMPANY_FR_DEBITS = { ...COMPANY_FR, regimeTvaServices: 'DEBITS' };
 
 const DRAFT_INVOICE = {
   id: 'invoice-1',
@@ -79,7 +101,10 @@ function makePrismaMock() {
     fiscalYear: {
       findFirst: jest.fn().mockResolvedValue({ id: 'fy-2026', companyId: 'company-1' }),
     },
-    account: { findFirst: jest.fn(), findMany: jest.fn() },
+    account: {
+      findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([REVENUE_ACCOUNT]),
+    },
     vatRate: { findMany: jest.fn(), count: jest.fn() },
     journal: { findFirst: jest.fn().mockResolvedValue(JOURNAL_VE) },
     invoice: {
@@ -303,6 +328,190 @@ describe('InvoicingService.finalize', () => {
     await expect(
       service(prisma, makeEntriesServiceMock()).finalize(company, 'invoice-1', finalizeDto),
     ).rejects.toThrow(ConflictException);
+  });
+});
+
+// TVA sur les encaissements (CGI art. 269) — see CLAUDE.md "Invoicing — cash-basis VAT".
+describe('InvoicingService.finalize — cash-basis VAT (TVA sur les encaissements)', () => {
+  const finalizeDto = {
+    invoiceDate: '2026-08-30',
+    clientName: 'Client Petit SARL',
+    clientCountryCode: 'FR',
+  };
+  const INVOICE_706 = {
+    ...DRAFT_INVOICE,
+    lines: [{ ...DRAFT_INVOICE.lines[0], revenueAccountId: REVENUE_ACCOUNT_706.id }],
+  };
+
+  it('a 706 line under ENCAISSEMENTS credits 445800, not 445710', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue(INVOICE_706);
+    prisma.company.findFirst.mockResolvedValue(COMPANY_FR);
+    prisma.vatRate.findMany.mockResolvedValue([VAT_RATE_20]);
+    prisma.account.findMany.mockResolvedValue([REVENUE_ACCOUNT_706]);
+    prisma.account.findFirst.mockImplementation(
+      ({ where }: { where: { id?: string; number?: string } }) => {
+        if (where.number === '445710') return Promise.resolve(TVA_ACCOUNT);
+        if (where.number === '445800') return Promise.resolve(TVA_ENCAISSEMENTS_ACCOUNT);
+        return Promise.resolve(CLIENT_ACCOUNT);
+      },
+    );
+    prisma.invoice.update.mockResolvedValue({
+      ...INVOICE_706,
+      status: 'FINALIZED',
+      invoiceNumber: '1',
+    });
+    const entries = makeEntriesServiceMock();
+
+    await service(prisma, entries).finalize(company, 'invoice-1', finalizeDto);
+
+    const posted = entries.create.mock.calls[0][1];
+    expect(posted.lignes).toEqual([
+      { compteId: CLIENT_ACCOUNT.id, debit: '1800.00' },
+      { compteId: REVENUE_ACCOUNT_706.id, credit: '1500.00' },
+      { compteId: TVA_ENCAISSEMENTS_ACCOUNT.id, credit: '300.00', vatRateId: VAT_RATE_20.id },
+    ]);
+  });
+
+  it('a 706 line under DEBITS credits 445710 directly (no 445800 lookup)', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue(INVOICE_706);
+    prisma.company.findFirst.mockResolvedValue(COMPANY_FR_DEBITS);
+    prisma.vatRate.findMany.mockResolvedValue([VAT_RATE_20]);
+    prisma.account.findMany.mockResolvedValue([REVENUE_ACCOUNT_706]);
+    prisma.account.findFirst.mockImplementation(
+      ({ where }: { where: { id?: string; number?: string } }) => {
+        if (where.number === '445710') return Promise.resolve(TVA_ACCOUNT);
+        if (where.number === '445800') {
+          throw new Error('445800 should never be looked up under DEBITS regime');
+        }
+        return Promise.resolve(CLIENT_ACCOUNT);
+      },
+    );
+    prisma.invoice.update.mockResolvedValue({
+      ...INVOICE_706,
+      status: 'FINALIZED',
+      invoiceNumber: '1',
+    });
+    const entries = makeEntriesServiceMock();
+
+    await service(prisma, entries).finalize(company, 'invoice-1', finalizeDto);
+
+    const posted = entries.create.mock.calls[0][1];
+    expect(posted.lignes).toEqual([
+      { compteId: CLIENT_ACCOUNT.id, debit: '1800.00' },
+      { compteId: REVENUE_ACCOUNT_706.id, credit: '1500.00' },
+      { compteId: TVA_ACCOUNT.id, credit: '300.00', vatRateId: VAT_RATE_20.id },
+    ]);
+  });
+});
+
+describe('InvoicingService.markAsEncaisse', () => {
+  const FINALIZED_706_INVOICE = {
+    ...DRAFT_INVOICE,
+    status: 'FINALIZED',
+    invoiceNumber: '1',
+    postedEcritureId: 'ecriture-1',
+    encaissementConfirmedAt: null,
+    lines: [{ ...DRAFT_INVOICE.lines[0], revenueAccountId: REVENUE_ACCOUNT_706.id }],
+  };
+
+  function mockAccountFindFirst(prisma: ReturnType<typeof makePrismaMock>) {
+    prisma.account.findFirst.mockImplementation(({ where }: { where: { number?: string } }) => {
+      if (where.number === '445710') return Promise.resolve(TVA_ACCOUNT);
+      if (where.number === '445800') return Promise.resolve(TVA_ENCAISSEMENTS_ACCOUNT);
+      return Promise.resolve(null);
+    });
+  }
+
+  it('posts a débit-445800/crédit-445710 reclassification for the exact posted amount, preserving vatRateId', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue(FINALIZED_706_INVOICE);
+    mockAccountFindFirst(prisma);
+    prisma.journal.findFirst.mockResolvedValue(JOURNAL_OD);
+    prisma.ecriture.findFirst.mockResolvedValue({
+      id: 'ecriture-1',
+      lignes: [
+        {
+          compteId: TVA_ENCAISSEMENTS_ACCOUNT.id,
+          debit: new Prisma.Decimal('0.00'),
+          credit: new Prisma.Decimal('300.00'),
+          vatRateId: VAT_RATE_20.id,
+        },
+      ],
+    });
+    prisma.invoice.update.mockResolvedValue({
+      ...FINALIZED_706_INVOICE,
+      encaissementConfirmedAt: new Date(),
+      encaissementEcritureId: 'ecriture-1',
+    });
+    const entries = makeEntriesServiceMock();
+
+    await service(prisma, entries).markAsEncaisse(company, 'invoice-1');
+
+    expect(entries.create).toHaveBeenCalledTimes(1);
+    const posted = entries.create.mock.calls[0][1];
+    expect(posted.lignes).toEqual([
+      { compteId: TVA_ENCAISSEMENTS_ACCOUNT.id, debit: '300.00', vatRateId: VAT_RATE_20.id },
+      { compteId: TVA_ACCOUNT.id, credit: '300.00', vatRateId: VAT_RATE_20.id },
+    ]);
+    expect(prisma.invoice.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          encaissementEcritureId: 'ecriture-1',
+        }),
+      }),
+    );
+  });
+
+  it('refuses a DRAFT invoice', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue(DRAFT_INVOICE);
+    await expect(
+      service(prisma, makeEntriesServiceMock()).markAsEncaisse(company, 'invoice-1'),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('refuses a CREDIT_NOTE', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue({
+      ...FINALIZED_706_INVOICE,
+      type: InvoiceType.CREDIT_NOTE,
+    });
+    await expect(
+      service(prisma, makeEntriesServiceMock()).markAsEncaisse(company, 'invoice-1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('refuses an already-encaissée invoice', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue({
+      ...FINALIZED_706_INVOICE,
+      encaissementConfirmedAt: new Date('2026-08-30'),
+    });
+    await expect(
+      service(prisma, makeEntriesServiceMock()).markAsEncaisse(company, 'invoice-1'),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('refuses an invoice with no TVA sur encaissements to reclassify', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue(FINALIZED_706_INVOICE);
+    mockAccountFindFirst(prisma);
+    prisma.ecriture.findFirst.mockResolvedValue({
+      id: 'ecriture-1',
+      lignes: [
+        {
+          compteId: TVA_ACCOUNT.id,
+          debit: new Prisma.Decimal('0.00'),
+          credit: new Prisma.Decimal('300.00'),
+          vatRateId: VAT_RATE_20.id,
+        },
+      ],
+    });
+    await expect(
+      service(prisma, makeEntriesServiceMock()).markAsEncaisse(company, 'invoice-1'),
+    ).rejects.toThrow(BadRequestException);
   });
 });
 
