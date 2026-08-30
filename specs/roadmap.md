@@ -55,13 +55,13 @@ reordered):
 2. **Bank reconciliation — Layer 1b (live aggregator connectivity)** — SHIPPED 2026-08-29, with a pre-ship blocker (real Bridge sandbox verification still needed)
 3. **Batch invoice review queue** — SHIPPED 2026-08-29. No technical dependency on 1/2; reused document attachment + `InvoiceExtractionService` + `propose_ecriture`'s validation gate, all already shipped — no new backend code needed at all.
 4. **Traceability drill-down — Tiers 1, 2, AND 3 SHIPPED (all 2026-08-29).** No dependency on 1–3; already has its own detailed spec (folded in below); the "→ justificatif" extension (document attachments, shipped) is done as part of Tier 1. Tier 3 (VAT rate lines, 2058 `WJ`/`WG`, 2059-A) was the spec's last defined tier — this feature's scope is now fully closed — see the spec's own §4/§5/§6 and CLAUDE.md's "Traceability drill-down (Tier 1)"/"(Tier 2)"/"(Tier 3)" sections.
-5. **Anomaly surfacing** — benefits from bank-rec (lettrage/matching data) and drill-down (to explain *why* something's flagged) existing first, though not hard-blocked by either.
-6. **Recurring entries / templates** — no dependency on anything above. Genuinely independent; flagged as the lowest-complexity gated item on this list, worth considering as a filler/quick-win if a later item stalls on a decision.
-7. **Reporting/export flexibility** — no dependency on anything above; enhances every report already shipped. Could run anytime.
-8. **Multi-user / roles & permissions** — no hard dependency on 1–7, but see the cross-cutting note below: this is the one item that, if pulled forward, retroactively closes the "no who" gap already logged in the document-attachment audit trail (CLAUDE.md: *"this app has no authentication/user-identity model anywhere... the log honestly records only when and what, never a fabricated actor"*) and would apply to any future audit trail too. Not proposing a reorder — just flagging that its cost is more front-loaded the longer it waits, since more features will exist that a future auth layer needs to retrofit around.
+5. **Invoicing / facturation — Phase A SHIPPED (backend only), 2026-08-30.** Moved up from "noted, not planned" — a key feature, not a nice-to-have. See §4 below, `specs/invoicing-plan.md` (regulatory research + phased plan) and `specs/invoicing-phase-a-implementation-spec.md` (the design-then-verify pass, now implemented and verified live). Monaco is architecturally wired (one jurisdiction-parameterized engine) but its rule content is an explicit pending stub, not guessed. Phase B (PA/e-transmission) remains a later, likely separate initiative.
+6. **Anomaly surfacing** — benefits from bank-rec (lettrage/matching data) and drill-down (to explain *why* something's flagged) existing first, though not hard-blocked by either.
+7. **Recurring entries / templates** — no dependency on anything above. Genuinely independent; flagged as the lowest-complexity gated item on this list, worth considering as a filler/quick-win if a later item stalls on a decision.
+8. **Reporting/export flexibility** — no dependency on anything above; enhances every report already shipped. Could run anytime.
+9. **Multi-user / roles & permissions** — no hard dependency on 1–8, but see the cross-cutting note below: this is the one item that, if pulled forward, retroactively closes the "no who" gap already logged in the document-attachment audit trail (CLAUDE.md: *"this app has no authentication/user-identity model anywhere... the log honestly records only when and what, never a fabricated actor"*) and would apply to any future audit trail too. Not proposing a reorder — just flagging that its cost is more front-loaded the longer it waits, since more features will exist that a future auth layer needs to retrofit around.
 
-Noted but not planned: **Invoicing/facturation**, **Mobile** — see the
-closing section.
+Noted but not planned: **Mobile** — see the closing section.
 
 ---
 
@@ -384,7 +384,94 @@ design pass starts.
 
 ---
 
-## 4. Anomaly surfacing
+## 4. Invoicing / facturation
+
+**Classification: GATED — and STATUS: Phase A SHIPPED, backend only,
+2026-08-30.** Moved up from "noted, not planned" — per the standing
+instruction, this is a key feature, not a nice-to-have — but
+French/Monaco invoicing is entangled with the phasing e-invoicing
+reform (facturation électronique), so the regulatory ground was
+established against primary sources first, the same discipline this
+app already applies to FEC/CA3/Monaco VAT/liasse, before any code was
+written. **Full regulatory findings (cited), the phased plan, and the
+Phase A design are in `specs/invoicing-plan.md` and
+`specs/invoicing-phase-a-implementation-spec.md`; the full verification
+record is in CLAUDE.md "Invoicing — Phase A" — this section is a
+summary, not a replacement, same pointer-not-duplicate convention as
+every other detailed spec referenced from this roadmap.**
+
+- **The headline regulatory finding**: compliant invoice *generation*
+  (correct legal mentions, a real data model, PDF/Factur-X output, and
+  — the actually gated part — posting the sale to the ledger through
+  the existing validated write path) needs **zero external
+  accreditation** and can be built now. Compliant invoice
+  *transmission* under the reform (September 2026 for grandes
+  entreprises/ETI émission + universal réception, September 2027 for
+  PME/TPE/micro-entreprises émission — Loi de finances 2024, reconfirmed
+  by LF2026 art. 123 after a postponement amendment was rejected in
+  April 2025) requires routing through a DGFiP-accredited **Plateforme
+  Agréée (PA, formerly "PDP")** — a formal, audited, ~3-year
+  accreditation this project has no reason to pursue itself. The
+  workable shape mirrors bank-rec exactly: **integrate with an existing
+  accredited PA via API** (147 already accredited as of August 2026),
+  never become one — the same "adapter to an external provider, don't
+  rebuild the provider" pattern as `BridgeAggregatorAdapter`.
+- **Monaco is a genuinely open regulatory question, not resolved by
+  assuming symmetry with France** — the official Monaco government
+  portal (`monentreprise.gouv.mc`, updated as recently as 2026-07-28)
+  still describes only the pre-reform, e-signature-based dematerialized
+  invoice regime (Ordonnance Souveraine n°4.199 of 2013 / n°9.821 of
+  2023) with no mention of a mandatory-PA-platform requirement or the
+  September 2026/2027 calendar; only secondary sources (not an official
+  Monaco text) assert Monaco follows the French calendar via the shared
+  VAT territory. Flagged, not resolved — see the plan doc's own
+  "Monaco compliance" discipline for why this can't be papered over.
+- **Two phases, split at exactly the same seam bank-rec split at**:
+  - **Phase A — compliant invoice generation + ledger posting — SHIPPED,
+    backend only (2026-08-30).** Data model (`Invoice`/`InvoiceLine`,
+    reusing the existing 411-family Tiers mechanism for the client),
+    mandatory legal mentions (France implemented against CGI Annexe II
+    art. 242 nonies A + Code de commerce art. L441-10; Monaco an
+    explicit pending stub, not a silent copy), and — the GATED core —
+    a validated invoice posting a real, balanced écriture
+    (411/707/44571-shaped, per-rate `vatRateId` tagging) through the
+    existing `EntriesService` path, never a privileged write. Verified
+    live on both the FR and Monaco demo companies — see CLAUDE.md
+    "Invoicing — Phase A" for the full record. PDF/Factur-X file
+    rendering and the frontend are explicitly NOT built this pass (no
+    PDF-generation dependency exists anywhere in this app yet — see
+    item 7 below).
+  - **Phase B — PA/e-transmission integration**, sequenced like bank-rec
+    Layer 1b, NOT started: choosing and contracting with an accredited
+    PA is an external, commercial decision (not a technical one this
+    project can resolve alone), flagged as its own later initiative
+    rather than folded into Phase A. A `InvoicingTransmissionPort`-
+    shaped abstraction (mirroring `BankAggregatorPort`) is the intended
+    shape once a real, accredited, publicly documented PA API exists —
+    see `specs/invoicing-plan.md` for a POTENTIAL provider signal being
+    watched, not yet acted on.
+- **The five decisions, all RESOLVED** — see
+  `specs/invoicing-phase-a-implementation-spec.md` for the full
+  reasoning behind each: numbering (a separate `nextInvoiceNum`
+  sequence, assigned only at finalize, shared by SALE and CREDIT_NOTE);
+  avoirs (one `Invoice` model with a `type` discriminator, independent
+  line items, the posting direction reversed); the invoice→écriture
+  posting model (draft-then-finalize, mirroring écriture validation,
+  the same two-step accepted-risk shape as `cessionEcritureId`);
+  multi-currency (out of scope, no currency field added); and the
+  mandatory-mentions data model (a pure `computeInvoiceMentions()`
+  function, jurisdiction-branching, France implemented / Monaco
+  pending).
+- **Effort/complexity**: Phase A shipped at the "substantial but fully
+  internal" size predicted — closest precedent was the liasse/CA3 build
+  discipline (data model + compliance mapping + a real compute
+  pipeline). Phase B remains substantial and largely external, same
+  shape as bank-rec Layer 1b (adapter + accreditation-adjacent provider
+  relationship, not algorithm design) — not started.
+
+---
+
+## 5. Anomaly surfacing
 
 **Classification: GATED.** Computing and comparing figures (an expense
 vs. its category's historical norm, an unlettered payment that appears
@@ -426,7 +513,7 @@ gates everywhere else.
 
 ---
 
-## 5. Recurring entries / templates
+## 6. Recurring entries / templates
 
 **Classification: GATED, lightly.** It creates real écritures, but only
 ever through the normal `EntriesService.create()`/`validate()` path
@@ -457,7 +544,7 @@ logic being correct, not about a new kind of ledger risk.
 
 ---
 
-## 6. Reporting/export flexibility
+## 7. Reporting/export flexibility
 
 **Classification: MOSTLY PRESENTATION**, with a per-export flag: any
 export requiring a **new** computed figure (something not already
@@ -490,7 +577,7 @@ specifically, even if the export mechanism itself is presentation.
 
 ---
 
-## 7. Multi-user / roles & permissions
+## 8. Multi-user / roles & permissions
 
 **Classification: GATED — and its own substantial project**, not a
 UI feature. This is access control and data integrity, not
@@ -545,17 +632,7 @@ extension of an existing pattern — it's new foundational surface.
 
 ## Noted, not planned
 
-### 8. Invoicing / facturation
-
-Not scoped here — flagged as **watch, likely a separate initiative**,
-not a simple feature addition to this app. The French e-invoicing
-reform (facturation électronique, the PPF/PDP obligation) is phasing in
-as a real compliance requirement, not just a convenience feature — that
-changes this from "nice to have" to "eventually mandatory for
-France-jurisdiction companies," which is worth tracking on its own
-timeline rather than folding into this roadmap's sequencing.
-
-### 9. Mobile
+### Mobile
 
 Not scoped here — flagged as its **own separate initiative**. Receipt
 capture on the go is the main draw (photograph a receipt, feed it into
@@ -568,11 +645,16 @@ roadmap's scope.
 
 ## Closing note
 
-This document is a **map**, current as of 2026-08-25. Nothing above has
+This document is a **map**, current as of 2026-08-30. Nothing above has
 been designed, and nothing above should be built from this document
 alone — each feature gets its own design-then-verify pass, reviewed and
 confirmed before any code is written, when we reach it. Update this
 file as items ship, as decisions get made, or as priorities shift, so
 it stays the accurate shared reference rather than a stale snapshot.
 
-**Next up**: Bank reconciliation, Layer 1a — its own design pass, next.
+**Next up**: Anomaly surfacing (§5) or Recurring entries / templates
+(§6) — the next design-then-build pass among the unstarted items.
+Invoicing (§4) is next in priority order but is a research-and-plan
+pass only until the two flagged decisions (Monaco scope, the PA
+integration choice for Phase B) are resolved — see
+`specs/invoicing-plan.md`.

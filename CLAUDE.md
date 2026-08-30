@@ -3651,6 +3651,207 @@ assembly of already-shipped pieces rather than new domain logic.
   (a draft — ordinary `DELETE /entries/:id`, cascading its attached
   document), confirmed gone via a follow-up read.
 
+## Invoicing — Phase A (compliant generation + gated ledger posting)
+
+**⚠️ NOT user-complete — three things deliberately missing, not
+forgotten. Read this before telling a user "invoicing is done":**
+1. **No PDF/Factur-X file exists anywhere.** This pass produces the
+   structured mentions DATA (`computeInvoiceMentions()`'s return value)
+   that a renderer would consume — no PDF-generation dependency exists
+   anywhere in this app yet (see roadmap item 7), so there is currently
+   no way to hand a user an actual invoice document.
+2. **No frontend exists.** Every verification below is via curl/direct
+   API calls against the running backend. There is no screen to create,
+   review, or finalize an invoice through the UI.
+3. **Monaco invoicing is NOT usable, by design.** A Monaco-jurisdiction
+   company can create/edit DRAFT invoices (the architecture is
+   jurisdiction-agnostic) but `finalize()` always throws — see
+   `computeInvoiceMentionsMC()` below. This is not a bug to fix later;
+   it is the correct behavior until Monaco's own numbering/transmission
+   regime is confirmed against a real Monaco legal source (§1.6 of
+   `specs/invoicing-plan.md`).
+4. **Phase B (PA/e-transmission) has not been started** — it stays a
+   watch-list item (see `specs/invoicing-plan.md`'s own "POTENTIAL
+   Phase B integration target") until a real, accredited, publicly
+   documented provider API exists, same bar Bridge had to clear before
+   `BridgeAggregatorAdapter` was built. No code, no adapter, no
+   commitment to any provider.
+
+`src/modules/invoicing/` (as of 2026-08-30) is the first half of the
+invoicing feature — see `specs/invoicing-plan.md` (regulatory research
++ phased plan) and `specs/invoicing-phase-a-implementation-spec.md`
+(the design-then-verify pass this section documents) for the full
+picture; this section records only what must never be re-derived from
+memory. **Backend only, deliberately, per this pass's own scope** — no
+frontend, no PDF/Factur-X file rendering (only the structured data a
+future renderer would need). Phase B (PA/e-transmission) is a later,
+likely separate initiative — see the plan doc.
+
+- **One jurisdiction-parameterized engine, France implemented, Monaco
+  an honest stub — not a silent copy.** `computeInvoiceMentions()`
+  branches on `Company.jurisdiction` exactly like
+  `VatService.computeDeclaration()` already does. `computeInvoiceMentionsFR()`
+  is real, built against two primary sources fetched directly (CGI
+  Annexe II art. 242 nonies A for tax mentions; Code de commerce art.
+  L441-10/D441-5 for the late-payment-penalty/40€-indemnity/escompte
+  wording — a mention family no other module in this app models).
+  `computeInvoiceMentionsMC()` throws `NotImplementedException` naming
+  the exact gap (*"Monaco invoicing rules pending official
+  confirmation — see specs/invoicing-plan.md §1.6"*) — Monaco's
+  mandatory-mentions LIST is separately confirmed from
+  `monentreprise.gouv.mc` directly, but the numbering/transmission
+  REGIME is not, and conflating the two would mean guessing which
+  regime applies. **This is called from `finalize()` as a guard,
+  BEFORE anything is posted** — an MC-jurisdiction company can freely
+  create/edit DRAFT invoices (the data model and posting mechanics are
+  jurisdiction-agnostic end to end) but cannot finalize one; confirmed
+  live (see below): zero side effects on that path — no écriture, no
+  `invoiceNumber` consumed.
+- **`Invoice`/`InvoiceLine`** (new Prisma models, migration
+  `20260830090953_add_invoicing_phase_a`) — a single `Invoice` model
+  with a `type` discriminator (`SALE` | `CREDIT_NOTE`), not two models.
+  `status` (`DRAFT` | `FINALIZED`) mirrors `Ecriture`'s own
+  draft/validated split; `Company.nextInvoiceNum` mirrors
+  `nextEcritureNum` exactly but is a SEPARATE sequence, shared by both
+  `SALE` and `CREDIT_NOTE` invoices (a documented design choice, not a
+  research-confirmed legal requirement — flagged as such in the spec).
+  The number is assigned only at `finalize()`, never at draft creation
+  — an abandoned draft never creates a numbering gap, same reasoning
+  `ecritureNum` already applies.
+- **Client identity is a SNAPSHOT, not a live read.** `Invoice` reuses
+  the existing 411-family auxiliary `Account` (Tiers) mechanism for
+  `clientAccountId` — no new client model — but an invoice is a legal
+  document whose printed content must never retroactively change if
+  the underlying tiers record is edited later, so `finalize()`
+  snapshots `clientNameSnapshot`/`clientAddressSnapshot`/
+  `clientSirenOrRci`/`clientVatNumber` onto the `Invoice` row (caller-
+  supplied via `FinalizeInvoiceDto`, since `Account` has no
+  address/SIREN/RCI fields yet — a natural, explicitly-noted future
+  follow-up, not attempted this pass).
+- **The gated core**: `buildInvoicePostingLignes()`
+  (`invoice-posting.ts`) posts a `SALE` as débit `clientAccountId` =
+  crédit revenue account(s) + crédit `445710` (TVA collectée) per
+  distinct VAT rate, **tagging each TVA ligne's own `vatRateId`** — the
+  same per-ligne rate-tagging convention `ca3-declaration.ts`/the
+  Tier-3 drill-down already verified (the same account can carry
+  multiple lignes at different rates, confirmed live below). A
+  `CREDIT_NOTE` posts the exact mirror image. Lines are grouped by
+  `(revenueAccountId, vatRateId)` before posting; a VAT-exempt group
+  contributes no TVA ligne; any zero-amount group is omitted (a 0,00
+  line is rejected, same as everywhere else in this app). Posted
+  through the ORDINARY `EntriesService.create()` + `.validate()` —
+  never a privileged write path, identical discipline to cession,
+  à-nouveau, `propose_ecriture`, and the batch invoice queue. Journal:
+  the company's own `VENTES`-type journal, resolved by type lookup
+  (`NotFoundException` naming the gap if none exists), same pattern
+  `disposeFixedAsset()` uses for `OPERATIONS_DIVERSES`.
+- **The oracle, twice over.** (1) `assertInvoiceMentionsTieToPosting()`
+  compares `computeInvoiceMentions()`'s own totalTTC (lines grouped by
+  VAT RATE) against `buildInvoicePostingLignes()`'s own totalTTC (lines
+  grouped by revenue-account+rate) — two genuinely different groupings
+  sharing only the one shared primitive (`computeInvoiceLineAmounts()`,
+  `invoice-line-math.ts`) for per-line arithmetic, asserted BEFORE
+  posting. (2) `getMentions()` (for an already-`FINALIZED` invoice)
+  re-derives mentions fresh and ties them against the ACTUAL posted
+  écriture's own ledger lines (fetched via `postedEcritureId`), not
+  just the same `InvoiceLine` rows checked against each other again —
+  the stronger, ledger-real check, same discipline as the Tier-3
+  2059-A drill-down reading the real disposal écriture. Both
+  directions verified live (see below), including a deliberate
+  tamper-and-detect test in `invoicing.service.spec.ts`.
+- **Rounding convention, a stated design choice, not a sourced rule**:
+  each line's HT is rounded to the centime FIRST, then VAT is computed
+  off the ROUNDED HT and rounded again (`invoice-line-math.ts`'s own
+  doc comment) — unlike CA3's `roundToNearestEuro()`, this pass's
+  regulatory research found no governing citation for per-line invoice
+  rounding, so this is flagged honestly as a choice, not confused with
+  a settled spec the way CA3's rounding is.
+- **An immutable-after-finalize document, no post-finalize edit path**
+  — mirrors écriture immutability exactly. A correction is a
+  `CREDIT_NOTE`, never an edit; no `lettrage`-style narrow exception
+  exists here and none was invented. `finalize()`'s own accepted-risk
+  shape (posting the écriture, THEN a separate step assigning
+  `invoiceNumber`/`postedEcritureId`) is the SAME two-step shape
+  `disposeFixedAsset()` already carries for `cessionEcritureId` — a
+  failure between the two steps leaves a validated écriture with no
+  invoice number yet, an accepted risk matching existing precedent,
+  not a new one introduced here.
+- **Multi-currency stays out of scope** — no currency field anywhere on
+  `Invoice`/`InvoiceLine`, matching this app's blanket money rule.
+- **Verified two ways, live against both required companies.** 24 new
+  backend tests (`invoice-line-math.spec.ts`,
+  `invoice-posting.spec.ts` — including the same-account-two-rates
+  grouping case, `invoice-mentions.spec.ts`, and
+  `invoicing.service.spec.ts` — MC's zero-side-effects path, the
+  ledger-tie-out and its tamper-detection case) — 660 backend tests
+  passing overall; `tsc`/`eslint` clean. Live against the FR demo
+  company: created and finalized a real `SALE` invoice (2 ×
+  500,00 € HT @ 20 % → `1000.00`/`200.00`/`1200.00`, `invoiceNumber
+  "1"`), confirmed the posted écriture's exact lines (411002 débit
+  1200,00 / 707000 crédit 1000,00 / 445710 crédit 200,00 tagged with
+  the real `vatRateId`), confirmed `GET .../mentions` re-derives and
+  ties to that same posted écriture; created and finalized a partial
+  `CREDIT_NOTE` against it (`invoiceNumber "2"`, continuing the SAME
+  sequence, `correctsInvoiceNumber: "1"`), confirmed its écriture posts
+  the exact mirror direction (crédit client 600,00 / débit revenue
+  500,00 / débit TVA 100,00); confirmed the client-account guard
+  refuses a non-411 account (400); and, on the Monaco demo company,
+  confirmed a DRAFT invoice creates successfully but `finalize()`
+  refuses with the exact 501 message above and provably zero side
+  effects (0 écritures before and after, invoice still `DRAFT` with no
+  number consumed). All four test écritures (sale, credit note, and
+  their two reversals) reversed/validated afterward, confirmed via the
+  grand livre that the client account's four lines net to exactly
+  `0.00` — the ledger restored to its exact original state; the two
+  test `Invoice` rows removed via a temporary script (no delete
+  endpoint exists for a `FINALIZED` invoice, by design), the temporary
+  MC tiers account left in place (no delete endpoint exists for
+  `Account`, same standing limitation as every other test tiers in
+  this codebase).
+- **A second, independent live pass (2026-08-30, before committing) —
+  requested by the user specifically to check the per-rate mirror, not
+  just the per-total one.** A genuine TWO-rate `SALE` invoice (2 ×
+  500,00 € HT @ 20 % + 3 × 100,00 € HT @ 10 % → `1300.00`/`230.00`/
+  `1530.00`, `invoiceNumber "3"`, continuing the sequence with no gap
+  after the earlier test's cleanup) against a partial, independently-
+  proportioned `CREDIT_NOTE` (1 × 500,00 € HT @ 20 % + 1 × 100,00 € HT
+  @ 10 % → `600.00`/`110.00`/`710.00`, `invoiceNumber "4"`). The two
+  postings, side by side, prove the reversal is per-rate, not a blended
+  average — the credit note's 445710 lines are `100,00 @ 20 %` (exactly
+  half the sale's `200,00 @ 20 %`, matching 1-of-2 units credited) and
+  `10,00 @ 10 %` (exactly a third of the sale's `30,00 @ 10 %`, matching
+  1-of-3 units credited), each its own separate ligne on the SAME
+  445710 account:
+
+  | Account | SALE (écriture 34) | CREDIT_NOTE (écriture 35) |
+  |---|---|---|
+  | 411002 Client Petit | D 1530,00 | C 710,00 |
+  | 707000 Ventes | C 1000,00 | D 500,00 |
+  | 445710 TVA collectée @20% | C 200,00 | D 100,00 |
+  | 707000 Ventes | C 300,00 | D 100,00 |
+  | 445710 TVA collectée @10% | C 30,00 | D 10,00 |
+
+  Both écritures reversed/validated afterward; confirmed the round-trip
+  nets to exactly `0,00` on every account touched — not just the client
+  account this time, but isolated to precisely these 4 écritures'
+  contribution to 707000/445710 too (`debit=1900.00, credit=1900.00`
+  and `debit=340.00, credit=340.00` respectively — those accounts carry
+  other, pre-existing seed/test activity, so the check filtered to only
+  this test's own `ecritureNum`s, not the account's all-time balance).
+  Confirmed `nextInvoiceNum` advanced cleanly to `5` afterward with
+  invoices `3`/`4` the only two ever issued — no gap. Test `Invoice`
+  rows removed via a temporary script afterward, same as the first
+  pass.
+- **Deferred, explicitly, not silently**: PDF/Factur-X file rendering
+  (no PDF-generation dependency exists anywhere in this app yet — see
+  roadmap item 7); the frontend; Monaco's actual rule content (the
+  seam is built, the content is pending — see above); `Account` gaining
+  address/SIREN/RCI fields for a "fill once" client UX. Phase B
+  (PA/e-transmission) is tracked separately in `specs/invoicing-plan.md`,
+  including a POTENTIAL provider signal to watch — not acted on until
+  it's a real, accredited, publicly documented API, same bar Bridge
+  had to clear.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't

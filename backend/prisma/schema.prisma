@@ -41,6 +41,22 @@ enum JournalType {
   A_NOUVEAU
 }
 
+/// SALE = a normal invoice. CREDIT_NOTE = an avoir, correcting a
+/// finalized SALE invoice (Invoice.correctsInvoiceId) — see
+/// specs/invoicing-phase-a-implementation-spec.md decision 2.
+enum InvoiceType {
+  SALE
+  CREDIT_NOTE
+}
+
+/// DRAFT = freely editable, no invoiceNumber/postedEcritureId yet.
+/// FINALIZED = numbered and posted to the ledger, immutable — mirrors
+/// Ecriture's own draft/validated split. Never transitions back to DRAFT.
+enum InvoiceStatus {
+  DRAFT
+  FINALIZED
+}
+
 enum DepreciationMethod {
   LINEAR
   // Declining-balance (dégressif) coefficients are not yet implemented —
@@ -129,6 +145,14 @@ model Company {
   /// counter is incremented atomically inside the validation transaction.
   nextEcritureNum Int @default(1)
 
+  /// Next value to assign as Invoice.invoiceNumber — a SEPARATE sequence
+  /// from nextEcritureNum (an invoice number and its posting écriture's
+  /// own number are legally distinct identifiers). Assigned only at
+  /// finalize(), never at draft creation — see
+  /// specs/invoicing-phase-a-implementation-spec.md decision 1. Shared by
+  /// both SALE and CREDIT_NOTE invoices (decision 2).
+  nextInvoiceNum Int @default(1)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -151,6 +175,8 @@ model Company {
   bankStatementLines    BankStatementLine[]
   lettrageAuditLogs     LettrageAuditLog[]
   bankAggregatorLinks   BankAggregatorLink[]
+  invoices              Invoice[]
+  invoiceLines          InvoiceLine[]
 }
 
 /// Exercice comptable. Ecritures are validated (locked) relative to a
@@ -168,6 +194,7 @@ model FiscalYear {
 
   ecritures           Ecriture[]
   depreciationEntries DepreciationEntry[]
+  invoices            Invoice[]
 
   @@unique([companyId, label])
   @@index([companyId])
@@ -205,6 +232,9 @@ model Account {
   fixedAssetsAsExpense      FixedAsset[] @relation("FixedAssetExpenseAccount")
 
   bankAccount BankAccount?
+
+  invoicesAsClient      Invoice[]
+  invoiceLinesAsRevenue InvoiceLine[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -369,8 +399,8 @@ model FixedAsset {
   /// Cession (disposal) — real since 2026-08-15, see
   /// DepreciationService.disposeFixedAsset(). All three fields stay null
   /// until an asset is actually disposed.
-  cessionDate  DateTime?
-  cessionPrice Decimal?  @db.Decimal(15, 2)
+  cessionDate       DateTime?
+  cessionPrice      Decimal?  @db.Decimal(15, 2)
   /// The écriture disposeFixedAsset() posted for this disposal — a bare
   /// nullable id, no @relation, same shape as DepreciationEntry's own
   /// postedEcritureId. Added 2026-08-29 for the traceability drill-down's
@@ -422,6 +452,7 @@ model VatRate {
   validTo     DateTime?
 
   ecritureLignes EcritureLigne[]
+  invoiceLines   InvoiceLine[]
 
   @@index([companyId])
 }
@@ -829,4 +860,100 @@ model LettrageAuditLog {
   occurredAt      DateTime            @default(now())
 
   @@index([companyId, ecritureLigneId])
+}
+
+/// Invoicing — Phase A (compliant generation + gated ledger posting).
+/// See specs/invoicing-plan.md and
+/// specs/invoicing-phase-a-implementation-spec.md for the full design.
+/// A DRAFT invoice is freely editable and has no legal existence yet
+/// (no invoiceNumber, no posted écriture). finalize() — jurisdiction-
+/// branching, France implemented, Monaco an explicit pending stub —
+/// assigns invoiceNumber/invoiceDate, snapshots the client's legal-
+/// mention fields, posts a real balanced écriture via the ordinary
+/// EntriesService path, and flips status to FINALIZED. Never
+/// transitions back to DRAFT; a correction is a CREDIT_NOTE invoice,
+/// never an edit.
+model Invoice {
+  id           String     @id @default(cuid())
+  companyId    String
+  company      Company    @relation(fields: [companyId], references: [id])
+  fiscalYearId String
+  fiscalYear   FiscalYear @relation(fields: [fiscalYearId], references: [id])
+
+  type   InvoiceType   @default(SALE)
+  status InvoiceStatus @default(DRAFT)
+
+  /// Assigned only at finalize(), from Company.nextInvoiceNum — see
+  /// decision 1. Null while DRAFT.
+  invoiceNumber String?
+  /// Issue date, set at finalize() time.
+  invoiceDate   DateTime?
+
+  /// The client this invoice bills — an existing 411-family auxiliary
+  /// Account (Tiers), never invented ad hoc here — see decision 5.
+  clientAccountId String
+  clientAccount   Account @relation(fields: [clientAccountId], references: [id])
+
+  /// Snapshot of the client's legal-mention fields AT finalize() time —
+  /// an invoice's printed content must never retroactively change if
+  /// the underlying tiers record is edited later. Null while DRAFT.
+  clientNameSnapshot    String?
+  clientAddressSnapshot String?
+  clientSirenOrRci      String?
+  clientVatNumber       String?
+
+  /// Required, and must reference a FINALIZED SALE invoice (enforced in
+  /// the service layer), when type = CREDIT_NOTE. Null for a SALE.
+  correctsInvoiceId String?
+  correctsInvoice   Invoice?  @relation("InvoiceCorrection", fields: [correctsInvoiceId], references: [id])
+  correctedBy       Invoice[] @relation("InvoiceCorrection")
+
+  /// The écriture finalize() posted — set alongside invoiceNumber. See
+  /// decision 1's accepted-risk note (same two-step shape as
+  /// FixedAsset.cessionEcritureId). Null while DRAFT.
+  postedEcritureId String?
+
+  lines InvoiceLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // invoiceNumber is only meaningful once assigned, but must be unique
+  // per company when present — same pattern as Ecriture.ecritureNum.
+  @@unique([companyId, invoiceNumber])
+  @@index([companyId])
+  @@index([companyId, fiscalYearId])
+}
+
+/// One line item on an Invoice — quantity/unit-price-HT/VAT-rate, the
+/// inputs computeInvoiceMentions()/buildInvoicePostingLignes() both
+/// consume. Quantity is Decimal, not a native number, matching this
+/// app's blanket money-handling rule (it feeds a money computation:
+/// quantity × unitPriceHT).
+model InvoiceLine {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+
+  description String
+  quantity    Decimal @db.Decimal(15, 2)
+  unitPriceHT Decimal @db.Decimal(15, 2)
+
+  /// The class-7 revenue account this line posts to (707/706-family) —
+  /// caller-chosen per line, same as a manual écriture line always
+  /// names its own account.
+  revenueAccountId String
+  revenueAccount   Account @relation(fields: [revenueAccountId], references: [id])
+
+  /// Null = VAT-exempt line (no TVA ligne posted for it) — never
+  /// guessed, same "untagged collectée line" discipline as
+  /// ca3-declaration.ts.
+  vatRateId String?
+  vatRate   VatRate? @relation(fields: [vatRateId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, invoiceId])
 }
