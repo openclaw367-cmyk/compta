@@ -208,7 +208,9 @@ export class InvoicingService {
     }
 
     // Guard: compute mentions FIRST, before any posting — throws (NotImplementedException) for
-    // MC with zero side effects. See decision 5.
+    // MC with zero side effects. See decision 5. Seller country CODE comes from
+    // Company.jurisdiction ('FR'/'MC' already ARE ISO 3166-1 alpha-2 codes), never parsed from
+    // Company.country (a free-text display name) — see invoice-mentions.ts's own doc comment.
     const mentions = computeInvoiceMentions(
       companyRecord.jurisdiction,
       {
@@ -216,14 +218,17 @@ export class InvoicingService {
         addressLine: companyRecord.addressLine,
         postalCode: companyRecord.postalCode,
         city: companyRecord.city,
-        country: companyRecord.country,
+        countryCode: companyRecord.jurisdiction,
         siren: companyRecord.siren,
         rci: companyRecord.rci,
         vatNumber: companyRecord.vatNumber,
       },
       {
         name: dto.clientName,
-        address: dto.clientAddress,
+        addressLine: dto.clientAddressLine ?? null,
+        postalCode: dto.clientPostalCode ?? null,
+        city: dto.clientCity ?? null,
+        countryCode: dto.clientCountryCode,
         sirenOrRci: dto.clientSirenOrRci ?? null,
         vatNumber: dto.clientVatNumber ?? null,
       },
@@ -305,7 +310,10 @@ export class InvoicingService {
           invoiceNumber: mentions.invoiceNumber,
           invoiceDate: new Date(dto.invoiceDate),
           clientNameSnapshot: dto.clientName,
-          clientAddressSnapshot: dto.clientAddress,
+          clientAddressLineSnapshot: dto.clientAddressLine,
+          clientPostalCodeSnapshot: dto.clientPostalCode,
+          clientCitySnapshot: dto.clientCity,
+          clientCountrySnapshot: dto.clientCountryCode,
           clientSirenOrRci: dto.clientSirenOrRci,
           clientVatNumber: dto.clientVatNumber,
           postedEcritureId: validated.id,
@@ -358,14 +366,17 @@ export class InvoicingService {
         addressLine: companyRecord.addressLine,
         postalCode: companyRecord.postalCode,
         city: companyRecord.city,
-        country: companyRecord.country,
+        countryCode: companyRecord.jurisdiction,
         siren: companyRecord.siren,
         rci: companyRecord.rci,
         vatNumber: companyRecord.vatNumber,
       },
       {
         name: invoice.clientNameSnapshot!,
-        address: invoice.clientAddressSnapshot!,
+        addressLine: invoice.clientAddressLineSnapshot,
+        postalCode: invoice.clientPostalCodeSnapshot,
+        city: invoice.clientCitySnapshot,
+        countryCode: invoice.clientCountrySnapshot!,
         sirenOrRci: invoice.clientSirenOrRci,
         vatNumber: invoice.clientVatNumber,
       },

@@ -6,7 +6,7 @@ const COMPANY = {
   addressLine: '1 rue de la Paix',
   postalCode: '75002',
   city: 'Paris',
-  country: 'France',
+  countryCode: 'FR',
   siren: '123456789',
   rci: null,
   vatNumber: 'FR12123456789',
@@ -14,7 +14,10 @@ const COMPANY = {
 
 const CLIENT = {
   name: 'Client Petit SARL',
-  address: '12 rue de la Paix, 75002 Paris, France',
+  addressLine: '12 rue de la Paix',
+  postalCode: '75002',
+  city: 'Paris',
+  countryCode: 'FR',
   sirenOrRci: '987654321',
   vatNumber: 'FR98987654321',
 };
@@ -48,6 +51,8 @@ describe('computeInvoiceMentions — FR', () => {
     expect(mentions.seller.name).toBe('Société Démo SARL');
     expect(mentions.seller.vatNumber).toBe('FR12123456789');
     expect(mentions.buyer.name).toBe('Client Petit SARL');
+    expect(mentions.buyer.address.countryCode).toBe('FR');
+    expect(mentions.seller.formattedAddress).toBe('1 rue de la Paix, 75002 Paris, FR');
     expect(mentions.lines).toHaveLength(2);
     expect(mentions.lines[0].totalHT).toBe('1500.00');
     expect(mentions.lines[1].vatRatePercent).toBeNull();

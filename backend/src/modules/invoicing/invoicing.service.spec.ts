@@ -233,7 +233,10 @@ describe('InvoicingService.finalize', () => {
   const finalizeDto = {
     invoiceDate: '2026-08-30',
     clientName: 'Client Petit SARL',
-    clientAddress: '12 rue de la Paix, 75002 Paris, France',
+    clientAddressLine: '12 rue de la Paix',
+    clientPostalCode: '75002',
+    clientCity: 'Paris',
+    clientCountryCode: 'FR',
   };
 
   it('FR: posts a real balanced écriture via EntriesService and assigns invoiceNumber/postedEcritureId — the gated core', async () => {
@@ -312,7 +315,10 @@ describe('InvoicingService.getMentions', () => {
       invoiceNumber: '1',
       invoiceDate: new Date('2026-08-30'),
       clientNameSnapshot: 'Client Petit SARL',
-      clientAddressSnapshot: '12 rue de la Paix, 75002 Paris, France',
+      clientAddressLineSnapshot: '12 rue de la Paix',
+      clientPostalCodeSnapshot: '75002',
+      clientCitySnapshot: 'Paris',
+      clientCountrySnapshot: 'FR',
       clientSirenOrRci: null,
       clientVatNumber: null,
       postedEcritureId: 'ecriture-1',
@@ -351,7 +357,8 @@ describe('InvoicingService.getMentions', () => {
       invoiceNumber: '1',
       invoiceDate: new Date('2026-08-30'),
       clientNameSnapshot: 'Client Petit SARL',
-      clientAddressSnapshot: 'x',
+      clientAddressLineSnapshot: 'x',
+      clientCountrySnapshot: 'FR',
       postedEcritureId: 'ecriture-1',
     });
     prisma.company.findFirst.mockResolvedValue(COMPANY_FR);

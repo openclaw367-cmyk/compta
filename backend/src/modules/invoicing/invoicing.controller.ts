@@ -1,8 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
-import { ApiHeader, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Delete, Get, Param, Post, Put, Res } from '@nestjs/common';
+import { ApiHeader, ApiOperation, ApiParam, ApiProduces, ApiTags } from '@nestjs/swagger';
+import { Response } from 'express';
 import { CurrentCompany } from '../../common/tenant/current-company.decorator';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { InvoicingService } from './invoicing.service';
+import { FacturXService } from './factur-x.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { FinalizeInvoiceDto } from './dto/finalize-invoice.dto';
 
@@ -14,7 +16,10 @@ import { FinalizeInvoiceDto } from './dto/finalize-invoice.dto';
 })
 @Controller('invoicing/invoices')
 export class InvoicingController {
-  constructor(private readonly invoicingService: InvoicingService) {}
+  constructor(
+    private readonly invoicingService: InvoicingService,
+    private readonly facturXService: FacturXService,
+  ) {}
 
   @ApiOperation({
     summary: 'Create a DRAFT invoice (SALE or CREDIT_NOTE). No écriture posted yet.',
@@ -80,5 +85,29 @@ export class InvoicingController {
   @Get(':id/mentions')
   getMentions(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
     return this.invoicingService.getMentions(company, id);
+  }
+
+  @ApiOperation({
+    summary: 'Download the Factur-X 1.09 / EN16931 file for a FINALIZED invoice.',
+    description:
+      'PDF/A-3 with the CII XML embedded, validated against the official XSD + Schematron ' +
+      'EN16931 business rules both before AND after embedding (round-trip check). Throws if any ' +
+      'line is VAT-exempt — only standard-rated invoices are supported this pass, see ' +
+      'invoice-to-cii.ts.',
+  })
+  @ApiParam({ name: 'id' })
+  @ApiProduces('application/pdf')
+  @Get(':id/factur-x')
+  async downloadFacturX(
+    @CurrentCompany() company: CompanyContext,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const invoice = await this.invoicingService.findOne(company, id);
+    const pdf = await this.facturXService.render(company, id);
+    const filename = `factur-x-${invoice.invoiceNumber}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(Buffer.from(pdf));
   }
 }

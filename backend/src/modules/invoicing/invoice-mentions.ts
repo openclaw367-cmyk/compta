@@ -29,9 +29,26 @@ import { computeInvoiceLineAmounts } from './invoice-line-math';
 
 export type InvoiceJurisdiction = 'FR' | 'MC';
 
+/**
+ * Structured, not free-text — needed as of the Factur-X CII renderer
+ * (EN16931 Schematron BR-8/BR-9 require at least a country code for
+ * both seller and buyer; a free-text address string can't be parsed
+ * into that without guessing). Mirrors `Company`'s own
+ * addressLine/postalCode/city/country shape.
+ */
+export interface InvoiceMentionsAddress {
+  addressLine: string | null;
+  postalCode: string | null;
+  city: string | null;
+  /** ISO 3166-1 alpha-2 country code (e.g. "FR"), required. */
+  countryCode: string;
+}
+
 export interface InvoiceMentionsPartyIdentity {
   name: string;
-  address: string;
+  address: InvoiceMentionsAddress;
+  /** Human-readable, comma-joined rendering of `address` — for display only. */
+  formattedAddress: string;
   vatNumber: string | null;
   sirenOrRci: string | null;
 }
@@ -74,7 +91,9 @@ export interface InvoiceMentionsCompanyInput {
   addressLine: string | null;
   postalCode: string | null;
   city: string | null;
-  country: string;
+  /** ISO 3166-1 alpha-2 country code, derived from Company.jurisdiction ('FR'|'MC') by the
+   *  caller — NOT parsed from Company.country (a free-text display name), see schema doc comment. */
+  countryCode: string;
   siren: string | null;
   rci: string | null;
   vatNumber: string | null;
@@ -82,7 +101,11 @@ export interface InvoiceMentionsCompanyInput {
 
 export interface InvoiceMentionsClientInput {
   name: string;
-  address: string;
+  addressLine: string | null;
+  postalCode: string | null;
+  city: string | null;
+  /** ISO 3166-1 alpha-2 country code (e.g. "FR"), required — see InvoiceMentionsAddress. */
+  countryCode: string;
   sirenOrRci: string | null;
   vatNumber: string | null;
 }
@@ -102,11 +125,11 @@ export interface InvoiceMentionsInvoiceInput {
   lines: InvoiceMentionsLineInput[];
 }
 
-function formatCompanyAddress(company: InvoiceMentionsCompanyInput): string {
+function formatAddress(address: InvoiceMentionsAddress): string {
   const parts = [
-    company.addressLine,
-    [company.postalCode, company.city].filter(Boolean).join(' '),
-    company.country,
+    address.addressLine,
+    [address.postalCode, address.city].filter(Boolean).join(' '),
+    address.countryCode,
   ];
   return parts.filter((p) => p && p.length > 0).join(', ');
 }
@@ -181,13 +204,35 @@ function computeInvoiceMentionsFR(
     correctsInvoiceNumber: invoice.correctsInvoiceNumber,
     seller: {
       name: company.name,
-      address: formatCompanyAddress(company),
+      address: {
+        addressLine: company.addressLine,
+        postalCode: company.postalCode,
+        city: company.city,
+        countryCode: company.countryCode,
+      },
+      formattedAddress: formatAddress({
+        addressLine: company.addressLine,
+        postalCode: company.postalCode,
+        city: company.city,
+        countryCode: company.countryCode,
+      }),
       vatNumber: company.vatNumber,
       sirenOrRci: company.siren,
     },
     buyer: {
       name: client.name,
-      address: client.address,
+      address: {
+        addressLine: client.addressLine,
+        postalCode: client.postalCode,
+        city: client.city,
+        countryCode: client.countryCode,
+      },
+      formattedAddress: formatAddress({
+        addressLine: client.addressLine,
+        postalCode: client.postalCode,
+        city: client.city,
+        countryCode: client.countryCode,
+      }),
       vatNumber: client.vatNumber,
       sirenOrRci: client.sirenOrRci,
     },

@@ -897,10 +897,25 @@ model Invoice {
   /// Snapshot of the client's legal-mention fields AT finalize() time —
   /// an invoice's printed content must never retroactively change if
   /// the underlying tiers record is edited later. Null while DRAFT.
-  clientNameSnapshot    String?
-  clientAddressSnapshot String?
-  clientSirenOrRci      String?
-  clientVatNumber       String?
+  /// Address is STRUCTURED (mirroring Company's own addressLine/
+  /// postalCode/city fields), not a single free-text string — added
+  /// 2026-08-31 when the Factur-X CII renderer needed a real structured
+  /// buyer address (EN16931 Schematron BR-8/BR-9 require at least a
+  /// country code for both seller and buyer); a free-text address
+  /// string can't honestly be parsed into that without guessing, so the
+  /// field was fixed at the source instead. clientCountrySnapshot holds
+  /// an ISO 3166-1 alpha-2 CODE (e.g. "FR"), NOT a display name —
+  /// deliberately different from Company.country (a free-text display
+  /// name, e.g. "France") so no name↔code mapping/guessing is ever
+  /// needed; the seller's own CII country code is derived directly from
+  /// Company.jurisdiction instead (FR/MC already ARE the ISO codes).
+  clientNameSnapshot        String?
+  clientAddressLineSnapshot String?
+  clientPostalCodeSnapshot  String?
+  clientCitySnapshot        String?
+  clientCountrySnapshot     String?
+  clientSirenOrRci          String?
+  clientVatNumber           String?
 
   /// Required, and must reference a FINALIZED SALE invoice (enforced in
   /// the service layer), when type = CREDIT_NOTE. Null for a SALE.

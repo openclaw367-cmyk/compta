@@ -386,19 +386,24 @@ design pass starts.
 
 ## 4. Invoicing / facturation
 
-**Classification: GATED — and STATUS: Phase A SHIPPED, backend only,
-2026-08-30.** Moved up from "noted, not planned" — per the standing
+**Classification: GATED — and STATUS: Phase A SHIPPED, backend only —
+generation + gated posting (2026-08-30), Factur-X rendering
+(2026-08-31).** Moved up from "noted, not planned" — per the standing
 instruction, this is a key feature, not a nice-to-have — but
 French/Monaco invoicing is entangled with the phasing e-invoicing
 reform (facturation électronique), so the regulatory ground was
 established against primary sources first, the same discipline this
 app already applies to FEC/CA3/Monaco VAT/liasse, before any code was
-written. **Full regulatory findings (cited), the phased plan, and the
-Phase A design are in `specs/invoicing-plan.md` and
-`specs/invoicing-phase-a-implementation-spec.md`; the full verification
-record is in CLAUDE.md "Invoicing — Phase A" — this section is a
-summary, not a replacement, same pointer-not-duplicate convention as
-every other detailed spec referenced from this roadmap.**
+written. **Full regulatory findings (cited) and the phased plan are in
+`specs/invoicing-plan.md`; the two build-then-verify passes are in
+`specs/invoicing-phase-a-implementation-spec.md` (generation + ledger
+posting) and `specs/invoicing-factur-x-implementation-spec.md` (the
+real Factur-X 1.09/EN16931 file, validated against the official XSD +
+Schematron); the full verification record for both is in CLAUDE.md
+"Invoicing — Phase A" and "Invoicing — Factur-X rendering" — this
+section is a summary, not a replacement, same pointer-not-duplicate
+convention as every other detailed spec referenced from this roadmap.
+No frontend exists yet for either pass.**
 
 - **The headline regulatory finding**: compliant invoice *generation*
   (correct legal mentions, a real data model, PDF/Factur-X output, and
@@ -437,10 +442,18 @@ every other detailed spec referenced from this roadmap.**
     (411/707/44571-shaped, per-rate `vatRateId` tagging) through the
     existing `EntriesService` path, never a privileged write. Verified
     live on both the FR and Monaco demo companies — see CLAUDE.md
-    "Invoicing — Phase A" for the full record. PDF/Factur-X file
-    rendering and the frontend are explicitly NOT built this pass (no
-    PDF-generation dependency exists anywhere in this app yet — see
-    item 7 below).
+    "Invoicing — Phase A" for the full record. **Factur-X 1.09/EN16931
+    rendering — SHIPPED (2026-08-31)**: `GET
+    /invoicing/invoices/:id/factur-x` returns a real PDF/A-3 file with
+    the CII XML embedded, validated against the official XSD +
+    Schematron EN16931 business rules both before and after embedding
+    — see `specs/invoicing-factur-x-implementation-spec.md` and
+    CLAUDE.md "Invoicing — Factur-X rendering" for the full record,
+    including two real bugs found and fixed (a Windows-only upstream
+    `libxml2-wasm` bug, and a PEPPOL Schematron empty-element rule).
+    Only standard-rated invoices are supported (VAT-exempt lines throw
+    rather than guess a category code). **The frontend is still NOT
+    built** for either the generation or the Factur-X pass.
   - **Phase B — PA/e-transmission integration**, sequenced like bank-rec
     Layer 1b, NOT started: choosing and contracting with an accredited
     PA is an external, commercial decision (not a technical one this

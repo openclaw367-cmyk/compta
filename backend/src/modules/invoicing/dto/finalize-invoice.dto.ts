@@ -1,4 +1,4 @@
-import { IsDateString, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsDateString, IsOptional, IsString, Matches, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -8,7 +8,11 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  * no address/SIREN/RCI fields today, so these are caller-supplied here
  * rather than read off the account — a natural follow-up (adding those
  * fields to `Account` for a "fill once" UX) is explicitly not attempted
- * this pass.
+ * this pass. Address is STRUCTURED (not a single free-text string) —
+ * added when the Factur-X CII renderer needed a real buyer country code
+ * (EN16931 Schematron BR-8/BR-9); see the schema's own doc comment on
+ * `Invoice.clientCountrySnapshot` for why the country field is an ISO
+ * code, not a display name.
  */
 export class FinalizeInvoiceDto {
   @ApiProperty({ example: '2026-08-30' })
@@ -20,10 +24,30 @@ export class FinalizeInvoiceDto {
   @MinLength(1)
   clientName!: string;
 
-  @ApiProperty({ example: '12 rue de la Paix, 75002 Paris, France' })
+  @ApiPropertyOptional({ example: '12 rue de la Paix' })
+  @IsOptional()
   @IsString()
-  @MinLength(1)
-  clientAddress!: string;
+  clientAddressLine?: string;
+
+  @ApiPropertyOptional({ example: '75002' })
+  @IsOptional()
+  @IsString()
+  clientPostalCode?: string;
+
+  @ApiPropertyOptional({ example: 'Paris' })
+  @IsOptional()
+  @IsString()
+  clientCity?: string;
+
+  @ApiProperty({
+    description: 'ISO 3166-1 alpha-2 country code — required (EN16931 Schematron BR-8/BR-9).',
+    example: 'FR',
+  })
+  @IsString()
+  @Matches(/^[A-Z]{2}$/, {
+    message: 'clientCountryCode must be an ISO 3166-1 alpha-2 code, e.g. "FR".',
+  })
+  clientCountryCode!: string;
 
   @ApiPropertyOptional({ description: 'SIREN (France) or RCI (Monaco).' })
   @IsOptional()

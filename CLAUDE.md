@@ -3655,14 +3655,22 @@ assembly of already-shipped pieces rather than new domain logic.
 
 **⚠️ NOT user-complete — three things deliberately missing, not
 forgotten. Read this before telling a user "invoicing is done":**
-1. **No PDF/Factur-X file exists anywhere.** This pass produces the
-   structured mentions DATA (`computeInvoiceMentions()`'s return value)
-   that a renderer would consume — no PDF-generation dependency exists
-   anywhere in this app yet (see roadmap item 7), so there is currently
-   no way to hand a user an actual invoice document.
-2. **No frontend exists.** Every verification below is via curl/direct
-   API calls against the running backend. There is no screen to create,
-   review, or finalize an invoice through the UI.
+1. **A real Factur-X 1.09 / EN16931 file IS now generated** (as of
+   2026-08-31, `GET /invoicing/invoices/:id/factur-x`) — PDF/A-3 with
+   the CII XML embedded, validated against the real official XSD +
+   Schematron EN16931 business rules both before AND after embedding,
+   confirmed live through the real running server (HTTP 200 with a
+   real downloaded file). See "Invoicing — Factur-X rendering" below
+   for the full record, including two genuine bugs found and fixed
+   along the way (an upstream Windows-only `libxml2-wasm` bug, and a
+   PEPPOL Schematron rule an empty CII element tripped). **Only
+   standard-rated invoices are supported** — a VAT-exempt line throws
+   rather than guessing a UNTDID 5305 category code, a stated, narrower
+   gap than "no PDF at all."
+2. **No frontend exists.** Every verification below (and in "Invoicing
+   — Factur-X rendering") is via curl/direct API calls against the
+   running backend. There is no screen to create, review, finalize, or
+   download an invoice through the UI.
 3. **Monaco invoicing is NOT usable, by design.** A Monaco-jurisdiction
    company can create/edit DRAFT invoices (the architecture is
    jurisdiction-agnostic) but `finalize()` always throws — see
@@ -3677,15 +3685,17 @@ forgotten. Read this before telling a user "invoicing is done":**
    `BridgeAggregatorAdapter` was built. No code, no adapter, no
    commitment to any provider.
 
-`src/modules/invoicing/` (as of 2026-08-30) is the first half of the
-invoicing feature — see `specs/invoicing-plan.md` (regulatory research
-+ phased plan) and `specs/invoicing-phase-a-implementation-spec.md`
-(the design-then-verify pass this section documents) for the full
-picture; this section records only what must never be re-derived from
-memory. **Backend only, deliberately, per this pass's own scope** — no
-frontend, no PDF/Factur-X file rendering (only the structured data a
-future renderer would need). Phase B (PA/e-transmission) is a later,
-likely separate initiative — see the plan doc.
+`src/modules/invoicing/` (as of 2026-08-30, Factur-X rendering added
+2026-08-31) is invoicing Phase A — see `specs/invoicing-plan.md`
+(regulatory research + phased plan),
+`specs/invoicing-phase-a-implementation-spec.md` (the generation +
+gated-posting engine), and
+`specs/invoicing-factur-x-implementation-spec.md` (the Factur-X
+renderer, its own design-then-verify pass) for the full picture; this
+section records only what must never be re-derived from memory.
+**Backend only, deliberately, per this pass's own scope** — no
+frontend. Phase B (PA/e-transmission) is a later, likely separate
+initiative — see the plan doc.
 
 - **One jurisdiction-parameterized engine, France implemented, Monaco
   an honest stub — not a silent copy.** `computeInvoiceMentions()`
@@ -3842,15 +3852,115 @@ likely separate initiative — see the plan doc.
   invoices `3`/`4` the only two ever issued — no gap. Test `Invoice`
   rows removed via a temporary script afterward, same as the first
   pass.
-- **Deferred, explicitly, not silently**: PDF/Factur-X file rendering
-  (no PDF-generation dependency exists anywhere in this app yet — see
-  roadmap item 7); the frontend; Monaco's actual rule content (the
-  seam is built, the content is pending — see above); `Account` gaining
-  address/SIREN/RCI fields for a "fill once" client UX. Phase B
-  (PA/e-transmission) is tracked separately in `specs/invoicing-plan.md`,
-  including a POTENTIAL provider signal to watch — not acted on until
-  it's a real, accredited, publicly documented API, same bar Bridge
-  had to clear.
+- **Deferred, explicitly, not silently**: the frontend; Monaco's actual
+  rule content (the seam is built, the content is pending — see above);
+  `Account` gaining address/SIREN/RCI fields for a "fill once" client
+  UX; VAT-exempt-line Factur-X support (see "Invoicing — Factur-X
+  rendering" below). Phase B (PA/e-transmission) is tracked separately
+  in `specs/invoicing-plan.md`, including a POTENTIAL provider signal
+  to watch — not acted on until it's a real, accredited, publicly
+  documented API, same bar Bridge had to clear. PDF/Factur-X file
+  rendering, listed here as deferred in the original Phase A pass, is
+  now real — see immediately below.
+
+## Invoicing — Factur-X rendering
+
+**⚠️ Still no frontend — every fact below is verified via curl/direct
+API calls, not through a UI, and only STANDARD-RATED invoices are
+supported (a VAT-exempt line throws by design, see below).**
+
+`src/modules/invoicing/{invoice-to-cii,factur-x-pdf,factur-x.service}.ts`
+(2026-08-31) is the second Phase A pass — see
+`specs/invoicing-factur-x-implementation-spec.md` for the full record;
+this section records only what must never be re-derived from memory.
+`GET /invoicing/invoices/:id/factur-x` returns a real **Factur-X 1.09 /
+EN16931** file (PDF/A-3, CII XML embedded) for a FINALIZED invoice,
+reusing `InvoicingService.getMentions()` verbatim — the same object
+already tied to the actual posted écriture.
+
+- **Profile: EN16931**, confirmed the fullest currently-published
+  Factur-X profile from FNFE-MPE's own page (fetched directly,
+  Factur-X 1.09.2/ZUGFeRD 2.5.2, published 2026-08-04) — EXTENDED is
+  explicitly "under construction" there, not a real option today.
+- **Library: `@stafyniaksacha/facturx`** (MIT, pure npm/WASM —
+  `libxml2-wasm` + `saxon-js`, no Java dependency this sandboxed
+  environment doesn't have) — chosen because its `check()` validates
+  against the **real official XSD and EN16931 Schematron `BR-*`
+  business rules**, confirmed by inspecting the installed package's own
+  bundled schema/Schematron artifacts, not a hand-rolled approximation.
+  `pdf-lib` added as an explicit direct dependency (pinned to the same
+  version the library uses, confirmed deduped via `npm ls`) for the
+  human-readable PDF layer `generate()` embeds the XML into.
+- **Two real bugs found and fixed, not by inspection**:
+  1. An empty `ApplicableHeaderTradeDelivery` (this app has no separate
+     delivery-date field) is XSD-valid but fails Schematron rule
+     **PEPPOL-EN16931-R008** ("Document MUST not contain empty
+     elements") — found live on the first generation attempt. Fixed by
+     defaulting the delivery/service date to the invoice's own issue
+     date, documented as a stated business decision, not silently
+     invented.
+  2. A genuine, **root-caused upstream bug in `libxml2-wasm`'s Node
+     file-input provider** on Windows: its `filePath()` helper calls
+     `new URL(filename)` on a bare Windows absolute path like
+     `"C:/Users/.../schema.xsd"` — the WHATWG URL grammar accepts a
+     single ASCII letter followed by `:` as a valid scheme, so this
+     parses with `protocol === "c:"` (confirmed directly), never
+     `"file:"`, so the provider reports a real, existing schema file as
+     missing. This broke EN16931's multi-file `<xs:import>` resolution
+     specifically. Confirmed via a throwaway logging provider that the
+     exact correct path was being requested every time — the file was
+     never actually missing. **Fixed in this app's own code**
+     (`src/common/libxml2-windows-path-fix.ts`), not by patching
+     `node_modules`: registers an *additional* input provider that
+     matches via plain `fs.existsSync()`, gated to
+     `process.platform === 'win32'` (a no-op on Linux/Mac, where this
+     specific bug doesn't manifest). Not filed upstream this pass —
+     recorded here so a future session doesn't rediscover it or delete
+     the fix as unexplained boilerplate.
+- **A genuine, separate ESM/CommonJS interop finding**: both
+  `@stafyniaksacha/facturx` and `libxml2-wasm` are ESM-only; this
+  backend is CommonJS throughout. A plain `await import(...)` inside
+  this project's own `.ts` source does **not** solve this — TypeScript
+  downlevels `import()` to `require()` when `module: "commonjs"`, which
+  still throws `ERR_REQUIRE_ESM`. This is a different, worse problem
+  than the pdfjs-dist case already documented elsewhere in this file
+  (pdfjs-dist's own dynamic import lives inside an *already-compiled*
+  `node_modules` file Node loads untouched by this project's own
+  transform). Fixed with `src/common/esm-interop.ts`'s `importEsm()` —
+  the standard `new Function('specifier', 'return import(specifier)')`
+  workaround (TypeScript issue #43329), whose body TypeScript's AST
+  transform never inspects. **Works under `ts-node` and the real
+  NestJS app** (confirmed live) but **not under Jest** —
+  `jest-environment-node` itself requires `--experimental-vm-modules`
+  for any real dynamic import, a limitation the eval trick can't
+  route around. Enabling that flag project-wide for one dependency was
+  rejected, same reasoning as the existing pdfjs-dist precedent.
+  `factur-x.integration.spec.ts` keeps only the ESM-independent guard
+  test under Jest; the actual generation+validation proof is a
+  `ts-node` smoke test (temporary, deleted after use, same discipline
+  as every other one-off verification script in this project).
+- **Verified two ways, then live through the real server.** A `ts-node`
+  smoke test generated a real two-rate SALE invoice AND a CREDIT_NOTE,
+  each independently passing `check({schematron:true})` **both before
+  embedding** (on the constructed XML) **and after** (on the XML
+  extracted back OUT of the generated PDF/A-3 — the round-trip check,
+  proving embedding didn't corrupt anything) — `valid: true`,
+  `schematronValid: true`, zero errors, every time. Live, through the
+  actual running NestJS dev server (not just `ts-node` standalone):
+  created and finalized a real invoice on the FR demo company
+  (`invoiceNumber "5"`), `GET .../factur-x` → **HTTP 200**,
+  `Content-Type: application/pdf`, a real 8831-byte file — since
+  `FacturXService.render()` throws `ConflictException` (409) on either
+  a pre- or post-embed validation failure, the 200 itself is live proof
+  both passed, not an assumption. Separately confirmed the endpoint
+  correctly refuses a DRAFT invoice (409) before ever reaching the
+  renderer. Test invoice's écriture reversed/validated afterward,
+  ledger confirmed net `0.00`; test `Invoice` rows removed via a
+  temporary script.
+- **Deferred, explicitly**: the frontend (no UI to trigger a download
+  yet); VAT-exempt line support (throws rather than guessing a UNTDID
+  5305 category code — no exemption-reason field exists on
+  `InvoiceLine`); filing the `libxml2-wasm` bug upstream.
 
 ## Known scope boundaries
 
