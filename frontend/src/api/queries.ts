@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
+import { downloadBlob } from '../lib/download';
 import type {
   Account,
   AccountLedgerResponse,
@@ -31,6 +32,9 @@ import type {
   FixedAsset,
   ImportBatch,
   ImportPreviewResponse,
+  FinalizeInvoiceResult,
+  Invoice,
+  InvoiceMentions,
   Journal,
   LiasseAnyResult,
   LineTraceResult,
@@ -61,9 +65,11 @@ import type {
   CreateEcritureDto,
   CreateFiscalYearDto,
   CreateFixedAssetDto,
+  CreateInvoiceDto,
   CreateJournalDto,
   CreateTiersDto,
   CreateVatRateDto,
+  FinalizeInvoiceDto,
   SendChatMessageDto,
   SetCloudCredentialDto,
   UpdateAccountDto,
@@ -1183,6 +1189,90 @@ export function useRevokeLink(bankAccountId: string) {
     mutationFn: () => api.delete<void>(`/bank-aggregator/links/${bankAccountId}`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['bank-aggregator-links'] });
+    },
+  });
+}
+
+/**
+ * Invoicing — Phase A. See CLAUDE.md "Invoicing — Phase A" and
+ * "Invoicing — Factur-X rendering". `findAll()`/`findOne()` on the
+ * backend both already `include: { lines: true }`, so a single
+ * ['invoices'] list query — same "no server-side filter, filter
+ * client-side over a small dataset" shape as ['ecritures'] — covers
+ * both the list and the editor without a second per-invoice fetch.
+ */
+function invalidateInvoices(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: ['invoices'] });
+}
+
+export function useInvoices() {
+  return useQuery({
+    queryKey: ['invoices'],
+    queryFn: () => api.get<Invoice[]>('/invoicing/invoices'),
+  });
+}
+
+export function useCreateInvoice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateInvoiceDto) => api.post<Invoice>('/invoicing/invoices', dto),
+    onSuccess: () => invalidateInvoices(queryClient),
+  });
+}
+
+export function useUpdateInvoice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: CreateInvoiceDto }) =>
+      api.put<Invoice>(`/invoicing/invoices/${id}`, dto),
+    onSuccess: () => invalidateInvoices(queryClient),
+  });
+}
+
+export function useDeleteInvoice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/invoicing/invoices/${id}`),
+    onSuccess: () => invalidateInvoices(queryClient),
+  });
+}
+
+/**
+ * The gated core — assigns invoiceNumber, posts the écriture, computes
+ * mentions. Throws (NotImplementedException, surfaced as an ApiError)
+ * for an MC-jurisdiction company, with zero side effects — see
+ * InvoicingService.finalize()'s own doc comment.
+ */
+export function useFinalizeInvoice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: FinalizeInvoiceDto }) =>
+      api.post<FinalizeInvoiceResult>(`/invoicing/invoices/${id}/finalize`, dto),
+    onSuccess: () => invalidateInvoices(queryClient),
+  });
+}
+
+/** Only meaningful for a FINALIZED invoice — re-derives mentions and ties them to the actual posted écriture. */
+export function useInvoiceMentions(invoiceId: string | null) {
+  return useQuery({
+    queryKey: ['invoice-mentions', invoiceId],
+    queryFn: () => api.get<InvoiceMentions>(`/invoicing/invoices/${invoiceId}/mentions`),
+    enabled: Boolean(invoiceId),
+  });
+}
+
+/**
+ * Downloads the real Factur-X 1.09/EN16931 file (PDF/A-3, CII XML
+ * embedded) for a FINALIZED invoice and triggers a browser save —
+ * see CLAUDE.md "Invoicing — Factur-X rendering". A mutation, not a
+ * query: it's a one-shot action with a side effect (the download),
+ * not cached/reusable data.
+ */
+export function useDownloadFacturX() {
+  return useMutation({
+    mutationFn: async (invoiceId: string) => {
+      const { filename, blob } = await api.getFileBlob(`/invoicing/invoices/${invoiceId}/factur-x`);
+      downloadBlob(filename, blob);
     },
   });
 }

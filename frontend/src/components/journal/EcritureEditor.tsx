@@ -7,7 +7,6 @@ import type {
   Ecriture,
   ExtractedInvoiceFacts,
   ProposedEcriture,
-  VatRate,
 } from '../../api/types';
 import type { CreateEcritureDto, CreateEcritureLigneDto, CreateTiersDto } from '../../api/dto';
 import {
@@ -29,6 +28,7 @@ import {
   sanitizeAmountBuffer,
 } from '../../lib/money';
 import { isAuxiliaryBearingAccount } from '../../lib/accounts';
+import { formatVatRateOption } from '../../lib/vatRates';
 import { AccountCombobox } from './AccountCombobox';
 import { BalanceIndicator } from './BalanceIndicator';
 import { EngineBadge } from './EngineBadge';
@@ -118,10 +118,6 @@ function fromExisting(ecriture: Ecriture): DraftLigne[] {
     vatRateId: ligne.vatRateId,
     dateEcheance: ligne.dateEcheance ? toIsoDate(ligne.dateEcheance) : '',
   }));
-}
-
-function formatVatRateOption(rate: VatRate): string {
-  return `${rate.ratePercent.replace('.', ',')} % — ${rate.label}`;
 }
 
 function isRowEmpty(row: DraftLigne): boolean {

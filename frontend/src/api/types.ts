@@ -1298,3 +1298,103 @@ export interface Tableau2059TraceResult {
   accountNumber: string;
   accountLabel: string;
 }
+
+/**
+ * Invoicing — Phase A. See CLAUDE.md "Invoicing — Phase A" and
+ * "Invoicing — Factur-X rendering". A DRAFT invoice is freely editable
+ * and jurisdiction-agnostic; finalize() (France only — Monaco throws)
+ * assigns invoiceNumber, snapshots the client's legal-mention fields,
+ * and posts a real balanced écriture.
+ */
+export type InvoiceType = 'SALE' | 'CREDIT_NOTE';
+export type InvoiceStatus = 'DRAFT' | 'FINALIZED';
+
+export interface InvoiceLine {
+  id: string;
+  companyId: string;
+  invoiceId: string;
+  description: string;
+  /** Decimal string, same shape as a money string — see lib/money.ts. */
+  quantity: string;
+  /** Money string, e.g. "1234.56". */
+  unitPriceHT: string;
+  revenueAccountId: string;
+  vatRateId: string | null;
+}
+
+export interface Invoice {
+  id: string;
+  companyId: string;
+  fiscalYearId: string;
+  type: InvoiceType;
+  status: InvoiceStatus;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  clientAccountId: string;
+  clientNameSnapshot: string | null;
+  clientAddressLineSnapshot: string | null;
+  clientPostalCodeSnapshot: string | null;
+  clientCitySnapshot: string | null;
+  /** ISO 3166-1 alpha-2 code (e.g. "FR"), not a display name. */
+  clientCountrySnapshot: string | null;
+  clientSirenOrRci: string | null;
+  clientVatNumber: string | null;
+  correctsInvoiceId: string | null;
+  postedEcritureId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: InvoiceLine[];
+}
+
+export interface FinalizeInvoiceResult {
+  invoice: Invoice;
+  mentions: InvoiceMentions;
+}
+
+export interface InvoiceMentionsAddress {
+  addressLine: string | null;
+  postalCode: string | null;
+  city: string | null;
+  countryCode: string;
+}
+
+export interface InvoiceMentionsPartyIdentity {
+  name: string;
+  address: InvoiceMentionsAddress;
+  formattedAddress: string;
+  vatNumber: string | null;
+  sirenOrRci: string | null;
+}
+
+export interface InvoiceMentionsLine {
+  description: string;
+  quantity: string;
+  unitPriceHT: string;
+  totalHT: string;
+  vatRatePercent: string | null;
+}
+
+export interface InvoiceMentionsVatBreakdown {
+  ratePercent: string;
+  baseHT: string;
+  vatAmount: string;
+}
+
+/** The mandatory-mentions data for a FINALIZED invoice — CGI 242 nonies A + Code de commerce L441-10. */
+export interface InvoiceMentions {
+  jurisdiction: 'FR';
+  invoiceNumber: string;
+  invoiceDate: string;
+  isCreditNote: boolean;
+  correctsInvoiceNumber: string | null;
+  seller: InvoiceMentionsPartyIdentity;
+  buyer: InvoiceMentionsPartyIdentity;
+  lines: InvoiceMentionsLine[];
+  vatByRate: InvoiceMentionsVatBreakdown[];
+  totalHT: string;
+  totalVAT: string;
+  totalTTC: string;
+  latePaymentPenaltyNotice: string;
+  forfeitIndemnityNotice: string;
+  escompteNotice: string;
+}

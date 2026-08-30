@@ -386,8 +386,8 @@ design pass starts.
 
 ## 4. Invoicing / facturation
 
-**Classification: GATED — and STATUS: Phase A SHIPPED, backend only —
-generation + gated posting (2026-08-30), Factur-X rendering
+**Classification: GATED — and STATUS: Phase A SHIPPED — generation +
+gated posting (2026-08-30), Factur-X rendering (2026-08-31), frontend
 (2026-08-31).** Moved up from "noted, not planned" — per the standing
 instruction, this is a key feature, not a nice-to-have — but
 French/Monaco invoicing is entangled with the phasing e-invoicing
@@ -400,10 +400,11 @@ written. **Full regulatory findings (cited) and the phased plan are in
 posting) and `specs/invoicing-factur-x-implementation-spec.md` (the
 real Factur-X 1.09/EN16931 file, validated against the official XSD +
 Schematron); the full verification record for both is in CLAUDE.md
-"Invoicing — Phase A" and "Invoicing — Factur-X rendering" — this
-section is a summary, not a replacement, same pointer-not-duplicate
-convention as every other detailed spec referenced from this roadmap.
-No frontend exists yet for either pass.**
+"Invoicing — Phase A", "Invoicing — Factur-X rendering", and "Invoicing
+— frontend" — this section is a summary, not a replacement, same
+pointer-not-duplicate convention as every other detailed spec
+referenced from this roadmap. The frontend (`/factures`) is now built
+and live-verified for both the generation and Factur-X passes.**
 
 - **The headline regulatory finding**: compliant invoice *generation*
   (correct legal mentions, a real data model, PDF/Factur-X output, and
@@ -452,8 +453,15 @@ No frontend exists yet for either pass.**
     including two real bugs found and fixed (a Windows-only upstream
     `libxml2-wasm` bug, and a PEPPOL Schematron empty-element rule).
     Only standard-rated invoices are supported (VAT-exempt lines throw
-    rather than guess a category code). **The frontend is still NOT
-    built** for either the generation or the Factur-X pass.
+    rather than guess a category code). **The frontend — SHIPPED
+    (2026-08-31)**: `/factures` (`InvoicingPage`) covers draft create/
+    edit, gated finalize, the finalized-invoice detail view with
+    mentions + Factur-X download, and avoir (credit-note) creation —
+    all live-verified in a real browser, including a real bug found and
+    fixed the same day (a missing `@HttpCode(NO_CONTENT)` on the DRAFT
+    delete endpoint made a successful deletion surface as a false "La
+    suppression a échoué." error) — see CLAUDE.md "Invoicing —
+    frontend" for the full record.
   - **Phase B — PA/e-transmission integration**, sequenced like bank-rec
     Layer 1b, NOT started: choosing and contracting with an accredited
     PA is an external, commercial decision (not a technical one this
@@ -658,7 +666,7 @@ roadmap's scope.
 
 ## Closing note
 
-This document is a **map**, current as of 2026-08-30. Nothing above has
+This document is a **map**, current as of 2026-08-31. Nothing above has
 been designed, and nothing above should be built from this document
 alone — each feature gets its own design-then-verify pass, reviewed and
 confirmed before any code is written, when we reach it. Update this
@@ -667,7 +675,9 @@ it stays the accurate shared reference rather than a stale snapshot.
 
 **Next up**: Anomaly surfacing (§5) or Recurring entries / templates
 (§6) — the next design-then-build pass among the unstarted items.
-Invoicing (§4) is next in priority order but is a research-and-plan
-pass only until the two flagged decisions (Monaco scope, the PA
-integration choice for Phase B) are resolved — see
+Invoicing (§4) Phase A is now fully shipped (generation, gated
+posting, Factur-X rendering, and the frontend) on both required
+companies; Phase B (PA/e-transmission) stays blocked on an external,
+commercial PA-provider decision this project can't resolve alone, and
+Monaco's own transmission-regime question stays open — see
 `specs/invoicing-plan.md`.

@@ -3667,10 +3667,13 @@ forgotten. Read this before telling a user "invoicing is done":**
    standard-rated invoices are supported** — a VAT-exempt line throws
    rather than guessing a UNTDID 5305 category code, a stated, narrower
    gap than "no PDF at all."
-2. **No frontend exists.** Every verification below (and in "Invoicing
-   — Factur-X rendering") is via curl/direct API calls against the
-   running backend. There is no screen to create, review, finalize, or
-   download an invoice through the UI.
+2. **The frontend is now built and live-verified** (2026-08-31) — see
+   "Invoicing — frontend" below for the full record. `/factures`
+   (`InvoicingPage`) covers create/edit/save-draft, finalize (gated,
+   `window.confirm()`-then-mutate, same discipline as cession/dotation),
+   the finalized-invoice detail view with mentions/Factur-X download,
+   and avoir (credit-note) creation — all through the real browser, not
+   just curl.
 3. **Monaco invoicing is NOT usable, by design.** A Monaco-jurisdiction
    company can create/edit DRAFT invoices (the architecture is
    jurisdiction-agnostic) but `finalize()` always throws — see
@@ -3852,22 +3855,25 @@ initiative — see the plan doc.
   invoices `3`/`4` the only two ever issued — no gap. Test `Invoice`
   rows removed via a temporary script afterward, same as the first
   pass.
-- **Deferred, explicitly, not silently**: the frontend; Monaco's actual
-  rule content (the seam is built, the content is pending — see above);
-  `Account` gaining address/SIREN/RCI fields for a "fill once" client
-  UX; VAT-exempt-line Factur-X support (see "Invoicing — Factur-X
+- **Deferred, explicitly, not silently**: Monaco's actual rule content
+  (the seam is built, the content is pending — see above); `Account`
+  gaining address/SIREN/RCI fields for a "fill once" client UX;
+  VAT-exempt-line Factur-X support (see "Invoicing — Factur-X
   rendering" below). Phase B (PA/e-transmission) is tracked separately
   in `specs/invoicing-plan.md`, including a POTENTIAL provider signal
   to watch — not acted on until it's a real, accredited, publicly
   documented API, same bar Bridge had to clear. PDF/Factur-X file
   rendering, listed here as deferred in the original Phase A pass, is
-  now real — see immediately below.
+  now real — see immediately below. **The frontend, also listed here
+  as deferred, is now real too — see "Invoicing — frontend" below.**
 
 ## Invoicing — Factur-X rendering
 
-**⚠️ Still no frontend — every fact below is verified via curl/direct
-API calls, not through a UI, and only STANDARD-RATED invoices are
-supported (a VAT-exempt line throws by design, see below).**
+**⚠️ Every fact below is verified via curl/direct API calls, not through
+a UI (the frontend pass came later — see "Invoicing — frontend"
+below, which re-verified the Factur-X download live through the real
+browser too), and only STANDARD-RATED invoices are supported (a
+VAT-exempt line throws by design, see below).**
 
 `src/modules/invoicing/{invoice-to-cii,factur-x-pdf,factur-x.service}.ts`
 (2026-08-31) is the second Phase A pass — see
@@ -3957,10 +3963,103 @@ already tied to the actual posted écriture.
   renderer. Test invoice's écriture reversed/validated afterward,
   ledger confirmed net `0.00`; test `Invoice` rows removed via a
   temporary script.
-- **Deferred, explicitly**: the frontend (no UI to trigger a download
-  yet); VAT-exempt line support (throws rather than guessing a UNTDID
-  5305 category code — no exemption-reason field exists on
-  `InvoiceLine`); filing the `libxml2-wasm` bug upstream.
+- **Deferred, explicitly**: VAT-exempt line support (throws rather than
+  guessing a UNTDID 5305 category code — no exemption-reason field
+  exists on `InvoiceLine`); filing the `libxml2-wasm` bug upstream. The
+  frontend, listed here as deferred in the original pass, is now real
+  — see immediately below.
+
+## Invoicing — frontend
+
+`frontend/src/pages/InvoicingPage.tsx` (route `/factures`, nav item
+between Écritures and Revue de factures) plus
+`frontend/src/components/invoicing/{InvoiceEditor,InvoiceLinesEditor,
+InvoiceDetailView,InvoicesList}.tsx` (2026-08-31, built and live-verified
+in the real browser the same day as the Factur-X rendering pass) close
+both frontend gaps flagged above. Built following this app's own
+established conventions — no new patterns invented — and verified live
+in a real Chrome tab against the running dev server, not just
+`tsc`/`eslint`/`vite build`.
+
+- **`InvoiceEditor`** is the DRAFT create/edit form (client via the
+  existing `AccountCombobox`, filtered to auxiliary-bearing 411
+  accounts; `InvoiceLinesEditor` for the dynamic line-items grid) plus
+  an embedded `FinalizeSection` shown only for an existing DRAFT — same
+  shape as `EcritureEditor`'s own save-draft-then-separately-validate
+  split. **No client-side arithmetic reimplementation, deliberately**:
+  `InvoiceLinesEditor` shows no live running total, since
+  `Invoice`/`InvoiceLine` carry no computed total of their own — only
+  `InvoiceMentions` (server-derived, either at finalize() time or via
+  `GET .../mentions` afterward) has one. `FinalizeSection.handleFinalize()`
+  is `window.confirm()`-then-mutate, the same irreversible-action
+  pattern cession/dotation/à-nouveau already established.
+- **`InvoiceDetailView`** is the read-only FINALIZED-invoice view —
+  always calls `useInvoiceMentions()` fresh (never trusts a cached
+  finalize response), rendering seller/buyer identity, the line-items
+  table, the VAT-by-rate breakdown, HT/TVA/TTC totals, the three
+  L441-10 legal notices, a "Créer un avoir" action (hidden when the
+  invoice IS itself a credit note), and a "Télécharger Factur-X"
+  button. Shows a warning banner when any line is VAT-exempt, since
+  Factur-X rendering throws for that case (see above) — the frontend
+  states the limitation honestly rather than letting the download
+  button fail silently.
+- **A real bug found live, not by inspection, and fixed the same
+  day**: deleting a DRAFT invoice returned HTTP 200 with an empty
+  body, and the shared `request()` helper in `api/client.ts`
+  unconditionally calls `response.json()` on any non-204 response —
+  parsing an empty body threw a `SyntaxError`, surfacing as "La
+  suppression a échoué." in the UI even though
+  `InvoicingService.remove()` had already deleted the row correctly
+  (confirmed via a direct backend read: the invoice was gone despite
+  the frontend showing an error). `EntriesController.remove()` already
+  established the correct pattern (`@HttpCode(HttpStatus.NO_CONTENT)`,
+  204, which `request()` DOES special-case) —
+  `InvoicingController.remove()` was simply missing that decorator.
+  Fixed by adding it, matching the existing convention exactly rather
+  than inventing a new one (e.g. changing `request()` to tolerate an
+  empty 200 body would have been a broader, riskier change for a
+  narrower, already-solved problem). Re-verified live afterward: a
+  fresh draft's delete now succeeds cleanly with no error banner.
+- **Verified live end to end in the real browser, FR demo company**:
+  created a SALE invoice (2 × 500,00 € HT @ 20 %), saved as draft,
+  reopened it, finalized it (`window.confirm()` intercepted for the
+  test, the real production code path otherwise unmodified) —
+  confirmed correct seller identity, buyer identity (composed from the
+  structured address fields into "5 avenue des Champs, 75008 Paris,
+  FR"), line data, VAT breakdown, HT/TVA/TTC totals (1 000,00 €/
+  200,00 €/1 200,00 €), and the three L441-10 notices rendering in
+  full French text. Clicked "Télécharger Factur-X" — a real `GET
+  .../factur-x` request returned **HTTP 200** (confirmed via network
+  inspection), proving the full backend XSD/Schematron validation
+  pipeline passes live through the frontend trigger, not just the
+  earlier `ts-node`/curl checks. Clicked "Créer un avoir" — confirmed
+  the pre-seeded editor (client pre-selected and disabled, empty line
+  items by design — avoir lines are entered independently, not copied)
+  — filled and saved it as a draft, reopened it to confirm the data
+  round-tripped correctly, then finalized it: the result showed "Avoir
+  n° 7 — rectifie la facture n° 6" with the correctly mirrored totals
+  (500,00 €/100,00 €/600,00 €) and the "Créer un avoir" button
+  correctly hidden (a credit note can't itself be corrected the same
+  way). **MC-jurisdiction, live-verified**: switching the company
+  selector to the Monaco demo company showed the amber warning banner
+  on `/factures`; a DRAFT invoice was created successfully there
+  (client "Client Test MC", line items filled); attempting to finalize
+  it surfaced the exact `NotImplementedException` message as an error
+  banner in `FinalizeSection` — *"Monaco invoicing rules pending
+  official confirmation — see specs/invoicing-plan.md §1.6..."* —
+  confirming the backend guard's message reaches the UI verbatim, not
+  paraphrased. All test data cleaned up afterward: both FR test
+  invoices' posted écritures reversed and validated (confirmed via the
+  liasse's own Actif=Passif check afterward: 39 375,00 = 39 375,00),
+  their `Invoice`/`InvoiceLine` rows removed via a temporary script
+  (no delete endpoint exists for a FINALIZED invoice, by design); the
+  Monaco test draft deleted through the ordinary UI delete action
+  (confirming the bug fix above in the same pass that found it).
+- `tsc`/`eslint`/`vite build` clean on the frontend; full backend
+  suite (661 tests, after the `@HttpCode` fix) passing.
+- **Deferred, explicitly, same as the backend passes above**:
+  VAT-exempt Factur-X support, Monaco's actual rule content, `Account`
+  address/SIREN/RCI fields, Phase B (PA/e-transmission).
 
 ## Known scope boundaries
 

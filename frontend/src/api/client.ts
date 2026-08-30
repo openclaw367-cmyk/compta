@@ -116,12 +116,38 @@ async function requestBlob(path: string): Promise<Blob> {
   return response.blob();
 }
 
+export interface DownloadableBlob {
+  filename: string;
+  blob: Blob;
+}
+
+/**
+ * For binary download endpoints with a real filename (the Factur-X
+ * file) — like requestFile() but the body is a Blob (a PDF), not text.
+ * Same Content-Disposition/exposedHeaders dependency as requestFile().
+ */
+async function requestFileBlob(path: string): Promise<DownloadableBlob> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: companyHeaders(),
+  });
+  if (!response.ok) {
+    const body: unknown = await response.json();
+    throw new ApiError(body as ApiErrorBody);
+  }
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'download';
+  const blob = await response.blob();
+  return { filename, blob };
+}
+
 export const api = {
   get: <T>(path: string): Promise<T> => request<T>(path),
   post: <T>(path: string, data: unknown): Promise<T> =>
     request<T>(path, { method: 'POST', body: JSON.stringify(data) }),
   patch: <T>(path: string, data: unknown): Promise<T> =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(data) }),
+  put: <T>(path: string, data: unknown): Promise<T> =>
+    request<T>(path, { method: 'PUT', body: JSON.stringify(data) }),
   delete: <T>(path: string): Promise<T> => request<T>(path, { method: 'DELETE' }),
   postForm: <T>(path: string, formData: FormData): Promise<T> =>
     request<T>(path, { method: 'POST', body: formData }),
@@ -129,4 +155,5 @@ export const api = {
     request<T>(path, { method: 'PUT', body: formData }),
   getFile: (path: string): Promise<DownloadableFile> => requestFile(path),
   getBlob: (path: string): Promise<Blob> => requestBlob(path),
+  getFileBlob: (path: string): Promise<DownloadableBlob> => requestFileBlob(path),
 };

@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Put,
+  Res,
+} from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiParam, ApiProduces, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { CurrentCompany } from '../../common/tenant/current-company.decorator';
@@ -56,6 +67,7 @@ export class InvoicingController {
   @ApiOperation({ summary: 'Delete a DRAFT invoice. Rejects a FINALIZED invoice.' })
   @ApiParam({ name: 'id' })
   @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
   remove(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
     return this.invoicingService.remove(company, id);
   }

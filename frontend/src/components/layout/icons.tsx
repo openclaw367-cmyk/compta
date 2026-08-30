@@ -238,3 +238,13 @@ export function IconPaperclip(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/** A receipt (zigzag bottom edge) — distinct from IconDocument's plain page, for invoicing/facturation. */
+export function IconInvoice(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M5.5 3h9v11l-1.5-1-1.5 1-1.5-1-1.5 1-1.5-1-1.5 1Z" />
+      <path d="M7.5 6.5h5M7.5 9h5M7.5 11.5h3" />
+    </svg>
+  );
+}
