@@ -277,10 +277,16 @@ describe('DepreciationService.disposeFixedAsset', () => {
     expect(result.vnc).toBe('7491.67');
     expect(result.plusOuMoinsValue).toBe('1508.33'); // 9000.00 - 7491.67
 
-    // FixedAsset marked disposed on the same row.
+    // FixedAsset marked disposed on the same row — cessionEcritureId is the real disposal
+    // écriture's own id, the Tier-3 traceability prerequisite (see CLAUDE.md "Traceability
+    // drill-down (Tier 3)").
     expect(prisma.fixedAsset.update).toHaveBeenCalledWith({
       where: { id: ASSET.id },
-      data: { cessionDate: new Date('2026-07-01'), cessionPrice: expect.anything() },
+      data: {
+        cessionDate: new Date('2026-07-01'),
+        cessionPrice: expect.anything(),
+        cessionEcritureId: expect.any(String),
+      },
     });
   });
 

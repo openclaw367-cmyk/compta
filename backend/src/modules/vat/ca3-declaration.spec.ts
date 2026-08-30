@@ -32,37 +32,163 @@ describe('computeCa3Declaration', () => {
     //   Ligne 25 (crédit) = null ; Ligne 28 = 43.00 ; Ligne 32 = 43.00
     const lignes: Ca3Ligne[] = [
       // Vente taux normal 20 % : HT 1000.00, TVA 200.00
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('1000.00'), vatRateId: RATE_20 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('200.00'), vatRateId: RATE_20 },
-      { compteNumber: '411000', pcgClass: 4, debit: d('1200.00'), credit: d('0.00'), vatRateId: null },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('1000.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('200.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '411000',
+        pcgClass: 4,
+        debit: d('1200.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
       // Vente taux réduit 10 % : HT 500.00, TVA 50.00
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('500.00'), vatRateId: RATE_10 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('50.00'), vatRateId: RATE_10 },
-      { compteNumber: '411000', pcgClass: 4, debit: d('550.00'), credit: d('0.00'), vatRateId: null },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('500.00'),
+        vatRateId: RATE_10,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('50.00'),
+        vatRateId: RATE_10,
+      },
+      {
+        compteNumber: '411000',
+        pcgClass: 4,
+        debit: d('550.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
       // Vente taux réduit 5,5 % : HT 200.00, TVA 11.00
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('200.00'), vatRateId: RATE_5_5 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('11.00'), vatRateId: RATE_5_5 },
-      { compteNumber: '411000', pcgClass: 4, debit: d('211.00'), credit: d('0.00'), vatRateId: null },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('200.00'),
+        vatRateId: RATE_5_5,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('11.00'),
+        vatRateId: RATE_5_5,
+      },
+      {
+        compteNumber: '411000',
+        pcgClass: 4,
+        debit: d('211.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
       // Vente T6 (2,1 % continentale) : HT 100.00, TVA 2.10
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('100.00'), vatRateId: RATE_2_1 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('2.10'), vatRateId: RATE_2_1 },
-      { compteNumber: '411000', pcgClass: 4, debit: d('102.10'), credit: d('0.00'), vatRateId: null },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('100.00'),
+        vatRateId: RATE_2_1,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('2.10'),
+        vatRateId: RATE_2_1,
+      },
+      {
+        compteNumber: '411000',
+        pcgClass: 4,
+        debit: d('102.10'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
       // Achat d'immobilisation : HT 800.00, TVA déductible 160.00
-      { compteNumber: '218300', pcgClass: 2, debit: d('800.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '445662', pcgClass: 4, debit: d('160.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '404000', pcgClass: 4, debit: d('0.00'), credit: d('960.00'), vatRateId: null },
+      {
+        compteNumber: '218300',
+        pcgClass: 2,
+        debit: d('800.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '445662',
+        pcgClass: 4,
+        debit: d('160.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '404000',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('960.00'),
+        vatRateId: null,
+      },
       // Achat de biens/services : HT 300.00, TVA déductible 60.00
-      { compteNumber: '607000', pcgClass: 6, debit: d('300.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '445660', pcgClass: 4, debit: d('60.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '401000', pcgClass: 4, debit: d('0.00'), credit: d('360.00'), vatRateId: null },
+      {
+        compteNumber: '607000',
+        pcgClass: 6,
+        debit: d('300.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '445660',
+        pcgClass: 4,
+        debit: d('60.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '401000',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('360.00'),
+        vatRateId: null,
+      },
     ];
 
     const result = computeCa3Declaration(lignes, VAT_RATES, '2026-01-01', '2026-01-31');
 
     expect(result.collecteeByRate).toEqual([
-      { ligne: '08', label: 'Taux normal 20 %', ratePercent: '20.00', baseHT: '1000.00', taxe: '200.00' },
-      { ligne: '9B', label: 'Taux réduit 10 %', ratePercent: '10.00', baseHT: '500.00', taxe: '50.00' },
-      { ligne: '09', label: 'Taux réduit 5,5 %', ratePercent: '5.50', baseHT: '200.00', taxe: '11.00' },
+      {
+        ligne: '08',
+        label: 'Taux normal 20 %',
+        ratePercent: '20.00',
+        baseHT: '1000.00',
+        taxe: '200.00',
+      },
+      {
+        ligne: '9B',
+        label: 'Taux réduit 10 %',
+        ratePercent: '10.00',
+        baseHT: '500.00',
+        taxe: '50.00',
+      },
+      {
+        ligne: '09',
+        label: 'Taux réduit 5,5 %',
+        ratePercent: '5.50',
+        baseHT: '200.00',
+        taxe: '11.00',
+      },
       {
         ligne: 'T6',
         label: 'Taux réduit 2,1 % (France continentale)',
@@ -85,9 +211,27 @@ describe('computeCa3Declaration', () => {
     // Hand-computed oracle: collectée 20% HT 100.00 / TVA 20.00 ; déductible immo 500.00.
     // Ligne 16 = 20.00 ; Ligne 23 = 500.00 ; 23 > 16 -> crédit (ligne 25) = 480.00, TD = null.
     const lignes: Ca3Ligne[] = [
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('100.00'), vatRateId: RATE_20 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('20.00'), vatRateId: RATE_20 },
-      { compteNumber: '445662', pcgClass: 4, debit: d('500.00'), credit: d('0.00'), vatRateId: null },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('100.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('20.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '445662',
+        pcgClass: 4,
+        debit: d('500.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
     ];
 
     const result = computeCa3Declaration(lignes, VAT_RATES, '2026-02-01', '2026-02-28');
@@ -103,8 +247,20 @@ describe('computeCa3Declaration', () => {
 
   it('rounds a precise .50 fraction up, per the notice\'s "0,50 compté pour 1" rule', () => {
     const lignes: Ca3Ligne[] = [
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('100.00'), vatRateId: RATE_20 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('20.50'), vatRateId: RATE_20 },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('100.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('20.50'),
+        vatRateId: RATE_20,
+      },
     ];
     const result = computeCa3Declaration(lignes, VAT_RATES, '2026-01-01', '2026-01-31');
     expect(result.collecteeByRate[0].taxe).toBe('21.00');
@@ -114,8 +270,20 @@ describe('computeCa3Declaration', () => {
 
   it('reports zero for an implemented rate with no activity in the period', () => {
     const lignes: Ca3Ligne[] = [
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('100.00'), vatRateId: RATE_20 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('20.00'), vatRateId: RATE_20 },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('100.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('20.00'),
+        vatRateId: RATE_20,
+      },
     ];
     const result = computeCa3Declaration(lignes, VAT_RATES, '2026-01-01', '2026-01-31');
     const line10 = result.collecteeByRate.find((r) => r.ligne === '9B')!;
@@ -125,7 +293,13 @@ describe('computeCa3Declaration', () => {
 
   it('refuses a TVA collectée line with no vatRateId', () => {
     const lignes: Ca3Ligne[] = [
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('20.00'), vatRateId: null },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('20.00'),
+        vatRateId: null,
+      },
     ];
     expect(() => computeCa3Declaration(lignes, VAT_RATES, '2026-01-01', '2026-01-31')).toThrow(
       /no vatRateId/,
@@ -134,8 +308,20 @@ describe('computeCa3Declaration', () => {
 
   it('refuses a rate that is not one of the four implemented rates', () => {
     const lignes: Ca3Ligne[] = [
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('100.00'), vatRateId: RATE_8_5_DOM },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('8.50'), vatRateId: RATE_8_5_DOM },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('100.00'),
+        vatRateId: RATE_8_5_DOM,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('8.50'),
+        vatRateId: RATE_8_5_DOM,
+      },
     ];
     expect(() => computeCa3Declaration(lignes, VAT_RATES, '2026-01-01', '2026-01-31')).toThrow(
       /not one of the currently-implemented CA3 rates/,
@@ -144,7 +330,13 @@ describe('computeCa3Declaration', () => {
 
   it('refuses a déductible 4456-prefixed account other than the two mapped ones', () => {
     const lignes: Ca3Ligne[] = [
-      { compteNumber: '445670', pcgClass: 4, debit: d('10.00'), credit: d('0.00'), vatRateId: null },
+      {
+        compteNumber: '445670',
+        pcgClass: 4,
+        debit: d('10.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
     ];
     expect(() => computeCa3Declaration(lignes, VAT_RATES, '2026-01-01', '2026-01-31')).toThrow(
       /not yet mapped to a CA3 line/,
@@ -154,7 +346,13 @@ describe('computeCa3Declaration', () => {
   it('refuses a negative bucket rather than silently reporting it, per "ne jamais indiquer de sommes négatives"', () => {
     // A credit note larger than the period's sales at that rate nets negative — deferred (régularisations).
     const lignes: Ca3Ligne[] = [
-      { compteNumber: '445710', pcgClass: 4, debit: d('50.00'), credit: d('10.00'), vatRateId: RATE_20 },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('50.00'),
+        credit: d('10.00'),
+        vatRateId: RATE_20,
+      },
     ];
     expect(() => computeCa3Declaration(lignes, VAT_RATES, '2026-01-01', '2026-01-31')).toThrow(
       /negative/,
@@ -163,8 +361,20 @@ describe('computeCa3Declaration', () => {
 
   it('ignores lines with no VAT relevance (untagged, non-VAT accounts)', () => {
     const lignes: Ca3Ligne[] = [
-      { compteNumber: '512000', pcgClass: 5, debit: d('1000.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('1000.00'), vatRateId: null }, // untagged revenue
+      {
+        compteNumber: '512000',
+        pcgClass: 5,
+        debit: d('1000.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('1000.00'),
+        vatRateId: null,
+      }, // untagged revenue
     ];
     const result = computeCa3Declaration(lignes, VAT_RATES, '2026-01-01', '2026-01-31');
     expect(result.ligne16).toBe('0.00');

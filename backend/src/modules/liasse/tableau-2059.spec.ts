@@ -15,10 +15,11 @@ describe('computeTableau2059A', () => {
     expect(result.note).toMatch(/Aucune cession/);
   });
 
-  it('computes Cadre A (valeur d\'origine / amortissements / valeur résiduelle) for a real disposal', () => {
+  it("computes Cadre A (valeur d'origine / amortissements / valeur résiduelle) for a real disposal", () => {
     const result = computeTableau2059A(
       [
         {
+          assetId: 'asset-1',
           accountNumber: '218200',
           cessionDate: new Date('2026-07-01'),
           cessionPrice: Money.fromString('9000.00'),
@@ -29,14 +30,21 @@ describe('computeTableau2059A', () => {
       FY_2026,
     );
     expect(result.cadreA).toEqual([
-      { accountNumber: '218200', valeurOrigine: '12000.00', amortissements: '4508.33', valeurResiduelle: '7491.67' },
+      {
+        assetId: 'asset-1',
+        accountNumber: '218200',
+        valeurOrigine: '12000.00',
+        amortissements: '4508.33',
+        valeurResiduelle: '7491.67',
+      },
     ]);
   });
 
-  it("computes Cadre B (prix de vente / montant global de la plus-value) with qualification left null", () => {
+  it('computes Cadre B (prix de vente / montant global de la plus-value) with qualification left null', () => {
     const result = computeTableau2059A(
       [
         {
+          assetId: 'asset-1',
           accountNumber: '218200',
           cessionDate: new Date('2026-07-01'),
           cessionPrice: Money.fromString('9000.00'),
@@ -47,7 +55,13 @@ describe('computeTableau2059A', () => {
       FY_2026,
     );
     expect(result.cadreB).toEqual([
-      { accountNumber: '218200', prixDeVente: '9000.00', plusOuMoinsValue: '1508.33', qualification: null },
+      {
+        assetId: 'asset-1',
+        accountNumber: '218200',
+        prixDeVente: '9000.00',
+        plusOuMoinsValue: '1508.33',
+        qualification: null,
+      },
     ]);
     expect(result.note).toMatch(/qualification fiscale/);
   });
@@ -56,6 +70,7 @@ describe('computeTableau2059A', () => {
     const result = computeTableau2059A(
       [
         {
+          assetId: 'asset-1',
           accountNumber: '218200',
           cessionDate: new Date('2026-07-01'),
           cessionPrice: Money.fromString('5000.00'),
@@ -72,6 +87,7 @@ describe('computeTableau2059A', () => {
     const result = computeTableau2059A(
       [
         {
+          assetId: 'asset-1',
           accountNumber: '218200',
           cessionDate: new Date('2026-07-01'),
           cessionPrice: Money.fromString('9000.00'),
@@ -79,6 +95,7 @@ describe('computeTableau2059A', () => {
           amortissementsCumules: Money.fromString('4508.33'),
         },
         {
+          assetId: 'asset-2',
           accountNumber: '218300',
           cessionDate: new Date('2026-03-01'),
           cessionPrice: Money.fromString('100.00'),
@@ -99,6 +116,7 @@ describe('computeTableau2059A', () => {
       computeTableau2059A(
         [
           {
+            assetId: 'asset-1',
             accountNumber: '218200',
             cessionDate: new Date('2025-07-01'),
             cessionPrice: Money.fromString('9000.00'),

@@ -54,7 +54,7 @@ reordered):
 1. **Bank reconciliation — Layer 1a (local statement import + matching engine)** — SHIPPED 2026-08-25
 2. **Bank reconciliation — Layer 1b (live aggregator connectivity)** — SHIPPED 2026-08-29, with a pre-ship blocker (real Bridge sandbox verification still needed)
 3. **Batch invoice review queue** — SHIPPED 2026-08-29. No technical dependency on 1/2; reused document attachment + `InvoiceExtractionService` + `propose_ecriture`'s validation gate, all already shipped — no new backend code needed at all.
-4. **Traceability drill-down — Tiers 1 AND 2 SHIPPED (both 2026-08-29).** No dependency on 1–3; already has its own detailed spec (folded in below); the "→ justificatif" extension (document attachments, shipped) is done as part of Tier 1. Tier 3+ not started, no scope decided yet — see the spec's own §4/§5 and CLAUDE.md's "Traceability drill-down (Tier 1)"/"(Tier 2)" sections.
+4. **Traceability drill-down — Tiers 1, 2, AND 3 SHIPPED (all 2026-08-29).** No dependency on 1–3; already has its own detailed spec (folded in below); the "→ justificatif" extension (document attachments, shipped) is done as part of Tier 1. Tier 3 (VAT rate lines, 2058 `WJ`/`WG`, 2059-A) was the spec's last defined tier — this feature's scope is now fully closed — see the spec's own §4/§5/§6 and CLAUDE.md's "Traceability drill-down (Tier 1)"/"(Tier 2)"/"(Tier 3)" sections.
 5. **Anomaly surfacing** — benefits from bank-rec (lettrage/matching data) and drill-down (to explain *why* something's flagged) existing first, though not hard-blocked by either.
 6. **Recurring entries / templates** — no dependency on anything above. Genuinely independent; flagged as the lowest-complexity gated item on this list, worth considering as a filler/quick-win if a later item stalls on a decision.
 7. **Reporting/export flexibility** — no dependency on anything above; enhances every report already shipped. Could run anytime.
@@ -313,13 +313,16 @@ here.
 
 ## 3. Traceability drill-down
 
-**Classification: GATED. Tiers 1 AND 2 SHIPPED (both 2026-08-29)** —
-see the spec's own §4/§5 and CLAUDE.md's "Traceability drill-down
-(Tier 1)"/"(Tier 2)" sections for the verification records. Reverse
-computation (line → accounts → écritures) sitting on top of several
-independently-forward-verified computations — a wrong reverse mapping
-is a wrong compliance artifact, not a cosmetic bug. Tier 3+ below
-remains unbuilt and unscheduled.
+**Classification: GATED. Tiers 1, 2, AND 3 SHIPPED (all 2026-08-29)** —
+see the spec's own §4/§5/§6 and CLAUDE.md's "Traceability drill-down
+(Tier 1)"/"(Tier 2)"/"(Tier 3)" sections for the verification records.
+Reverse computation (line → accounts → écritures) sitting on top of
+several independently-forward-verified computations — a wrong reverse
+mapping is a wrong compliance artifact, not a cosmetic bug. Tier 3 was
+the spec's own last defined tier (item 4 below, "Cash flow / Analyse
+financière," was explicitly deferred to its own follow-up conversation,
+never numbered as part of this feature's tiers) — this feature's scope
+is now fully closed.
 
 **Already fully scoped** in
 `specs/liasse-drilldown-traceability-implementation-spec.md` — that
@@ -343,17 +346,19 @@ design pass starts.
      hit and fixed once (`buildMaturityTotals()`'s own doc comment).
   2. **2054/2055/2056** (tier 2) — simpler than tier 1, no dual-nature
      landmine at all; could ship alongside tier 1.
-  3. **VAT rate lines, 2058 `WJ`/`WG`** (tier 3) — a new but small
-     rate-tagged query; `WJ`/`WG` reuse the already-proven single-
-     account pattern from VAT ligne 19/20 (already shipped).
-  4. **2059-A** — blocked on a real, previously-undiscovered schema
-     gap: `FixedAsset` has no stored reference to the écriture(s)
-     `disposeFixedAsset()` posted, so tracing a disposal row today
-     would mean *searching* by account+date+amount — which this app's
-     "never guess" discipline should reject. Needs a small additive
-     migration (a `cessionEcritureId`-shaped field) decided before this
-     tier can be built.
-  5. **Cash flow / Analyse financière** — explicitly deferred in the
+  3. **VAT rate lines, 2058 `WJ`/`WG`, and 2059-A** (tier 3, SHIPPED
+     2026-08-29) — all three shipped together as Tier 3, per CLAUDE.md's
+     "Traceability drill-down (Tier 3)". VAT's per-ligne rate tagging
+     (`EcritureLigne.vatRateId`) turned out to be the real new shape (the
+     same account can appear at multiple rates — confirmed live);
+     `WJ`/`WG` reused the already-proven single-account pattern from VAT
+     ligne 19/20 as predicted. 2059-A's schema gap (`FixedAsset` had no
+     stored reference to the écriture `disposeFixedAsset()` posted, so
+     tracing a disposal row would have meant *searching* by
+     account+date+amount) was closed first via a new nullable
+     `FixedAsset.cessionEcritureId` field, chosen over the alternatives
+     through `AskUserQuestion` before any Tier 3 code was written.
+  4. **Cash flow / Analyse financière** — explicitly deferred in the
      spec itself to its own follow-up conversation; most of its lines
      are deltas-between-fiscal-years or arithmetic-over-other-lines, a
      genuinely different "formula trace" UI shape from "here is a list

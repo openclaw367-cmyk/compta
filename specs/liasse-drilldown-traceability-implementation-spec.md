@@ -1,9 +1,11 @@
 # Drill-down traceability — "click any computed number, see what feeds it"
 
-**Status: Tiers 1 AND 2 SHIPPED (both 2026-08-29) — see §4/§5 at the
-end of this file for the verification summaries and CLAUDE.md's own
-"Traceability drill-down (Tier 1)"/"(Tier 2)" sections for the
-permanent record. Tier 3+ not started; no scope decided yet.** This
+**Status: Tiers 1, 2, AND 3 SHIPPED (all 2026-08-29) — see §4/§5/§6 at
+the end of this file for the verification summaries and CLAUDE.md's own
+"Traceability drill-down (Tier 1)"/"(Tier 2)"/"(Tier 3)" sections for
+the permanent record. Tier 3 was the last tier this spec ever defined
+— see §1 below, which never described a Tier 4 — so the feature's
+scope is now fully closed.** This
 was the gated item held back from the
 2026-08-24 autonomous UX pass (see that session's proposal list) — a
 REVERSE computation (line → accounts → écritures) sitting on top of
@@ -445,3 +447,53 @@ record — same pointer-not-duplicate discipline as §4 above.
   Tier 3 work begins. §3's numbered build order above (VAT rate lines,
   2058 `WJ`/`WG`, 2059-A once its schema decision is resolved) is the
   candidate shape for Tier 3, not yet confirmed.
+
+## 6. Tier 3 — SHIPPED (2026-08-29, same day)
+
+§3's candidate shape for Tier 3 shipped exactly as sketched: CA3 lignes
+08/09/9B/T6, 2058 `WJ`/`WG`, and 2059-A. See CLAUDE.md's own
+"Traceability drill-down (Tier 3)" section for the permanent, detailed
+record — same pointer-not-duplicate discipline as §4/§5 above.
+
+- **The one stated prerequisite (§1's Tier 3 section, the
+  `FixedAsset` cession-écriture-reference schema decision) was resolved
+  first, via `AskUserQuestion`**: the user chose "Add
+  `cessionEcritureId` now" — a new nullable `FixedAsset.cessionEcritureId`
+  field, set in `disposeFixedAsset()` alongside `cessionDate`/
+  `cessionPrice`. `ca3-declaration.ts`'s own constant exports
+  (`findImplementedRate()`, `IMPLEMENTED_RATES`, `COLLECTEE_PREFIX`,
+  `REVENUE_PCG_CLASS`), the OTHER stated Tier-3 prerequisite, were also
+  exported as part of this work, not a separate pass.
+- **Confirmed: no shared engine across the three, exactly as §1
+  predicted** — each trace function reuses whatever forward primitive
+  its own module already exposed (`findImplementedRate()` for CA3,
+  `CONFIRMABLE_LINE_ACCOUNT_PREFIXES` for 2058, `resolveCessionNature()`/
+  `CESSION_ACCOUNTS` for 2059-A), never a fourth shared abstraction
+  invented to unify them.
+- **The genuinely new shape §1 flagged for CA3 (a rate tagged PER-LIGNE,
+  not per-account) was the real risk, and it held live**: the same
+  account (`445710`) correctly split into two independent, correctly-
+  computed contributions at two different rates simultaneously (200,00 €
+  at ligne 08, 50,00 € at ligne 9B) — proven in the browser, not just by
+  reading the code.
+- **2059-A turned out to need no "sum ties to line" oracle at all**,
+  unlike every other tier — a genuinely different oracle shape (see
+  CLAUDE.md): each traceable column is already asset-level and resolves
+  to exactly one account, so the real content is resolving the RIGHT
+  account via the same forward primitive the disposal posting itself
+  used, not summing anything.
+- Verified two ways (new oracle-style tests across
+  `ca3-line-trace.spec.ts`, `resultat-fiscal-trace.spec.ts`,
+  `tableau-2059-trace.spec.ts`, plus `ResultatFiscalService`'s
+  first-ever service-level mocked-Prisma test file — 636 backend tests
+  passing overall, up from 609 after Tier 2); live against both required
+  companies via curl and, for CA3/2058, in the browser too — see
+  CLAUDE.md for the full verification summary, including the one honest
+  gap (the 2059-A frontend click-through wasn't completed live after the
+  browser session hit a hard rate limit mid-pass; the backend trace and
+  the reused, already-verified frontend components make this an
+  acceptable gap to ship with, not a blocker).
+- **This closes the feature's stated scope.** §1 never defined a Tier 4
+  — Tiers 1–3 were the complete plan. Any further drill-down work (e.g.
+  a period-to-fiscal-year resolver enabling CA3's own "→ écritures" hop)
+  is a new, separately-scoped feature.

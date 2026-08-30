@@ -153,13 +153,18 @@ export function computeMonacoDeclaration(
   const ratesById = new Map(vatRates.map((r) => [r.id, Money.fromDecimal(r.ratePercent)]));
 
   const buckets = new Map<string, { rate: ImplementedRate; baseHT: Money; taxe: Money }>(
-    IMPLEMENTED_RATES.map((rate) => [rate.label, { rate, baseHT: Money.zero(), taxe: Money.zero() }]),
+    IMPLEMENTED_RATES.map((rate) => [
+      rate.label,
+      { rate, baseHT: Money.zero(), taxe: Money.zero() },
+    ]),
   );
 
   function resolveBucket(vatRateId: string) {
     const ratePercent = ratesById.get(vatRateId);
     if (!ratePercent) {
-      throw new BadRequestException(`VAT rate ${vatRateId} referenced by a ledger line was not found.`);
+      throw new BadRequestException(
+        `VAT rate ${vatRateId} referenced by a ledger line was not found.`,
+      );
     }
     const implemented = findImplementedRate(ratePercent);
     return buckets.get(implemented.label)!;

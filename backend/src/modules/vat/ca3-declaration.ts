@@ -14,17 +14,19 @@ import { roundToNearestEuro } from './vat-rounding';
  */
 
 /** Ligne 19 — biens constituant des immobilisations (déductible), unambiguous, no rate split. */
-const DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT = '445662';
+export const DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT = '445662';
 /** Ligne 20 — autres biens et services (déductible), unambiguous, no rate split. */
-const DEDUCTIBLE_AUTRES_ACCOUNT = '445660';
+export const DEDUCTIBLE_AUTRES_ACCOUNT = '445660';
 /** Lignes 08/09/9B/T6 (collectée) — any account under 4457, not hardcoded to one id. */
-const COLLECTEE_PREFIX = '4457';
+export const COLLECTEE_PREFIX = '4457';
 /** Other 4456-prefixed accounts aren't mapped to a CA3 line yet. */
 const DEDUCTIBLE_PREFIX = '4456';
 /** Revenue lines feeding the base-HT-by-rate figures (lignes 08/09/9B/T6's "Base hors taxe" column). */
-const REVENUE_PCG_CLASS = 7;
+export const REVENUE_PCG_CLASS = 7;
 
-interface ImplementedRate {
+/** Exported (2026-08-29, Tier 3 prerequisite) so the traceability drill-down's reverse trace reuses
+ * the SAME rate classification the forward computation below uses — see ca3-line-trace.ts. */
+export interface ImplementedRate {
   /** CA3 line code, e.g. "08", "9B", "T6". */
   ligne: string;
   label: string;
@@ -38,11 +40,15 @@ interface ImplementedRate {
  * the rest of "taux particuliers" (DOM/Corse/produits pétroliers stay
  * deferred).
  */
-const IMPLEMENTED_RATES: ImplementedRate[] = [
+export const IMPLEMENTED_RATES: ImplementedRate[] = [
   { ligne: '08', label: 'Taux normal 20 %', ratePercent: Money.fromString('20.00') },
   { ligne: '9B', label: 'Taux réduit 10 %', ratePercent: Money.fromString('10.00') },
   { ligne: '09', label: 'Taux réduit 5,5 %', ratePercent: Money.fromString('5.50') },
-  { ligne: 'T6', label: 'Taux réduit 2,1 % (France continentale)', ratePercent: Money.fromString('2.10') },
+  {
+    ligne: 'T6',
+    label: 'Taux réduit 2,1 % (France continentale)',
+    ratePercent: Money.fromString('2.10'),
+  },
 ];
 
 export interface Ca3Ligne {
@@ -100,13 +106,13 @@ function assertNotNegative(amount: Money, description: string): void {
   }
 }
 
-function findImplementedRate(ratePercent: Money): ImplementedRate {
+export function findImplementedRate(ratePercent: Money): ImplementedRate {
   const match = IMPLEMENTED_RATES.find((r) => r.ratePercent.equals(ratePercent));
   if (!match) {
     throw new BadRequestException(
       `VAT rate ${ratePercent.toApiString()}% is not one of the currently-implemented CA3 rates ` +
         `(${IMPLEMENTED_RATES.map((r) => r.ratePercent.toApiString()).join('%, ')}%) — it falls under ` +
-        "a deferred category (DOM, Corse, produits pétroliers, or another taux particulier). See " +
+        'a deferred category (DOM, Corse, produits pétroliers, or another taux particulier). See ' +
         'specs/vat-ca3-implementation-spec.md.',
     );
   }
@@ -129,13 +135,18 @@ export function computeCa3Declaration(
   const ratesById = new Map(vatRates.map((r) => [r.id, Money.fromDecimal(r.ratePercent)]));
 
   const buckets = new Map<string, { rate: ImplementedRate; baseHT: Money; taxe: Money }>(
-    IMPLEMENTED_RATES.map((rate) => [rate.ligne, { rate, baseHT: Money.zero(), taxe: Money.zero() }]),
+    IMPLEMENTED_RATES.map((rate) => [
+      rate.ligne,
+      { rate, baseHT: Money.zero(), taxe: Money.zero() },
+    ]),
   );
 
   function resolveBucket(vatRateId: string) {
     const ratePercent = ratesById.get(vatRateId);
     if (!ratePercent) {
-      throw new BadRequestException(`VAT rate ${vatRateId} referenced by a ledger line was not found.`);
+      throw new BadRequestException(
+        `VAT rate ${vatRateId} referenced by a ledger line was not found.`,
+      );
     }
     const implemented = findImplementedRate(ratePercent);
     return buckets.get(implemented.ligne)!;

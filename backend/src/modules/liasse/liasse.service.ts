@@ -57,6 +57,8 @@ import { ProvisionMovementLigne, Tableau2056, computeTableau2056 } from './table
 import { PROVISION_ACCOUNT_CLASS_PREFIXES } from './provision-categories';
 import { Tableau2057, Tableau2057RawLigne, computeTableau2057 } from './tableau-2057';
 import { Tableau2059AAsset, Tableau2059A, computeTableau2059A } from './tableau-2059';
+import { traceTableau2059Column } from './tableau-2059-trace';
+import { Tableau2059TraceQueryDto } from './dto/tableau-2059-trace-query.dto';
 import {
   ImmobilisationMovementAssetWithId,
   Tableau2054TraceResult,
@@ -76,6 +78,23 @@ import {
 import { Tableau2054TraceQueryDto } from './dto/tableau-2054-trace-query.dto';
 import { Tableau2055TraceQueryDto } from './dto/tableau-2055-trace-query.dto';
 import { Tableau2056TraceQueryDto } from './dto/tableau-2056-trace-query.dto';
+
+/**
+ * Response shape for `traceTableau2059()` — see CLAUDE.md "Traceability
+ * drill-down". Unlike every other trace tier, this is a SINGLE
+ * account, never a list — a 2059-A row is already asset-level, so
+ * there's nothing to aggregate.
+ */
+export interface LiasseTableau2059TraceResult {
+  assetId: string;
+  assetLabel: string;
+  column: string;
+  columnValue: string;
+  fiscalYearId: string;
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+}
 
 /** One contributing account in a traceability drill-down — see `liasse-line-trace.ts`. */
 export interface TracedAccountWithId {
@@ -337,6 +356,67 @@ export class LiasseService {
   }
 
   /**
+   * Traceability drill-down, Tier 3 — 2059-A (plus/moins-values). See
+   * CLAUDE.md "Traceability drill-down" and `tableau-2059-trace.ts`'s
+   * own doc comment. REEL_NORMAL only, same reason as the annexe
+   * traces above. Keyed by `assetId`, not category+column, since a
+   * 2059-A row is already asset-level.
+   */
+  async traceTableau2059(
+    company: CompanyContext,
+    dto: Tableau2059TraceQueryDto,
+  ): Promise<LiasseTableau2059TraceResult> {
+    const ctx = await this.fetchLedgerContext(company, dto);
+    this.assertReelNormalOnly(ctx.companyRecord.regime, '2059-A');
+    const assets = await this.fetchImmobilisations(company, ctx.fiscalYear);
+    const asset = assets.find(
+      (a) =>
+        a.id === dto.assetId &&
+        a.cessionDate &&
+        a.cessionDate >= ctx.fiscalYear.startDate &&
+        a.cessionDate <= ctx.fiscalYear.endDate,
+    );
+    if (!asset) {
+      throw new NotFoundException(
+        `No disposed asset "${dto.assetId}" found within this fiscal year — 2059-A only covers ` +
+          'disposals dated within the reported year.',
+      );
+    }
+
+    const summary = computeFixedAssetSummary(asset, asset.depreciationEntries);
+    const trace = traceTableau2059Column(
+      asset.id,
+      asset.account.number,
+      asset.depreciationAccount.number,
+      summary.valeurBrute,
+      summary.amortissementsCumules,
+      Money.fromDecimal(asset.cessionPrice!),
+      dto.column,
+    );
+
+    const accountRow = await this.prisma.account.findFirst({
+      where: { companyId: company.companyId, number: trace.accountNumber },
+    });
+    if (!accountRow) {
+      throw new NotFoundException(
+        `Account "${trace.accountNumber}" was traced to 2059-A ${trace.column} but no longer ` +
+          'exists on this company.',
+      );
+    }
+
+    return {
+      assetId: trace.assetId,
+      assetLabel: asset.label,
+      column: trace.column,
+      columnValue: trace.columnValue,
+      fiscalYearId: ctx.fiscalYear.id,
+      accountId: accountRow.id,
+      accountNumber: accountRow.number,
+      accountLabel: accountRow.label,
+    };
+  }
+
+  /**
    * 2054/2055/2056 have no régime réel simplifié equivalent — see
    * CLAUDE.md "Liasse fiscale — régime réel simplifié (2033-series)".
    * `fetchLedgerContext()` already refuses any regime OTHER than
@@ -546,6 +626,7 @@ export class LiasseService {
     const tableau2059Assets: Tableau2059AAsset[] = assetsDisposedThisYear.map((asset) => {
       const summary = computeFixedAssetSummary(asset, asset.depreciationEntries);
       return {
+        assetId: asset.id,
         accountNumber: asset.account.number,
         cessionDate: asset.cessionDate!,
         cessionPrice: Money.fromDecimal(asset.cessionPrice!),

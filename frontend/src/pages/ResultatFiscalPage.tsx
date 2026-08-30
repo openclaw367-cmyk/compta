@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useEcritures, useGenerateResultatFiscal } from '../api/queries';
+import {
+  useEcritures,
+  useGenerateResultatFiscal,
+  useJournals,
+  useTraceResultatFiscalLine,
+} from '../api/queries';
 import type { ComputeResultatFiscalDto, DeclaredLineDto } from '../api/dto';
-import type { ResultatFiscalResult } from '../api/types';
+import type { Journal, ResultatFiscalResult, ResultatFiscalTraceCode } from '../api/types';
 import { ApiError } from '../api/client';
 import { useAppContext } from '../context/appContextStore';
 import { formatMoneyFr, normalizeMoneyInput, sanitizeAmountBuffer } from '../lib/money';
+import { AccountLedgerDrilldown } from '../components/ledger/AccountLedgerDrilldown';
+import { LineTraceDrilldown } from '../components/ledger/LineTraceDrilldown';
+
+const NO_JOURNALS: never[] = [];
 
 const NO_ECRITURES: never[] = [];
 
@@ -51,9 +60,11 @@ function toDeclaredLineDto(row: DeclaredRow): DeclaredLineDto {
 export function ResultatFiscalPage() {
   const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
   const ecrituresQuery = useEcritures();
+  const journalsQuery = useJournals();
   const generate = useGenerateResultatFiscal();
 
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
+  const journals = journalsQuery.data ?? NO_JOURNALS;
 
   const [error, setError] = useState<string[] | null>(null);
   const [hasGeneratedOnce, setHasGeneratedOnce] = useState(false);
@@ -201,6 +212,8 @@ export function ResultatFiscalPage() {
           <HonestyBanner />
           <ResultatComptableSection montant={result.resultatComptable} />
           <ReintegrationsSection
+            fiscalYearId={fiscalYearId!}
+            journals={journals}
             impotSurLesSocietes={result.impotSurLesSocietes}
             wj={wj}
             setWj={setWj}
@@ -308,6 +321,8 @@ function ResultatComptableSection({ montant }: { montant: string }) {
 // ---------------------------------------------------------------------------
 
 function ReintegrationsSection({
+  fiscalYearId,
+  journals,
   impotSurLesSocietes,
   wj,
   setWj,
@@ -319,6 +334,8 @@ function ReintegrationsSection({
   setDeclared,
   total,
 }: {
+  fiscalYearId: string;
+  journals: Journal[];
   impotSurLesSocietes: { code: string; label: string; montant: string };
   wj: ConfirmableState;
   setWj: (s: ConfirmableState) => void;
@@ -340,20 +357,11 @@ function ReintegrationsSection({
       <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
         <table className="w-full border-collapse text-[13px]">
           <tbody>
-            <tr className="border-b border-border">
-              <td className="px-4 py-2.5">
-                <div className="flex items-center gap-2">
-                  <Badge tone="computed">Calculé</Badge>
-                  <span className="text-ink">Impôt sur les sociétés (I7)</span>
-                </div>
-                <div className="mt-0.5 pl-[3.75rem] text-[11px] text-ink-faint">
-                  Compte 695 — non déductible du résultat, reporté directement du compte de résultat.
-                </div>
-              </td>
-              <td className="px-4 py-2.5 text-right tabular-nums text-ink">
-                {formatMoneyFr(impotSurLesSocietes.montant)}
-              </td>
-            </tr>
+            <I7Row
+              impotSurLesSocietes={impotSurLesSocietes}
+              fiscalYearId={fiscalYearId}
+              journals={journals}
+            />
             <ConfirmableRow
               code="WJ"
               label="Amendes et pénalités"
@@ -361,6 +369,8 @@ function ReintegrationsSection({
               state={wj}
               onChange={setWj}
               suggested={wjLigne?.suggested ?? '0.00'}
+              fiscalYearId={fiscalYearId}
+              journals={journals}
             />
             <ConfirmableRow
               code="WG"
@@ -369,6 +379,8 @@ function ReintegrationsSection({
               state={wg}
               onChange={setWg}
               suggested={wgLigne?.suggested ?? '0.00'}
+              fiscalYearId={fiscalYearId}
+              journals={journals}
             />
           </tbody>
         </table>
@@ -456,6 +468,144 @@ function ResultatFiscalTotal({ montant }: { montant: string }) {
 // shown explicitly so the user can never mistake "found" for "counted".
 // ---------------------------------------------------------------------------
 
+/**
+ * Traceability drill-down, Tier 3 — 2058 I7. Zero new backend work —
+ * I7 already just IS the compte de résultat's own HK line (compte
+ * 695), so this reuses Tier 1's `useTraceCdrLine()`/`LineTraceDrilldown`
+ * verbatim, `regime="REEL_NORMAL"` since résultat-fiscal.ts only ever
+ * reads the 2050-series CDR regardless of the company's own regime.
+ */
+function I7Row({
+  impotSurLesSocietes,
+  fiscalYearId,
+  journals,
+}: {
+  impotSurLesSocietes: { code: string; label: string; montant: string };
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <>
+      <tr
+        className="cursor-pointer border-b border-border hover:bg-bg"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <td className="px-4 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className="text-ink-faint">{expanded ? '▾' : '▸'}</span>
+            <Badge tone="computed">Calculé</Badge>
+            <span className="text-ink">Impôt sur les sociétés (I7)</span>
+          </div>
+          <div className="mt-0.5 pl-[3.75rem] text-[11px] text-ink-faint">
+            Compte 695 — non déductible du résultat, reporté directement du compte de résultat.
+          </div>
+        </td>
+        <td className="px-4 py-2.5 text-right tabular-nums text-ink">
+          {formatMoneyFr(impotSurLesSocietes.montant)}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={2} className="p-0">
+            <LineTraceDrilldown
+              family="cdr"
+              fiscalYearId={fiscalYearId}
+              lineCode="HK"
+              regime="REEL_NORMAL"
+              journals={journals}
+            />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/**
+ * Traceability drill-down, Tier 3 — 2058 WJ/WG. Traces the SUGGESTION
+ * only (see resultat-fiscal-trace.ts's own doc comment) — a manually-
+ * confirmed override has no ledger backing to trace, so this hop
+ * always shows what the ledger suggests, not necessarily what was
+ * confirmed.
+ */
+function ResultatFiscalTraceDrilldown({
+  fiscalYearId,
+  code,
+  journals,
+}: {
+  fiscalYearId: string;
+  code: ResultatFiscalTraceCode;
+  journals: Journal[];
+}) {
+  const query = useTraceResultatFiscalLine(fiscalYearId, code);
+  const [expandedAccountId, setExpandedAccountId] = useState<string | null>(null);
+  if (query.isPending) {
+    return (
+      <div className="border-t border-border bg-bg px-5 py-3 text-[12.5px] text-ink-faint">
+        Chargement…
+      </div>
+    );
+  }
+  if (query.isError || !query.data) {
+    const message =
+      query.error instanceof ApiError
+        ? query.error.details.join(' ')
+        : "Cette ligne n'a pas pu être tracée.";
+    return (
+      <div className="border-t border-border bg-bg px-5 py-3 text-[12.5px] italic text-ink-faint">
+        {message}
+      </div>
+    );
+  }
+  const { data } = query;
+  return (
+    <div className="border-t border-border bg-bg px-5 py-4">
+      <div className="mb-2.5 flex items-center justify-between text-[12.5px]">
+        <span className="font-semibold text-ink">
+          Comptes contribuant à la suggestion {data.code}
+        </span>
+        <span className="tabular-nums text-ink-muted">
+          Total tracé : <span className="font-medium text-ink">{formatMoneyFr(data.columnValue)}</span>
+        </span>
+      </div>
+      {data.accounts.length === 0 ? (
+        <p className="text-[12px] text-ink-faint">Aucun compte ne contribue à cette suggestion.</p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {data.accounts.map((a) => (
+            <div key={a.accountId} className="overflow-hidden rounded-md border border-border bg-surface">
+              <button
+                type="button"
+                onClick={() =>
+                  setExpandedAccountId((cur) => (cur === a.accountId ? null : a.accountId))
+                }
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] hover:bg-bg"
+              >
+                <span className="text-ink-faint">{expandedAccountId === a.accountId ? '▾' : '▸'}</span>
+                <span className="tabular-nums text-ink-muted">{a.accountNumber}</span>
+                <span className="min-w-0 flex-1 truncate text-ink">{a.accountLabel}</span>
+                <span className="tabular-nums font-medium text-ink">
+                  {formatMoneyFr(a.contribution)}
+                </span>
+              </button>
+              {expandedAccountId === a.accountId && (
+                <AccountLedgerDrilldown
+                  accountId={a.accountId}
+                  accountNumber={a.accountNumber}
+                  accountLabel={a.accountLabel}
+                  fiscalYearId={data.fiscalYearId}
+                  journals={journals}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ConfirmableRow({
   code,
   label,
@@ -463,15 +613,20 @@ function ConfirmableRow({
   state,
   onChange,
   suggested,
+  fiscalYearId,
+  journals,
 }: {
-  code: string;
+  code: ResultatFiscalTraceCode;
   label: string;
   caption: string;
   state: ConfirmableState;
   onChange: (s: ConfirmableState) => void;
   suggested: string;
+  fiscalYearId: string;
+  journals: Journal[];
 }) {
   const [buffer, setBuffer] = useState(() => formatMoneyFr(state.value).replace(' €', ''));
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     setBuffer(formatMoneyFr(state.value).replace(' €', ''));
@@ -487,46 +642,63 @@ function ConfirmableRow({
   }
 
   return (
-    <tr className="border-b border-border last:border-b-0">
-      <td className="px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          {state.confirmed ? <Badge tone="confirmed">Confirmé</Badge> : <Badge tone="unconfirmed">À confirmer</Badge>}
-          <span className="text-ink">
-            {label} ({code})
-          </span>
-        </div>
-        <div className="mt-0.5 pl-[3.75rem] text-[11px] text-ink-faint">
-          Trouvé dans la comptabilité : <strong>{formatMoneyFr(suggested)}</strong>. {caption}
-        </div>
-      </td>
-      <td className="px-4 py-2.5 text-right">
-        <div className="flex items-center justify-end gap-2">
-          <input
-            type="text"
-            inputMode="decimal"
-            value={buffer}
-            onChange={(e) => setBuffer(sanitizeAmountBuffer(e.target.value))}
-            onBlur={(e) => commitBuffer(e.target.value)}
-            className="w-28 rounded-md border border-border bg-surface px-2.5 py-1.5 text-right text-[13px] tabular-nums text-ink outline-none focus:border-accent"
-          />
-          <button
-            type="button"
-            onClick={() => onChange({ ...state, confirmed: !state.confirmed })}
-            className={[
-              'rounded-md px-3 py-1.5 text-[12.5px] font-medium',
-              state.confirmed
-                ? 'bg-bg text-ink-muted hover:bg-border-strong'
-                : 'bg-accent text-white hover:bg-accent-hover',
-            ].join(' ')}
-          >
-            {state.confirmed ? 'Modifier' : 'Confirmer'}
-          </button>
-        </div>
-        {!state.confirmed && (
-          <div className="mt-1 text-[11px] text-warning">Pas encore inclus dans le total (compte pour 0,00 €)</div>
-        )}
-      </td>
-    </tr>
+    <>
+      <tr className="border-b border-border last:border-b-0">
+        <td className="px-4 py-2.5">
+          <div className="flex items-center gap-2">
+            {state.confirmed ? <Badge tone="confirmed">Confirmé</Badge> : <Badge tone="unconfirmed">À confirmer</Badge>}
+            <span className="text-ink">
+              {label} ({code})
+            </span>
+          </div>
+          <div className="mt-0.5 pl-[3.75rem] text-[11px] text-ink-faint">
+            Trouvé dans la comptabilité :{' '}
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="font-medium text-ink underline decoration-dotted hover:text-accent"
+            >
+              {expanded ? '▾' : '▸'} {formatMoneyFr(suggested)}
+            </button>
+            . {caption}
+          </div>
+        </td>
+        <td className="px-4 py-2.5 text-right">
+          <div className="flex items-center justify-end gap-2">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={buffer}
+              onChange={(e) => setBuffer(sanitizeAmountBuffer(e.target.value))}
+              onBlur={(e) => commitBuffer(e.target.value)}
+              className="w-28 rounded-md border border-border bg-surface px-2.5 py-1.5 text-right text-[13px] tabular-nums text-ink outline-none focus:border-accent"
+            />
+            <button
+              type="button"
+              onClick={() => onChange({ ...state, confirmed: !state.confirmed })}
+              className={[
+                'rounded-md px-3 py-1.5 text-[12.5px] font-medium',
+                state.confirmed
+                  ? 'bg-bg text-ink-muted hover:bg-border-strong'
+                  : 'bg-accent text-white hover:bg-accent-hover',
+              ].join(' ')}
+            >
+              {state.confirmed ? 'Modifier' : 'Confirmer'}
+            </button>
+          </div>
+          {!state.confirmed && (
+            <div className="mt-1 text-[11px] text-warning">Pas encore inclus dans le total (compte pour 0,00 €)</div>
+          )}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={2} className="p-0">
+            <ResultatFiscalTraceDrilldown fiscalYearId={fiscalYearId} code={code} journals={journals} />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

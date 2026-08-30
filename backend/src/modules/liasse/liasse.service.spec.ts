@@ -422,6 +422,7 @@ describe('LiasseService.generate', () => {
 
     expect(result.tableau2059.cadreA).toEqual([
       {
+        assetId: 'asset-3',
         accountNumber: '215400',
         valeurOrigine: '30000.00',
         amortissements: '6000.00',
@@ -430,6 +431,7 @@ describe('LiasseService.generate', () => {
     ]);
     expect(result.tableau2059.cadreB).toEqual([
       {
+        assetId: 'asset-3',
         accountNumber: '215400',
         prixDeVente: '25000.00',
         plusOuMoinsValue: '1000.00',
@@ -917,7 +919,7 @@ describe('LiasseService.traceTableau2054 / traceTableau2055 / traceTableau2056',
     ]);
   });
 
-  it('refuses all three for a REEL_SIMPLIFIE company — no 2033-series equivalent exists', async () => {
+  it('refuses all four for a REEL_SIMPLIFIE company — no 2033-series equivalent exists', async () => {
     const prisma = makePrismaMock();
     prisma.company.findFirst.mockResolvedValue({ id: company.companyId, regime: 'REEL_SIMPLIFIE' });
     const svc = new LiasseService(prisma as unknown as PrismaService);
@@ -931,6 +933,86 @@ describe('LiasseService.traceTableau2054 / traceTableau2055 / traceTableau2056',
     await expect(
       svc.traceTableau2056(company, { ...dto, categoryCode: 'GARANTIES_CLIENTS', column: 'debut' }),
     ).rejects.toThrow(/régime réel simplifié/);
+    await expect(
+      svc.traceTableau2059(company, { ...dto, assetId: 'asset-x', column: 'valeurOrigine' }),
+    ).rejects.toThrow(/régime réel simplifié/);
+  });
+
+  it('traceTableau2059: resolves the real produit account (775200) for a disposed corporelle asset, keyed by assetId', async () => {
+    const disposedAsset: FakeFixedAsset = {
+      id: 'asset-disposed',
+      companyId: company.companyId,
+      accountId: 'account-218200',
+      account: { number: '218200' },
+      label: 'Camion',
+      depreciationAccount: {
+        id: 'dep-218200',
+        number: '281820',
+        label: 'Amortissements matériel de transport',
+      },
+      acquisitionDate: new Date('2025-01-01'),
+      acquisitionValue: new Prisma.Decimal('12000.00'),
+      residualValue: new Prisma.Decimal('0.00'),
+      cessionDate: new Date('2026-07-01'),
+      cessionPrice: new Prisma.Decimal('9000.00'),
+      depreciationEntries: [
+        {
+          id: 'entry-1',
+          fiscalYearId: FY_2026.id,
+          fiscalYear: { endDate: FY_2026.endDate },
+          amount: new Prisma.Decimal('4508.33'),
+          postedEcritureId: 'some-ecriture',
+        },
+      ],
+    };
+    const prisma = makePrismaMock([disposedAsset]);
+    (prisma as unknown as { account: unknown }).account = {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'acc-775200',
+        number: '775200',
+        label: 'Produits des cessions — corporelles',
+      }),
+    };
+    const svc = new LiasseService(prisma as unknown as PrismaService);
+
+    const result = await svc.traceTableau2059(company, {
+      fiscalYearId: FY_2026.id,
+      assetId: 'asset-disposed',
+      column: 'prixDeVente',
+    });
+
+    expect(result).toEqual({
+      assetId: 'asset-disposed',
+      assetLabel: 'Camion',
+      column: 'prixDeVente',
+      columnValue: '9000.00',
+      fiscalYearId: FY_2026.id,
+      accountId: 'acc-775200',
+      accountNumber: '775200',
+      accountLabel: 'Produits des cessions — corporelles',
+    });
+  });
+
+  it('traceTableau2059: refuses an assetId that is not disposed within the reported fiscal year', async () => {
+    const notDisposed: FakeFixedAsset = {
+      id: 'asset-not-disposed',
+      companyId: company.companyId,
+      accountId: 'account-218200',
+      account: { number: '218200' },
+      acquisitionDate: new Date('2025-01-01'),
+      acquisitionValue: new Prisma.Decimal('12000.00'),
+      residualValue: new Prisma.Decimal('0.00'),
+      depreciationEntries: [],
+    };
+    const prisma = makePrismaMock([notDisposed]);
+    const svc = new LiasseService(prisma as unknown as PrismaService);
+    await expect(
+      svc.traceTableau2059(company, {
+        fiscalYearId: FY_2026.id,
+        assetId: 'asset-not-disposed',
+        column: 'valeurOrigine',
+      }),
+    ).rejects.toThrow(/No disposed asset/);
   });
 });
 

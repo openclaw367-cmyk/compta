@@ -6,6 +6,7 @@ import {
   useGenerateLiasse,
   useGenerateLiasseSecondary,
   useJournals,
+  useTraceTableau2059,
 } from '../api/queries';
 import type {
   Bilan2033A,
@@ -28,12 +29,16 @@ import type {
   Tableau2057CadreALigne,
   Tableau2057CadreBLigne,
   Tableau2059A,
+  Tableau2059ACadreARow,
+  Tableau2059ACadreBRow,
+  Tableau2059TraceColumn,
 } from '../api/types';
 import { ApiError } from '../api/client';
 import { useAppContext } from '../context/appContextStore';
 import { addMoneyStrings, formatMoneyFr, subtractMoneyStrings } from '../lib/money';
 import { LineTraceDrilldown } from '../components/ledger/LineTraceDrilldown';
 import { MovementTraceDrilldown } from '../components/ledger/MovementTraceDrilldown';
+import { AccountLedgerDrilldown } from '../components/ledger/AccountLedgerDrilldown';
 
 const NO_ECRITURES: never[] = [];
 const NO_JOURNALS: never[] = [];
@@ -337,7 +342,7 @@ export function LiassePage() {
               <Tableau2056Section tableau2056={result.tableau2056} fiscalYearId={fiscalYearId!} fiscalYears={fiscalYears} journals={journals} />
               <Tableau2057ArticulationBanner bilan={result.bilan} tableau2057={result.tableau2057} />
               <Tableau2057Section tableau2057={result.tableau2057} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
-              <Tableau2059Section tableau2059={result.tableau2059} />
+              <Tableau2059Section tableau2059={result.tableau2059} fiscalYearId={fiscalYearId!} journals={journals} />
             </>
           ) : (
             <>
@@ -2211,7 +2216,76 @@ function Tableau2057CadreBRow({
 // a table with nothing in it.
 // ---------------------------------------------------------------------------
 
-function Tableau2059Section({ tableau2059 }: { tableau2059: Tableau2059A }) {
+/**
+ * Traceability drill-down, Tier 3 — 2059-A. Unlike every other trace
+ * tier's own drilldown, this always resolves to exactly ONE account (a
+ * 2059-A row is already asset-level) — so there's no intermediate
+ * "list of contributing accounts" step; a click renders the unmodified
+ * `AccountLedgerDrilldown` directly.
+ */
+function Tableau2059TraceDrilldown({
+  fiscalYearId,
+  assetId,
+  column,
+  journals,
+}: {
+  fiscalYearId: string;
+  assetId: string;
+  column: Tableau2059TraceColumn;
+  journals: Journal[];
+}) {
+  const query = useTraceTableau2059(fiscalYearId, assetId, column);
+  if (query.isPending) {
+    return (
+      <div className="border-t border-border bg-bg px-5 py-3 text-[12.5px] text-ink-faint">
+        Chargement…
+      </div>
+    );
+  }
+  if (query.isError || !query.data) {
+    const message =
+      query.error instanceof ApiError
+        ? query.error.details.join(' ')
+        : "Cette cellule n'a pas pu être tracée.";
+    return (
+      <div className="border-t border-border bg-bg px-5 py-3 text-[12.5px] italic text-ink-faint">
+        {message}
+      </div>
+    );
+  }
+  const { data } = query;
+  return (
+    <div className="border-t border-border bg-bg px-5 py-4">
+      <div className="mb-2.5 flex items-center justify-between text-[12.5px]">
+        <span className="font-semibold text-ink">
+          Compte tracé —{' '}
+          <span className="tabular-nums text-ink-muted">{data.accountNumber}</span>{' '}
+          {data.accountLabel}
+        </span>
+        <span className="tabular-nums text-ink-muted">
+          Total tracé : <span className="font-medium text-ink">{formatMoneyFr(data.columnValue)}</span>
+        </span>
+      </div>
+      <AccountLedgerDrilldown
+        accountId={data.accountId}
+        accountNumber={data.accountNumber}
+        accountLabel={data.accountLabel}
+        fiscalYearId={data.fiscalYearId}
+        journals={journals}
+      />
+    </div>
+  );
+}
+
+function Tableau2059Section({
+  tableau2059,
+  fiscalYearId,
+  journals,
+}: {
+  tableau2059: Tableau2059A;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
   const hasDisposals = tableau2059.cadreA.length > 0;
 
   return (
@@ -2239,22 +2313,12 @@ function Tableau2059Section({ tableau2059 }: { tableau2059: Tableau2059A }) {
               </thead>
               <tbody>
                 {tableau2059.cadreA.map((row) => (
-                  <tr key={row.accountNumber} className="border-b border-border last:border-b-0">
-                    <td className="px-4 py-2 text-ink">
-                      <span className="mr-2 font-medium tabular-nums text-ink-faint">
-                        {row.accountNumber}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-                      {formatMoneyFr(row.valeurOrigine)}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-                      {formatMoneyFr(row.amortissements)}
-                    </td>
-                    <td className="px-4 py-2 text-right tabular-nums text-ink">
-                      {formatMoneyFr(row.valeurResiduelle)}
-                    </td>
-                  </tr>
+                  <Tableau2059CadreARow
+                    key={row.assetId}
+                    row={row}
+                    fiscalYearId={fiscalYearId}
+                    journals={journals}
+                  />
                 ))}
               </tbody>
             </table>
@@ -2273,32 +2337,14 @@ function Tableau2059Section({ tableau2059 }: { tableau2059: Tableau2059A }) {
                 </tr>
               </thead>
               <tbody>
-                {tableau2059.cadreB.map((row) => {
-                  const isMoinsValue = row.plusOuMoinsValue.startsWith('-');
-                  return (
-                    <tr key={row.accountNumber} className="border-b border-border last:border-b-0">
-                      <td className="px-4 py-2 text-ink">
-                        <span className="mr-2 font-medium tabular-nums text-ink-faint">
-                          {row.accountNumber}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-right tabular-nums text-ink-muted">
-                        {formatMoneyFr(row.prixDeVente)}
-                      </td>
-                      <td
-                        className={[
-                          'px-4 py-2 text-right tabular-nums',
-                          isMoinsValue ? 'text-negative' : 'text-positive',
-                        ].join(' ')}
-                      >
-                        {formatMoneyFr(row.plusOuMoinsValue)}
-                      </td>
-                      <td className="px-4 py-2 text-right text-ink-faint">
-                        {row.qualification ?? 'non qualifiée'}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {tableau2059.cadreB.map((row) => (
+                  <Tableau2059CadreBRow
+                    key={row.assetId}
+                    row={row}
+                    fiscalYearId={fiscalYearId}
+                    journals={journals}
+                  />
+                ))}
                 <tr className="bg-bg">
                   <td className="px-4 py-2.5 font-semibold text-ink">TOTAL (non qualifié)</td>
                   <td className="px-4 py-2.5" />
@@ -2342,6 +2388,102 @@ function Tableau2059Section({ tableau2059 }: { tableau2059: Tableau2059A }) {
         </p>
       </div>
     </section>
+  );
+}
+
+function Tableau2059CadreARow({
+  row,
+  fiscalYearId,
+  journals,
+}: {
+  row: Tableau2059ACadreARow;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
+  const [expanded, setExpanded] = useState<'valeurOrigine' | 'amortissements' | null>(null);
+  const toggle = (column: 'valeurOrigine' | 'amortissements') =>
+    setExpanded((c) => (c === column ? null : column));
+  return (
+    <>
+      <tr className="border-b border-border last:border-b-0">
+        <td className="px-4 py-2 text-ink">
+          <span className="mr-2 font-medium tabular-nums text-ink-faint">{row.accountNumber}</span>
+        </td>
+        <MovementCell
+          value={row.valeurOrigine}
+          active={expanded === 'valeurOrigine'}
+          onClick={() => toggle('valeurOrigine')}
+        />
+        <MovementCell
+          value={row.amortissements}
+          active={expanded === 'amortissements'}
+          onClick={() => toggle('amortissements')}
+        />
+        <td className="px-4 py-2 text-right tabular-nums text-ink">
+          {formatMoneyFr(row.valeurResiduelle)}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={4} className="p-0">
+            <Tableau2059TraceDrilldown
+              fiscalYearId={fiscalYearId}
+              assetId={row.assetId}
+              column={expanded}
+              journals={journals}
+            />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function Tableau2059CadreBRow({
+  row,
+  fiscalYearId,
+  journals,
+}: {
+  row: Tableau2059ACadreBRow;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
+  const [expanded, setExpanded] = useState<'prixDeVente' | null>(null);
+  const isMoinsValue = row.plusOuMoinsValue.startsWith('-');
+  return (
+    <>
+      <tr className="border-b border-border last:border-b-0">
+        <td className="px-4 py-2 text-ink">
+          <span className="mr-2 font-medium tabular-nums text-ink-faint">{row.accountNumber}</span>
+        </td>
+        <MovementCell
+          value={row.prixDeVente}
+          active={expanded === 'prixDeVente'}
+          onClick={() => setExpanded((c) => (c === 'prixDeVente' ? null : 'prixDeVente'))}
+        />
+        <td
+          className={[
+            'px-4 py-2 text-right tabular-nums',
+            isMoinsValue ? 'text-negative' : 'text-positive',
+          ].join(' ')}
+        >
+          {formatMoneyFr(row.plusOuMoinsValue)}
+        </td>
+        <td className="px-4 py-2 text-right text-ink-faint">{row.qualification ?? 'non qualifiée'}</td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={4} className="p-0">
+            <Tableau2059TraceDrilldown
+              fiscalYearId={fiscalYearId}
+              assetId={row.assetId}
+              column={expanded}
+              journals={journals}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

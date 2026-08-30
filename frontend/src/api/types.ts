@@ -515,6 +515,8 @@ export interface Tableau2057 {
 
 /** Cadre A row shape (valeur résiduelle des éléments cédés) — "valeur nette réévaluée" and "amortissements en franchise d'impôt" aren't represented, see tableau-2059.ts's doc comment. */
 export interface Tableau2059ACadreARow {
+  /** Added 2026-08-29 for the traceability drill-down — 2059-A rows are keyed by asset, not account (accountNumber isn't unique if two disposed assets share a gross account). */
+  assetId: string;
   accountNumber: string;
   valeurOrigine: string;
   amortissements: string;
@@ -523,6 +525,7 @@ export interface Tableau2059ACadreARow {
 
 /** Cadre B row shape (plus-values/moins-values). `qualification` is always null — the court-terme/long-terme tax split isn't computed, see tableau-2059.ts's doc comment. */
 export interface Tableau2059ACadreBRow {
+  assetId: string;
   accountNumber: string;
   prixDeVente: string;
   plusOuMoinsValue: string;
@@ -1243,4 +1246,55 @@ export interface Tableau2056TraceResult {
   columnValue: string;
   fiscalYearId: string;
   accounts: Tableau2056AccountTrace[];
+}
+
+/**
+ * Traceability drill-down, Tier 3 — CA3 rate lines, 2058 WJ/WG, and
+ * 2059-A. See CLAUDE.md "Traceability drill-down".
+ */
+export type Ca3TraceColumn = 'baseHT' | 'taxe';
+
+export interface Ca3AccountTrace {
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  contribution: string;
+}
+
+export interface Ca3LineTraceResult {
+  ligne: string;
+  label: string;
+  column: Ca3TraceColumn;
+  columnValue: string;
+  accounts: Ca3AccountTrace[];
+}
+
+export type ResultatFiscalTraceCode = 'WJ' | 'WG';
+
+export interface ResultatFiscalTracedAccount {
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  contribution: string;
+}
+
+export interface ResultatFiscalLineTraceResult {
+  code: string;
+  label: string;
+  fiscalYearId: string;
+  columnValue: string;
+  accounts: ResultatFiscalTracedAccount[];
+}
+
+export type Tableau2059TraceColumn = 'valeurOrigine' | 'amortissements' | 'prixDeVente';
+
+export interface Tableau2059TraceResult {
+  assetId: string;
+  assetLabel: string;
+  column: Tableau2059TraceColumn;
+  columnValue: string;
+  fiscalYearId: string;
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
 }

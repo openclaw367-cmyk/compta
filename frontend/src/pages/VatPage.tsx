@@ -6,10 +6,11 @@ import {
   useComputeVatDeclaration,
   useCreateVatRate,
   useEcritures,
+  useTraceCa3Line,
   useVatRates,
 } from '../api/queries';
 import type { CreateVatRateDto } from '../api/dto';
-import type { Ca3Declaration, Ca3RateLine, FiscalYear } from '../api/types';
+import type { Ca3Declaration, Ca3RateLine, Ca3TraceColumn, FiscalYear } from '../api/types';
 import { ApiError } from '../api/client';
 import { formatMoneyFr, normalizeMoneyInput, sanitizeAmountBuffer } from '../lib/money';
 import { useAppContext } from '../context/appContextStore';
@@ -299,6 +300,145 @@ function DeclarationSection() {
   );
 }
 
+/**
+ * Traceability drill-down, Tier 3 — CA3 lignes 08/09/9B/T6. Each row
+ * has two independently-clickable cells (baseHT/taxe), same
+ * click-to-expand idiom as the liasse annexe tables. No "→ écritures"
+ * hop — see ca3-line-trace.ts's own doc comment on the backend for why
+ * a VAT declaration period can't cleanly reuse the fiscal-year-scoped
+ * AccountLedgerDrilldown; the account-level détail below is the honest
+ * bottom of this chain, stated in the UI rather than silently omitted.
+ */
+function Ca3CollecteeRow({
+  line,
+  periodStart,
+  periodEnd,
+}: {
+  line: Ca3RateLine;
+  periodStart: string;
+  periodEnd: string;
+}) {
+  const [expanded, setExpanded] = useState<Ca3TraceColumn | null>(null);
+  const toggle = (column: Ca3TraceColumn) => setExpanded((c) => (c === column ? null : column));
+  return (
+    <>
+      <tr className="border-b border-border last:border-b-0">
+        <td className="px-4 py-2.5 text-ink">
+          <span className="mr-2 font-medium tabular-nums text-ink-faint">{line.ligne}</span>
+          {line.label}
+        </td>
+        <td
+          role="button"
+          tabIndex={0}
+          onClick={() => toggle('baseHT')}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggle('baseHT')}
+          className={[
+            'cursor-pointer px-4 py-2.5 text-right tabular-nums',
+            expanded === 'baseHT' ? 'bg-accent-soft font-medium text-ink' : 'text-ink-muted hover:bg-bg',
+          ].join(' ')}
+        >
+          <span className="mr-1 text-ink-faint">{expanded === 'baseHT' ? '▾' : '▸'}</span>
+          {formatMoneyFr(line.baseHT)}
+        </td>
+        <td
+          role="button"
+          tabIndex={0}
+          onClick={() => toggle('taxe')}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && toggle('taxe')}
+          className={[
+            'cursor-pointer px-4 py-2.5 text-right tabular-nums',
+            expanded === 'taxe' ? 'bg-accent-soft font-medium text-ink' : 'text-ink hover:bg-bg',
+          ].join(' ')}
+        >
+          <span className="mr-1 text-ink-faint">{expanded === 'taxe' ? '▾' : '▸'}</span>
+          {formatMoneyFr(line.taxe)}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={3} className="p-0">
+            <Ca3LineTraceDrilldown
+              periodStart={periodStart}
+              periodEnd={periodEnd}
+              ligne={line.ligne}
+              column={expanded}
+            />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function Ca3LineTraceDrilldown({
+  periodStart,
+  periodEnd,
+  ligne,
+  column,
+}: {
+  periodStart: string;
+  periodEnd: string;
+  ligne: string;
+  column: Ca3TraceColumn;
+}) {
+  const query = useTraceCa3Line(periodStart, periodEnd, ligne, column);
+  if (query.isPending) {
+    return (
+      <div className="border-t border-border bg-bg px-5 py-3 text-[12.5px] text-ink-faint">
+        Chargement…
+      </div>
+    );
+  }
+  if (query.isError || !query.data) {
+    const message =
+      query.error instanceof ApiError
+        ? query.error.details.join(' ')
+        : "Cette cellule n'a pas pu être tracée.";
+    return (
+      <div className="border-t border-border bg-bg px-5 py-3 text-[12.5px] italic text-ink-faint">
+        {message}
+      </div>
+    );
+  }
+  const { data } = query;
+  return (
+    <div className="border-t border-border bg-bg px-5 py-4">
+      <div className="mb-2.5 flex items-center justify-between text-[12.5px]">
+        <span className="font-semibold text-ink">
+          Comptes contribuant à la ligne{' '}
+          <span className="tabular-nums text-ink-faint">{data.ligne}</span>
+        </span>
+        <span className="tabular-nums text-ink-muted">
+          Total tracé : <span className="font-medium text-ink">{formatMoneyFr(data.columnValue)}</span>
+        </span>
+      </div>
+      {data.accounts.length === 0 ? (
+        <p className="text-[12px] text-ink-faint">Aucun compte ne contribue à cette ligne.</p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {data.accounts.map((a) => (
+            <div
+              key={a.accountId}
+              className="flex items-center gap-2.5 rounded-md border border-border bg-surface px-3 py-2 text-[12.5px]"
+            >
+              <span className="tabular-nums text-ink-faint">{a.accountNumber}</span>
+              <span className="min-w-0 flex-1 truncate text-ink">{a.accountLabel}</span>
+              <span className="tabular-nums font-medium text-ink">
+                {formatMoneyFr(a.contribution)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="mt-2 text-[11.5px] italic text-ink-faint">
+        Détail au niveau du compte uniquement — une période de déclaration ne correspond pas
+        toujours à un seul exercice fiscal, donc les écritures individuelles ne sont pas affichées
+        ici.
+      </p>
+    </div>
+  );
+}
+
 function DeclarationResult({
   declaration,
   immobilisationsAccountId,
@@ -325,18 +465,12 @@ function DeclarationResult({
           </thead>
           <tbody>
             {collectee.map((line) => (
-              <tr key={line.ligne} className="border-b border-border last:border-b-0">
-                <td className="px-4 py-2.5 text-ink">
-                  <span className="mr-2 font-medium tabular-nums text-ink-faint">{line.ligne}</span>
-                  {line.label}
-                </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-ink-muted">
-                  {formatMoneyFr(line.baseHT)}
-                </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-ink">
-                  {formatMoneyFr(line.taxe)}
-                </td>
-              </tr>
+              <Ca3CollecteeRow
+                key={line.ligne}
+                line={line}
+                periodStart={declaration.periodStart}
+                periodEnd={declaration.periodEnd}
+              />
             ))}
             <tr className="bg-bg">
               <td className="px-4 py-2.5 font-semibold text-ink">

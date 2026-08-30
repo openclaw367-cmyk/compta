@@ -8,6 +8,7 @@ import { LineTraceQueryDto } from './dto/line-trace-query.dto';
 import { Tableau2054TraceQueryDto } from './dto/tableau-2054-trace-query.dto';
 import { Tableau2055TraceQueryDto } from './dto/tableau-2055-trace-query.dto';
 import { Tableau2056TraceQueryDto } from './dto/tableau-2056-trace-query.dto';
+import { Tableau2059TraceQueryDto } from './dto/tableau-2059-trace-query.dto';
 
 @ApiTags('liasse')
 @ApiHeader({
@@ -120,5 +121,22 @@ export class LiasseController {
     @Query() dto: Tableau2056TraceQueryDto,
   ) {
     return this.liasseService.traceTableau2056(company, dto);
+  }
+
+  @ApiOperation({
+    summary:
+      'Trace a 2059-A (plus/moins-values) row/column back to its one contributing account — Tier 3, see CLAUDE.md "Traceability drill-down".',
+    description:
+      'Keyed by assetId, not category+column — a 2059-A row is already asset-level. Every column ' +
+      '(valeurOrigine, amortissements, prixDeVente) is dated within the reported fiscal year by ' +
+      'construction, so all three get a real "→ écritures" hop. "valeurResiduelle" and ' +
+      '"plusOuMoinsValue" are never traceable — always derived. REEL_NORMAL only.',
+  })
+  @Get('tableau-2059-trace')
+  traceTableau2059(
+    @CurrentCompany() company: CompanyContext,
+    @Query() dto: Tableau2059TraceQueryDto,
+  ) {
+    return this.liasseService.traceTableau2059(company, dto);
   }
 }

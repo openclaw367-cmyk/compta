@@ -416,7 +416,11 @@ export class DepreciationService {
 
     await this.prisma.fixedAsset.update({
       where: { id: asset.id },
-      data: { cessionDate, cessionPrice: cessionPrice.toDecimal() },
+      data: {
+        cessionDate,
+        cessionPrice: cessionPrice.toDecimal(),
+        cessionEcritureId: validated.id,
+      },
     });
 
     return {

@@ -8,6 +8,8 @@ import type {
   BankStatementImport,
   BankStatementLine,
   Ca3Declaration,
+  Ca3LineTraceResult,
+  Ca3TraceColumn,
   CashFlowStatement,
   CessionResult,
   ChatMessage,
@@ -34,13 +36,17 @@ import type {
   LineTraceResult,
   LocalModelAvailability,
   Regime,
+  ResultatFiscalLineTraceResult,
   ResultatFiscalResult,
+  ResultatFiscalTraceCode,
   Tableau2054TraceColumn,
   Tableau2054TraceResult,
   Tableau2055TraceColumn,
   Tableau2055TraceResult,
   Tableau2056TraceColumn,
   Tableau2056TraceResult,
+  Tableau2059TraceColumn,
+  Tableau2059TraceResult,
   StatementLineMatchProposal,
   StatementPreviewResponse,
   TrialBalanceResponse,
@@ -613,6 +619,66 @@ export function useTraceTableau2056(
         `/liasse/tableau-2056-trace?fiscalYearId=${encodeURIComponent(fiscalYearId!)}&categoryCode=${encodeURIComponent(categoryCode!)}&column=${encodeURIComponent(column!)}`,
       ),
     enabled: Boolean(fiscalYearId && categoryCode && column),
+  });
+}
+
+/**
+ * Traceability drill-down, Tier 3 — 2059-A. Keyed by assetId, not
+ * category+column, since a 2059-A row is already asset-level.
+ */
+export function useTraceTableau2059(
+  fiscalYearId: string | null,
+  assetId: string | null,
+  column: Tableau2059TraceColumn | null,
+) {
+  return useQuery({
+    queryKey: ['liasse-tableau-2059-trace', fiscalYearId, assetId, column],
+    queryFn: () =>
+      api.get<Tableau2059TraceResult>(
+        `/liasse/tableau-2059-trace?fiscalYearId=${encodeURIComponent(fiscalYearId!)}&assetId=${encodeURIComponent(assetId!)}&column=${encodeURIComponent(column!)}`,
+      ),
+    enabled: Boolean(fiscalYearId && assetId && column),
+  });
+}
+
+/**
+ * Traceability drill-down, Tier 3 — CA3 lignes 08/09/9B/T6. Period-
+ * scoped (not fiscal-year-scoped) since it mirrors /vat/declaration's
+ * own period params — no "→ écritures" hop, see ca3-line-trace.ts's
+ * own doc comment for why.
+ */
+export function useTraceCa3Line(
+  periodStart: string | null,
+  periodEnd: string | null,
+  ligne: string | null,
+  column: Ca3TraceColumn | null,
+) {
+  return useQuery({
+    queryKey: ['ca3-line-trace', periodStart, periodEnd, ligne, column],
+    queryFn: () =>
+      api.get<Ca3LineTraceResult>(
+        `/vat/declaration/ca3-line-trace?periodStart=${encodeURIComponent(periodStart!)}&periodEnd=${encodeURIComponent(periodEnd!)}&ligne=${encodeURIComponent(ligne!)}&column=${encodeURIComponent(column!)}`,
+      ),
+    enabled: Boolean(periodStart && periodEnd && ligne && column),
+  });
+}
+
+/**
+ * Traceability drill-down, Tier 3 — 2058 WJ/WG (the ledger-suggested
+ * réintégrations). Traces the SUGGESTION only — a manually-confirmed
+ * override has no ledger backing to trace.
+ */
+export function useTraceResultatFiscalLine(
+  fiscalYearId: string | null,
+  code: ResultatFiscalTraceCode | null,
+) {
+  return useQuery({
+    queryKey: ['resultat-fiscal-trace', fiscalYearId, code],
+    queryFn: () =>
+      api.get<ResultatFiscalLineTraceResult>(
+        `/resultat-fiscal/trace?fiscalYearId=${encodeURIComponent(fiscalYearId!)}&code=${encodeURIComponent(code!)}`,
+      ),
+    enabled: Boolean(fiscalYearId && code),
   });
 }
 

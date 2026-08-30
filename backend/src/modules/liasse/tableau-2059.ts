@@ -31,6 +31,10 @@ import { Money } from '../../common/decimal';
  */
 
 export interface Tableau2059AAsset {
+  /** Added 2026-08-29 for the traceability drill-down's Tier 3 — 2059-A rows are keyed by
+   * accountNumber, which is NOT unique if two disposed assets in the same year share a gross
+   * account, so a trace request needs the asset's own real id to disambiguate which row was clicked. */
+  assetId: string;
   accountNumber: string;
   /** Guaranteed non-null and within the reported fiscal year — the caller pre-filters to disposals this year, same convention as 2054/2055/2056. */
   cessionDate: Date;
@@ -43,6 +47,7 @@ export interface Tableau2059AAsset {
 
 /** Cadre A row — valeur résiduelle des éléments cédés. See module doc comment for why "valeur nette réévaluée" and "amortissements en franchise d'impôt" aren't represented. */
 export interface Tableau2059ACadreARow {
+  assetId: string;
   accountNumber: string;
   valeurOrigine: string;
   amortissements: string;
@@ -51,6 +56,7 @@ export interface Tableau2059ACadreARow {
 
 /** Cadre B row — plus-values/moins-values. `qualification` is always null this pass — see module doc comment. */
 export interface Tableau2059ACadreBRow {
+  assetId: string;
   accountNumber: string;
   prixDeVente: string;
   plusOuMoinsValue: string;
@@ -72,12 +78,11 @@ export interface Tableau2059A {
 const NOTE =
   "La qualification fiscale (court terme / long terme / taxable à 19 %) n'est pas calculée : elle " +
   "dépend d'une analyse fiscale (durée de détention, nature du bien) que cette application ne fait " +
-  "pas. Le montant global de la plus ou moins-value par cession est calculé (prix de cession − " +
+  'pas. Le montant global de la plus ou moins-value par cession est calculé (prix de cession − ' +
   'valeur résiduelle) et apparaît dans « totalNonQualifie » plutôt que réparti entre CADRE A et ' +
   'CADRE B.';
 
-const EMPTY_NOTE =
-  "Aucune cession d'immobilisation n'a eu lieu au cours de cet exercice.";
+const EMPTY_NOTE = "Aucune cession d'immobilisation n'a eu lieu au cours de cet exercice.";
 
 /**
  * Pure computation, no I/O. `disposedAssets` must already be scoped by
@@ -102,6 +107,7 @@ export function computeTableau2059A(
   }
 
   const cadreA: Tableau2059ACadreARow[] = disposedAssets.map((asset) => ({
+    assetId: asset.assetId,
     accountNumber: asset.accountNumber,
     valeurOrigine: asset.valeurBrute.toApiString(),
     amortissements: asset.amortissementsCumules.toApiString(),
@@ -111,6 +117,7 @@ export function computeTableau2059A(
   const cadreB: Tableau2059ACadreBRow[] = disposedAssets.map((asset) => {
     const vnc = asset.valeurBrute.minus(asset.amortissementsCumules);
     return {
+      assetId: asset.assetId,
       accountNumber: asset.accountNumber,
       prixDeVente: asset.cessionPrice.toApiString(),
       plusOuMoinsValue: asset.cessionPrice.minus(vnc).toApiString(),

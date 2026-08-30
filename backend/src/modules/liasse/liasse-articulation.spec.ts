@@ -247,6 +247,7 @@ describe('assertTableau2059TiesToCompteResultat', () => {
     const tableau2059 = computeTableau2059A(
       [
         {
+          assetId: 'asset-1',
           accountNumber: '218200',
           cessionDate: new Date('2026-07-01'),
           cessionPrice: Money.fromString('9000.00'),

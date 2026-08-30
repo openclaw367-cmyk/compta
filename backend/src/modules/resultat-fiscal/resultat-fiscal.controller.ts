@@ -1,9 +1,10 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentCompany } from '../../common/tenant/current-company.decorator';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { ResultatFiscalService } from './resultat-fiscal.service';
 import { ComputeResultatFiscalDto } from './dto/compute-resultat-fiscal.dto';
+import { ResultatFiscalTraceQueryDto } from './dto/resultat-fiscal-trace-query.dto';
 
 @ApiTags('resultat-fiscal')
 @ApiHeader({
@@ -29,5 +30,22 @@ export class ResultatFiscalController {
   @Post('generate')
   generate(@CurrentCompany() company: CompanyContext, @Body() dto: ComputeResultatFiscalDto) {
     return this.resultatFiscalService.generate(company, dto);
+  }
+
+  @ApiOperation({
+    summary:
+      'Trace a 2058 WJ/WG suggestion back to its contributing accounts — Tier 3, see CLAUDE.md "Traceability drill-down".',
+    description:
+      'A genuine read (GET, auto-fetched on row expand). Only WJ/WG are traceable — every other ' +
+      "réintégration/déduction is user-declared, with no ledger source at all by this module's own " +
+      'design, and is never offered a drill-down affordance. Traces the SUGGESTION only, never a ' +
+      'manually-confirmed override (which may have no ledger backing at all).',
+  })
+  @Get('trace')
+  traceConfirmableLine(
+    @CurrentCompany() company: CompanyContext,
+    @Query() dto: ResultatFiscalTraceQueryDto,
+  ) {
+    return this.resultatFiscalService.traceConfirmableLine(company, dto);
   }
 }

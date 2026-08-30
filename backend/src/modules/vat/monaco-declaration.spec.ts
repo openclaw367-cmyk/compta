@@ -31,33 +31,159 @@ describe('computeMonacoDeclaration', () => {
     //   B1 (282.00) > B2 (150.00) -> ligne 48 (TVA nette due) = 282.00 - 150.00 = 132.00
     //   Ligne B3 (crédit) = null ; ligne 60 (total à payer) = 132.00
     const lignes: MonacoLigne[] = [
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('1000.00'), vatRateId: RATE_20 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('200.00'), vatRateId: RATE_20 },
-      { compteNumber: '411000', pcgClass: 4, debit: d('1200.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('500.00'), vatRateId: RATE_10 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('50.00'), vatRateId: RATE_10 },
-      { compteNumber: '411000', pcgClass: 4, debit: d('550.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('200.00'), vatRateId: RATE_5_5 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('11.00'), vatRateId: RATE_5_5 },
-      { compteNumber: '411000', pcgClass: 4, debit: d('211.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('1000.00'), vatRateId: RATE_2_1 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('21.00'), vatRateId: RATE_2_1 },
-      { compteNumber: '411000', pcgClass: 4, debit: d('1021.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '218300', pcgClass: 2, debit: d('450.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '445662', pcgClass: 4, debit: d('90.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '404000', pcgClass: 4, debit: d('0.00'), credit: d('540.00'), vatRateId: null },
-      { compteNumber: '607000', pcgClass: 6, debit: d('300.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '445660', pcgClass: 4, debit: d('60.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '401000', pcgClass: 4, debit: d('0.00'), credit: d('360.00'), vatRateId: null },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('1000.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('200.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '411000',
+        pcgClass: 4,
+        debit: d('1200.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('500.00'),
+        vatRateId: RATE_10,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('50.00'),
+        vatRateId: RATE_10,
+      },
+      {
+        compteNumber: '411000',
+        pcgClass: 4,
+        debit: d('550.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('200.00'),
+        vatRateId: RATE_5_5,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('11.00'),
+        vatRateId: RATE_5_5,
+      },
+      {
+        compteNumber: '411000',
+        pcgClass: 4,
+        debit: d('211.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('1000.00'),
+        vatRateId: RATE_2_1,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('21.00'),
+        vatRateId: RATE_2_1,
+      },
+      {
+        compteNumber: '411000',
+        pcgClass: 4,
+        debit: d('1021.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '218300',
+        pcgClass: 2,
+        debit: d('450.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '445662',
+        pcgClass: 4,
+        debit: d('90.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '404000',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('540.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '607000',
+        pcgClass: 6,
+        debit: d('300.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '445660',
+        pcgClass: 4,
+        debit: d('60.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '401000',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('360.00'),
+        vatRateId: null,
+      },
     ];
 
     const result = computeMonacoDeclaration(lignes, VAT_RATES, '2026-05-01', '2026-05-31');
 
     expect(result.collecteeByRate).toEqual([
-      { ligne: '30', label: 'Taux particulier 2,1 %', ratePercent: '2.10', baseHT: '1000.00', taxe: '21.00' },
+      {
+        ligne: '30',
+        label: 'Taux particulier 2,1 %',
+        ratePercent: '2.10',
+        baseHT: '1000.00',
+        taxe: '21.00',
+      },
       { ligne: '32', label: 'Taux réduit', ratePercent: '5.50', baseHT: '200.00', taxe: '11.00' },
-      { ligne: '32', label: 'Taux intermédiaire', ratePercent: '10.00', baseHT: '500.00', taxe: '50.00' },
-      { ligne: '32', label: 'Taux normal', ratePercent: '20.00', baseHT: '1000.00', taxe: '200.00' },
+      {
+        ligne: '32',
+        label: 'Taux intermédiaire',
+        ratePercent: '10.00',
+        baseHT: '500.00',
+        taxe: '50.00',
+      },
+      {
+        ligne: '32',
+        label: 'Taux normal',
+        ratePercent: '20.00',
+        baseHT: '1000.00',
+        taxe: '200.00',
+      },
     ]);
     expect(result.ligneB1).toBe('282.00');
     expect(result.ligne44).toBe('90.00');
@@ -72,9 +198,27 @@ describe('computeMonacoDeclaration', () => {
     // Hand-computed oracle: collectée 20% HT 100.00 / taxe 20.00 ; déductible immo 500.00.
     // Ligne B1 = 20.00 ; ligne B2 = 500.00 ; B2 > B1 -> crédit (ligne B3) = 480.00, ligne 48 = null, ligne 60 = 0.00.
     const lignes: MonacoLigne[] = [
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('100.00'), vatRateId: RATE_20 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('20.00'), vatRateId: RATE_20 },
-      { compteNumber: '445662', pcgClass: 4, debit: d('500.00'), credit: d('0.00'), vatRateId: null },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('100.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('20.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '445662',
+        pcgClass: 4,
+        debit: d('500.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
     ];
 
     const result = computeMonacoDeclaration(lignes, VAT_RATES, '2026-06-01', '2026-06-30');
@@ -89,8 +233,20 @@ describe('computeMonacoDeclaration', () => {
 
   it('rounds a precise .50 fraction up', () => {
     const lignes: MonacoLigne[] = [
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('100.00'), vatRateId: RATE_20 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('20.50'), vatRateId: RATE_20 },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('100.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('20.50'),
+        vatRateId: RATE_20,
+      },
     ];
     const result = computeMonacoDeclaration(lignes, VAT_RATES, '2026-05-01', '2026-05-31');
     const normal = result.collecteeByRate.find((r) => r.label === 'Taux normal')!;
@@ -101,8 +257,20 @@ describe('computeMonacoDeclaration', () => {
 
   it('reports zero for an implemented rate with no activity in the period', () => {
     const lignes: MonacoLigne[] = [
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('100.00'), vatRateId: RATE_20 },
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('20.00'), vatRateId: RATE_20 },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('100.00'),
+        vatRateId: RATE_20,
+      },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('20.00'),
+        vatRateId: RATE_20,
+      },
     ];
     const result = computeMonacoDeclaration(lignes, VAT_RATES, '2026-05-01', '2026-05-31');
     const intermediaire = result.collecteeByRate.find((r) => r.label === 'Taux intermédiaire')!;
@@ -112,7 +280,13 @@ describe('computeMonacoDeclaration', () => {
 
   it('refuses a TVA collectée line with no vatRateId', () => {
     const lignes: MonacoLigne[] = [
-      { compteNumber: '445710', pcgClass: 4, debit: d('0.00'), credit: d('20.00'), vatRateId: null },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('0.00'),
+        credit: d('20.00'),
+        vatRateId: null,
+      },
     ];
     expect(() => computeMonacoDeclaration(lignes, VAT_RATES, '2026-05-01', '2026-05-31')).toThrow(
       /no vatRateId/,
@@ -143,7 +317,13 @@ describe('computeMonacoDeclaration', () => {
 
   it('refuses a déductible 4456-prefixed account other than the two mapped ones', () => {
     const lignes: MonacoLigne[] = [
-      { compteNumber: '445670', pcgClass: 4, debit: d('10.00'), credit: d('0.00'), vatRateId: null },
+      {
+        compteNumber: '445670',
+        pcgClass: 4,
+        debit: d('10.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
     ];
     expect(() => computeMonacoDeclaration(lignes, VAT_RATES, '2026-05-01', '2026-05-31')).toThrow(
       /not yet mapped to a Monaco line/,
@@ -152,7 +332,13 @@ describe('computeMonacoDeclaration', () => {
 
   it('refuses a negative bucket rather than silently reporting it', () => {
     const lignes: MonacoLigne[] = [
-      { compteNumber: '445710', pcgClass: 4, debit: d('50.00'), credit: d('10.00'), vatRateId: RATE_20 },
+      {
+        compteNumber: '445710',
+        pcgClass: 4,
+        debit: d('50.00'),
+        credit: d('10.00'),
+        vatRateId: RATE_20,
+      },
     ];
     expect(() => computeMonacoDeclaration(lignes, VAT_RATES, '2026-05-01', '2026-05-31')).toThrow(
       /negative/,
@@ -161,8 +347,20 @@ describe('computeMonacoDeclaration', () => {
 
   it('ignores lines with no VAT relevance (untagged, non-VAT accounts)', () => {
     const lignes: MonacoLigne[] = [
-      { compteNumber: '512000', pcgClass: 5, debit: d('1000.00'), credit: d('0.00'), vatRateId: null },
-      { compteNumber: '707000', pcgClass: 7, debit: d('0.00'), credit: d('1000.00'), vatRateId: null },
+      {
+        compteNumber: '512000',
+        pcgClass: 5,
+        debit: d('1000.00'),
+        credit: d('0.00'),
+        vatRateId: null,
+      },
+      {
+        compteNumber: '707000',
+        pcgClass: 7,
+        debit: d('0.00'),
+        credit: d('1000.00'),
+        vatRateId: null,
+      },
     ];
     const result = computeMonacoDeclaration(lignes, VAT_RATES, '2026-05-01', '2026-05-31');
     expect(result.ligneB1).toBe('0.00');

@@ -3030,6 +3030,145 @@ before Tier 3.
   etc.) are ALSO a stated Tier-3 prerequisite per that same §0, not yet
   done). See the spec's own §3/§4 for the full build-order reasoning.
 
+## Traceability drill-down (Tier 3)
+
+`backend/src/modules/vat/ca3-line-trace.ts` /
+`backend/src/modules/resultat-fiscal/resultat-fiscal-trace.ts` /
+`backend/src/modules/liasse/tableau-2059-trace.ts` (as of 2026-08-29,
+same day as Tiers 1/2) close out the three lines Tier 2 explicitly
+deferred: CA3 lignes 08/09/9B/T6 (collectée by rate), 2058 `WJ`/`WG`
+(the ledger-suggested confirmable réintégrations), and 2059-A
+(plus/moins-values). Per the spec's own framing, this tier has **no
+shared engine at all** — each of the three is genuinely separate, using
+whatever forward primitive that module already exposed, never a new
+one written just for tracing.
+
+- **The one real prerequisite, closed before any trace code was
+  written**: `FixedAsset.cessionEcritureId String?` (new nullable
+  field, migration `20260829210140_add_fixed_asset_cession_ecriture_id`),
+  set in `DepreciationService.disposeFixedAsset()` alongside
+  `cessionDate`/`cessionPrice` — the écriture the disposal itself
+  posted. Without it, tracing a 2059-A row would mean *searching* for
+  the disposal écriture by account+date+amount, which this app's own
+  "never guess" discipline already rejects for every other trace tier.
+  The user chose "Add `cessionEcritureId` now" over alternatives via
+  `AskUserQuestion` before any build work started.
+- **CA3 (lignes 08/09/9B/T6, `traceCa3RateColumn()`)** — the hardest of
+  the three, and the only one with a genuinely new reverse-mapping
+  shape: a rate is tagged PER-LIGNE (`EcritureLigne.vatRateId`), not
+  pinned to one account, so the **same account can appear at multiple
+  different rates** — verified live (see below): account `445710` split
+  into 200,00 € (ligne 08, 20 %) and 50,00 € (ligne 9B, 5,5 %)
+  simultaneously, both correct. `findImplementedRate()` and the
+  `COLLECTEE_PREFIX`/`IMPLEMENTED_RATES`/`REVENUE_PCG_CLASS` constants
+  (all now exported from `ca3-declaration.ts`, per the Tier 2 gap this
+  closes) are the exact same forward primitives
+  `computeCa3Declaration()` already used — reused verbatim, no
+  separately-written rate resolution. The oracle re-runs the FULL
+  forward `computeCa3Declaration()` and compares against its own
+  already-rounded `collecteeByRate` figure for the exact (ligne,
+  column) — rounding applied only once, at the same declaration-line
+  boundary the forward computation uses, never to a raw per-account
+  contribution (same discipline `roundToNearestEuro()`'s own doc
+  comment requires elsewhere in this module). **Deliberately no
+  "→ écritures" hop this pass** — a CA3 period doesn't necessarily
+  align with one fiscal year, and resolving "which fiscal year(s) cover
+  this period" needs either a new date-range lookup or a genuinely new
+  period-scoped écriture-list endpoint, out of this pass's "new but
+  small" scope; the account-level détail (which DOES tie to the line)
+  is the honest bottom of this chain, same "stop at the honest bottom"
+  precedent as 2054's own undrillable "début" column in Tier 2.
+- **2058 `WJ`/`WG` (`traceConfirmableLine()`)** — the simplest of the
+  three, reusing `CONFIRMABLE_LINE_ACCOUNT_PREFIXES` (the exact same
+  constant `resultat-fiscal.service.ts`'s own suggestion sums are built
+  from) to filter the closing trial balance's charges accounts by
+  prefix. **Traces the SUGGESTION only, never a manual override** —
+  `ConfirmableLigne.confirmed` may be a caller-entered value with no
+  ledger backing at all (that's the entire point of the confirm step),
+  so there is nothing honest to trace for an overridden amount. The
+  oracle independently re-filters+re-sums the same closing-charges
+  trial balance a second time and compares against the trace's own
+  internal sum — a fresh derivation, not the same call checked against
+  itself. `ResultatFiscalService` gained its **first-ever service-level
+  (mocked-Prisma) test file** in this pass
+  (`resultat-fiscal.service.spec.ts`, 4 tests) — no service-layer
+  coverage existed at all before, only the pure `resultat-fiscal.ts`/
+  `resultat-fiscal-trace.ts` functions were tested; added to cover the
+  new `fetchClosingContext()` extraction, the double-derivation oracle,
+  and the account-id resolution pass with real safety, not just the
+  pure compute logic.
+- **2059-A (`traceTableau2059Column()`)** — structurally different from
+  every other trace tier, including the rest of Tier 3: a 2059-A row is
+  ALREADY asset-level (one row per disposed asset, never a category
+  aggregate), so there is no "list of contributing items" to build at
+  all — each of the three traceable columns
+  (`valeurOrigine`/`amortissements`/`prixDeVente`) resolves to exactly
+  ONE account. No separate "sum vs. official total" oracle check is
+  needed the way the other two tiers' category aggregates required —
+  the real content is resolving the RIGHT account, via
+  `resolveCessionNature()`/`CESSION_ACCOUNTS` from
+  `cession-invariants.ts` (the exact same forward primitive
+  `DepreciationService.disposeFixedAsset()` used to decide which 775x
+  account to credit), never guessed or re-derived separately. All three
+  columns ARE dated within the reported fiscal year by construction
+  (`computeTableau2059A()` already asserts every disposal falls inside
+  it), so — unlike 2054's own "début" — every column here gets a real
+  "→ écritures" hop, scoped to `(accountNumber, reportedFiscalYear)`.
+  Rows are now keyed by `assetId` (added to
+  `Tableau2059AAsset`/`Tableau2059ACadreARow`, since `accountNumber`
+  alone isn't unique when two disposed assets in the same year share a
+  gross account).
+- **New GET endpoints, same auto-fetched-on-expand discipline as Tiers
+  1/2**: `GET /vat/ca3-line-trace`, `GET /resultat-fiscal/trace`, `GET
+  /liasse/tableau-2059-trace`.
+- **Frontend**: `Ca3LineTraceDrilldown` (`VatPage.tsx`) on each rate row
+  of the collectée-by-rate table; `ResultatFiscalTraceDrilldown`
+  (`ResultatFiscalPage.tsx`) on the WJ/WG confirmable lines, rendering
+  an honest "Aucun compte ne contribue à cette suggestion." when the
+  trace is genuinely empty rather than hiding the row — verified live
+  in the browser, not just via curl; `Tableau2059TraceDrilldown`
+  (`LiassePage.tsx`) on each Cadre A/B cell, reusing the unmodified
+  `AccountLedgerDrilldown` for the écriture hop exactly like the rest
+  of this app's drill-downs.
+- **Verified two ways, on both required companies.** New oracle-style
+  tests: `ca3-line-trace.spec.ts`, `resultat-fiscal-trace.spec.ts`
+  (pure), `resultat-fiscal.service.spec.ts` (new service-level mocked-
+  Prisma coverage, 4 tests — WJ ties to a real account excluding an
+  unrelated class-6 account, an honest 0,00/empty-list case, the
+  draft-block guard, and a `NotFoundException` when a traced account
+  number no longer resolves to a real row), `tableau-2059-trace.spec.ts`
+  — 636 backend tests passing overall (up from 609 after Tier 2);
+  `tsc`/`eslint`/`vite build` clean on both sides. Live: the VAT rate
+  split (`445710` at 200,00 €/ligne 08 vs. 50,00 €/ligne 9B
+  simultaneously, full CA3 figures ligne16=250/ligne19=90/ligne20=60/
+  ligne23=150/ligneTD=100 matching the documented seed-sample dataset)
+  and WJ's honest-zero suggestion both confirmed live in the browser
+  against the FR demo company, plus a full écriture create → validate →
+  trace (150,00 €, resolving the real `6712` account) → reverse →
+  validate-reversal → re-trace (back to 0,00, empty accounts) cycle
+  proving the WJ trace tracks live ledger state in both directions,
+  leaving the ledger exactly as it started. 2059-A verified live via
+  curl against "Société Test Multi-Année"'s Entrepôt C fixture — all
+  three columns (80000.00/`214000`, 1677.78/`281800`, 90000.00/
+  `775200`) matching CLAUDE.md's own already-documented cession figures
+  exactly, and the refusal case (an undisposed asset) correctly
+  returning a 404 naming the reason. **The 2059-A frontend click-through
+  (Cadre A/B cell → `Tableau2059TraceDrilldown` → `AccountLedgerDrilldown`)
+  was not completed in the browser this pass** — the browser session hit
+  a hard rate limit partway through Tier 3's live-verification pass, and
+  reconnecting failed afterward. Judged acceptable to ship without it:
+  the backend trace is proven correct via curl on real fixture data, and
+  `Tableau2059TraceDrilldown`/`AccountLedgerDrilldown` are the same,
+  already browser-verified components Tier 1/Tier 2 exercised
+  extensively for every other trace family — this is the one honest gap
+  in an otherwise two-ways-verified pass, worth a human glance in a
+  future session rather than blocking on it here.
+- **Tier 3 closes the drill-down feature's stated scope** — per the
+  reconciled spec, Tiers 1–3 were the full plan; no Tier 4 was ever
+  defined. Any further drill-down work (e.g. a genuine period-to-
+  fiscal-year resolver enabling CA3's own "→ écritures" hop) is a new,
+  separately-scoped feature, not a continuation of this one.
+
 ## Bank reconciliation — Layer 1a (statement import + matching + review)
 
 `src/modules/bank-accounts/` + `src/modules/bank-reconciliation/`

@@ -10,7 +10,9 @@ const company: CompanyContext = { companyId: 'company-1' };
 
 function makePrismaMock() {
   return {
-    company: { findFirst: jest.fn().mockResolvedValue({ id: company.companyId, jurisdiction: 'FR' }) },
+    company: {
+      findFirst: jest.fn().mockResolvedValue({ id: company.companyId, jurisdiction: 'FR' }),
+    },
     ecriture: { count: jest.fn().mockResolvedValue(0) },
     ecritureLigne: { findMany: jest.fn().mockResolvedValue([]) },
     vatRate: { findMany: jest.fn().mockResolvedValue([]) },
@@ -100,7 +102,10 @@ describe('VatService.computeDeclaration', () => {
   });
 
   it('scopes the lignes query to validated écritures within the period, company-scoped', async () => {
-    await service.computeDeclaration(company, { periodStart: '2026-01-01', periodEnd: '2026-01-31' });
+    await service.computeDeclaration(company, {
+      periodStart: '2026-01-01',
+      periodEnd: '2026-01-31',
+    });
 
     expect(prisma.ecriture.count).toHaveBeenCalledWith({
       where: {
@@ -119,7 +124,9 @@ describe('VatService.computeDeclaration', () => {
       },
       include: { compte: true },
     });
-    expect(prisma.vatRate.findMany).toHaveBeenCalledWith({ where: { companyId: company.companyId } });
+    expect(prisma.vatRate.findMany).toHaveBeenCalledWith({
+      where: { companyId: company.companyId },
+    });
   });
 
   it('delegates the fetched data to computeCa3Declaration and returns its result', async () => {
@@ -151,5 +158,83 @@ describe('VatService.computeDeclaration', () => {
     expect(result.ligne16).toBe('20.00');
     expect(result.ligneTD).toBe('20.00');
     expect(result.collecteeByRate.find((r) => r.ligne === '08')?.baseHT).toBe('100.00');
+  });
+});
+
+describe('VatService.traceCa3Line', () => {
+  let prisma: ReturnType<typeof makePrismaMock>;
+  let service: VatService;
+
+  beforeEach(() => {
+    prisma = makePrismaMock();
+    service = new VatService(prisma as unknown as PrismaService);
+  });
+
+  it('traces ligne 08/taxe, resolving real account ids/labels, ties to 20.00', async () => {
+    prisma.ecritureLigne.findMany.mockResolvedValue([
+      {
+        compteId: 'account-707',
+        compte: {
+          id: 'acc-707000',
+          number: '707000',
+          label: 'Ventes de marchandises',
+          pcgClass: 7,
+        },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('100.00'),
+        vatRateId: 'rate-20',
+      },
+      {
+        compteId: 'account-44571',
+        compte: { id: 'acc-445710', number: '445710', label: 'TVA collectée', pcgClass: 4 },
+        debit: new Prisma.Decimal('0.00'),
+        credit: new Prisma.Decimal('20.00'),
+        vatRateId: 'rate-20',
+      },
+    ]);
+    prisma.vatRate.findMany.mockResolvedValue([
+      { id: 'rate-20', ratePercent: new Prisma.Decimal('20.00') },
+    ]);
+
+    const result = await service.traceCa3Line(company, {
+      periodStart: '2026-01-01',
+      periodEnd: '2026-01-31',
+      ligne: '08',
+      column: 'taxe',
+    });
+
+    expect(result.columnValue).toBe('20.00');
+    expect(result.accounts).toEqual([
+      expect.objectContaining({
+        accountId: 'acc-445710',
+        accountNumber: '445710',
+        accountLabel: 'TVA collectée',
+        contribution: '20.00',
+      }),
+    ]);
+  });
+
+  it('refuses for a Monaco (MC) jurisdiction company — different rate-line shape, out of scope', async () => {
+    prisma.company.findFirst.mockResolvedValue({ id: company.companyId, jurisdiction: 'MC' });
+    await expect(
+      service.traceCa3Line(company, {
+        periodStart: '2026-01-01',
+        periodEnd: '2026-01-31',
+        ligne: '08',
+        column: 'taxe',
+      }),
+    ).rejects.toThrow(/Monaco/);
+  });
+
+  it('refuses to trace while a draft écriture exists in the period, same guard as computeDeclaration', async () => {
+    prisma.ecriture.count.mockResolvedValue(1);
+    await expect(
+      service.traceCa3Line(company, {
+        periodStart: '2026-01-01',
+        periodEnd: '2026-01-31',
+        ligne: '08',
+        column: 'taxe',
+      }),
+    ).rejects.toThrow(ConflictException);
   });
 });

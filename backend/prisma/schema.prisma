@@ -366,12 +366,18 @@ model FixedAsset {
   usefulLifeYears  Int
   method           DepreciationMethod @default(LINEAR)
 
-  /// Cession (disposal). Present from the start so the model doesn't need
-  /// retrofitting once disposal is built, but no cession logic (plus/moins-
-  /// value computation, posting the disposal écriture) exists yet — both
-  /// fields stay null until that feature lands. Not exposed on any DTO yet.
+  /// Cession (disposal) — real since 2026-08-15, see
+  /// DepreciationService.disposeFixedAsset(). All three fields stay null
+  /// until an asset is actually disposed.
   cessionDate  DateTime?
   cessionPrice Decimal?  @db.Decimal(15, 2)
+  /// The écriture disposeFixedAsset() posted for this disposal — a bare
+  /// nullable id, no @relation, same shape as DepreciationEntry's own
+  /// postedEcritureId. Added 2026-08-29 for the traceability drill-down's
+  /// Tier 3 (2059-A) — before this, tracing a 2059-A row would have meant
+  /// *searching* écritures by account+date+amount, which this app's own
+  /// "never guess" discipline rejects.
+  cessionEcritureId String?
 
   depreciationEntries DepreciationEntry[]
 
