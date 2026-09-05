@@ -2,20 +2,34 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Ecriture, Journal } from '../api/types';
+import type { CreateEcritureDto } from '../api/dto';
 import {
   useAccounts,
   useDeleteEcriture,
   useEcritures,
   useJournals,
+  useMarkTemplateApplied,
+  useRecurringTemplates,
   useReverseEcriture,
   useValidateEcriture,
 } from '../api/queries';
 import { ApiError } from '../api/client';
 import { EcrituresList } from '../components/journal/EcrituresList';
 import { EcritureEditor } from '../components/journal/EcritureEditor';
+import { ApplyTemplateDialog } from '../components/journal/ApplyTemplateDialog';
 import { useAppContext } from '../context/appContextStore';
 
-type EditorState = { mode: 'closed' } | { mode: 'new' } | { mode: 'edit'; ecriture: Ecriture };
+type EditorState =
+  | { mode: 'closed' }
+  | { mode: 'new' }
+  | { mode: 'edit'; ecriture: Ecriture }
+  | {
+      mode: 'new-from-template';
+      templateId: string;
+      journalId: string;
+      fiscalYearId: string;
+      prefill: CreateEcritureDto;
+    };
 
 // Stable empty-array fallbacks: `data ?? []` would create a new reference
 // every render even when `data` itself hasn't changed, which then makes
@@ -24,18 +38,22 @@ type EditorState = { mode: 'closed' } | { mode: 'new' } | { mode: 'edit'; ecritu
 const NO_JOURNALS: never[] = [];
 const NO_ACCOUNTS: never[] = [];
 const NO_ECRITURES: never[] = [];
+const NO_TEMPLATES: never[] = [];
 
 export function JournalEntriesPage() {
   const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
   const journalsQuery = useJournals();
   const accountsQuery = useAccounts();
   const ecrituresQuery = useEcritures();
+  const templatesQuery = useRecurringTemplates();
   const deleteEcriture = useDeleteEcriture();
   const validateEcriture = useValidateEcriture();
   const reverseEcriture = useReverseEcriture();
+  const markTemplateApplied = useMarkTemplateApplied();
 
   const [journalId, setJournalId] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState>({ mode: 'closed' });
+  const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionWarnings, setActionWarnings] = useState<string[] | null>(null);
@@ -47,6 +65,7 @@ export function JournalEntriesPage() {
   const journals = journalsQuery.data ?? NO_JOURNALS;
   const accounts = accountsQuery.data ?? NO_ACCOUNTS;
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
+  const templates = templatesQuery.data ?? NO_TEMPLATES;
 
   useEffect(() => {
     if (journalId) return;
@@ -201,15 +220,45 @@ export function JournalEntriesPage() {
             Saisie et consultation des écritures comptables par journal.
           </p>
         </div>
+        {templates.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowTemplateDialog(true)}
+            className="ml-auto rounded-md border border-border px-3.5 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-bg"
+          >
+            Depuis un modèle
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setEditor({ mode: 'new' })}
           disabled={!journalId || !fiscalYearId || Boolean(selectedFiscalYear?.closedAt)}
-          className="ml-auto rounded-md bg-accent px-3.5 py-2 text-[13px] font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
+          className={
+            templates.length > 0
+              ? 'rounded-md bg-accent px-3.5 py-2 text-[13px] font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint'
+              : 'ml-auto rounded-md bg-accent px-3.5 py-2 text-[13px] font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint'
+          }
         >
           + Nouvelle écriture
         </button>
       </header>
+
+      {showTemplateDialog && (
+        <ApplyTemplateDialog
+          templates={templates}
+          onClose={() => setShowTemplateDialog(false)}
+          onResolved={({ templateId, dto }) => {
+            setShowTemplateDialog(false);
+            setEditor({
+              mode: 'new-from-template',
+              templateId,
+              journalId: dto.journalId,
+              fiscalYearId: dto.fiscalYearId,
+              prefill: dto,
+            });
+          }}
+        />
+      )}
 
       <JournalTabs
         journals={journals}
@@ -246,7 +295,27 @@ export function JournalEntriesPage() {
         </Banner>
       )}
 
-      {editor.mode !== 'closed' && journalId && fiscalYearId && (
+      {editor.mode === 'new-from-template' && (
+        <EcritureEditor
+          key={`template-${editor.templateId}`}
+          journalId={editor.journalId}
+          fiscalYearId={editor.fiscalYearId}
+          accounts={accounts}
+          existing={null}
+          prefill={editor.prefill}
+          onSaved={(warnings) => {
+            const templateId = editor.templateId;
+            setEditor({ mode: 'closed' });
+            setActionWarnings(warnings.length > 0 ? warnings : null);
+            // Best-effort — the "next due" hint is purely informational,
+            // never worth blocking or rolling back an already-saved draft.
+            markTemplateApplied.mutate(templateId);
+          }}
+          onCancel={() => setEditor({ mode: 'closed' })}
+        />
+      )}
+
+      {(editor.mode === 'new' || editor.mode === 'edit') && journalId && fiscalYearId && (
         <EcritureEditor
           key={editor.mode === 'edit' ? editor.ecriture.id : 'new'}
           journalId={journalId}

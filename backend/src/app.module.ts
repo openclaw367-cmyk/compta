@@ -50,6 +50,8 @@ import { BankAggregatorModule } from './modules/bank-aggregator/bank-aggregator.
 import { BankAggregatorController } from './modules/bank-aggregator/bank-aggregator.controller';
 import { InvoicingModule } from './modules/invoicing/invoicing.module';
 import { InvoicingController } from './modules/invoicing/invoicing.controller';
+import { RecurringEntriesModule } from './modules/recurring-entries/recurring-entries.module';
+import { RecurringEntriesController } from './modules/recurring-entries/recurring-entries.controller';
 import { DevModule } from './modules/dev/dev.module';
 import { DevController } from './modules/dev/dev.controller';
 
@@ -87,6 +89,7 @@ const isProduction = process.env.NODE_ENV === 'production';
     BankReconciliationModule,
     BankAggregatorModule,
     InvoicingModule,
+    RecurringEntriesModule,
     ...(isProduction ? [] : [DevModule]),
   ],
 })
@@ -133,6 +136,7 @@ export class AppModule implements NestModule {
         BankReconciliationController,
         BankAggregatorController,
         InvoicingController,
+        RecurringEntriesController,
         ...(isProduction ? [] : [DevController]),
       );
   }

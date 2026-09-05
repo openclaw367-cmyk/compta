@@ -7,6 +7,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { JournalEntriesPage } from './pages/JournalEntriesPage';
 import { InvoicingPage } from './pages/InvoicingPage';
 import { BatchInvoiceQueuePage } from './pages/BatchInvoiceQueuePage';
+import { RecurringTemplatesPage } from './pages/RecurringTemplatesPage';
 import { FiscalYearsPage } from './pages/FiscalYearsPage';
 import { CompanyProfilePage } from './pages/CompanyProfilePage';
 import { AccountsJournalsPage } from './pages/AccountsJournalsPage';
@@ -47,6 +48,7 @@ export default function App() {
             <Route path="/ecritures" element={<JournalEntriesPage />} />
             <Route path="/factures" element={<InvoicingPage />} />
             <Route path="/factures/lot" element={<BatchInvoiceQueuePage />} />
+            <Route path="/modeles" element={<RecurringTemplatesPage />} />
             <Route path="/exercices" element={<FiscalYearsPage />} />
             <Route path="/tiers" element={<TiersPage />} />
             <Route path="/comptes" element={<AccountsJournalsPage />} />

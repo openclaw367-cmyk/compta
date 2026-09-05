@@ -989,6 +989,57 @@ export interface ProposedEcriture {
 }
 
 /**
+ * A saved template for a repeating écriture — see CLAUDE.md "Recurring
+ * entries / templates". `frequency`/`anchorDay`/`anchorMonth` are purely
+ * informational (feed `nextDueDate`'s "prochaine échéance" hint) —
+ * applying a template is always an explicit, on-demand action via
+ * POST .../preview, never auto-posted on a schedule.
+ */
+export type RecurrenceFrequency = 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
+
+export interface RecurringEntryTemplateLine {
+  id: string;
+  templateId: string;
+  order: number;
+  /** PCG account NUMBER (not id) — resolved to a live Account at apply-time. */
+  accountNumber: string;
+  auxAccountNumber: string | null;
+  vatRateId: string | null;
+  /** Money string, e.g. "1234.56". */
+  debit: string;
+  credit: string;
+}
+
+export interface RecurringEntryTemplate {
+  id: string;
+  companyId: string;
+  name: string;
+  journalId: string;
+  libelle: string;
+  frequency: RecurrenceFrequency | null;
+  anchorDay: number | null;
+  anchorMonth: number | null;
+  /** Stamped by the explicit POST .../mark-applied call — not an audit trail. */
+  lastAppliedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: RecurringEntryTemplateLine[];
+  /** Computed at read time from frequency/anchorDay/anchorMonth/lastAppliedAt — never stored. */
+  nextDueDate: string | null;
+}
+
+/**
+ * The response of POST .../preview — resolved but UNPERSISTED, same
+ * "never persists" discipline as ProposedEcriture above. `dto` is saved
+ * via the ordinary POST /entries (useCreateEcriture()), never a
+ * privileged write path.
+ */
+export interface RecurringEntryApplicationPreview {
+  dto: ProposedEcritureDto;
+  warnings: string[];
+}
+
+/**
  * Response for POST /documents/suggest-accounts — the "Comptable IA"
  * toggle's own explicit action (see CLAUDE.md "Supporting-document
  * attachments" — Layer 3). Reuses the SAME ProposedEcriture shape

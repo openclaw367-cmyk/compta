@@ -85,6 +85,16 @@ enum ImportStatus {
   FAILED
 }
 
+/// How often a RecurringEntryTemplate is expected to recur — purely
+/// informational (feeds computeNextDueDate()'s "next due" hint in the
+/// templates list), never drives auto-posting. See CLAUDE.md "Recurring
+/// entries / templates" — v1 is on-demand apply only, no scheduler.
+enum RecurrenceFrequency {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
 /// USER = what the person typed. ASSISTANT = the local model's reply,
 /// optionally carrying toolCalls it wants executed before it can finish
 /// answering. TOOL = a tool call's result, fed back to the model as the
@@ -206,6 +216,7 @@ model Company {
   bankAggregatorLinks   BankAggregatorLink[]
   invoices              Invoice[]
   invoiceLines          InvoiceLine[]
+  recurringEntryTemplates RecurringEntryTemplate[]
 }
 
 /// Exercice comptable. Ecritures are validated (locked) relative to a
@@ -283,6 +294,7 @@ model Journal {
   type  JournalType
 
   ecritures Ecriture[]
+  recurringEntryTemplates RecurringEntryTemplate[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -482,6 +494,7 @@ model VatRate {
 
   ecritureLignes EcritureLigne[]
   invoiceLines   InvoiceLine[]
+  recurringEntryTemplateLines RecurringEntryTemplateLine[]
 
   @@index([companyId])
 }
@@ -1015,4 +1028,80 @@ model InvoiceLine {
   createdAt DateTime @default(now())
 
   @@index([companyId, invoiceId])
+}
+
+/// A saved template for a repeating écriture (rent, a subscription, a
+/// loan installment) — see CLAUDE.md "Recurring entries / templates".
+/// Pure metadata: a template never itself becomes part of the ledger
+/// (unlike Journal/Account/VatRate/FiscalYear, referenced forever by
+/// immutable écritures), so it's safe to hard-delete. `journalId` is
+/// stored directly (Journal has no delete/update endpoint at all, so a
+/// raw id is exactly as stable as a code lookup); each line's account is
+/// instead resolved by NUMBER at apply-time (see
+/// RecurringEntriesService.previewApplication()), matching this app's own
+/// established idiom for system-composed écritures
+/// (DepreciationService.requireAccountByNumber(),
+/// a-nouveau.service.ts's account-by-number lookups) rather than a raw,
+/// harder-to-audit id. `frequency`/`anchorDay`/`anchorMonth` are
+/// PURELY informational (feed computeNextDueDate()'s "next due" hint) —
+/// applying a template is always an explicit, on-demand human action
+/// (POST .../preview then the ordinary POST /entries), never
+/// auto-posted on a schedule; there is no scheduler in this app.
+model RecurringEntryTemplate {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  name      String
+  journalId String
+  journal   Journal @relation(fields: [journalId], references: [id])
+  libelle   String
+
+  frequency   RecurrenceFrequency?
+  /// Day-of-month (1-31) the template is expected to recur on. For
+  /// QUARTERLY/YEARLY this is the day-of-month WITHIN anchorMonth.
+  anchorDay   Int?
+  /// 1-12. Only meaningful for QUARTERLY (month-within-quarter, 1-3) or
+  /// YEARLY (calendar month, 1-12) — null for MONTHLY.
+  anchorMonth Int?
+
+  /// Stamped by the explicit POST .../mark-applied call, right after the
+  /// frontend's own useCreateEcriture() succeeds for a draft built from
+  /// this template — purely a "next due" reminder input, not an audit
+  /// trail (a template can be applied many times; no link to which
+  /// écriture(s) resulted is kept here).
+  lastAppliedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines RecurringEntryTemplateLine[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+/// One line of a RecurringEntryTemplate. `accountNumber`/`auxAccountNumber`
+/// are PCG account NUMBERS, resolved to a live Account at apply-time —
+/// see RecurringEntryTemplate's own doc comment for why. Exactly one of
+/// debit/credit is non-zero, same invariant as EcritureLigne, enforced in
+/// the service layer (not expressible in SQL alone).
+model RecurringEntryTemplateLine {
+  id         String                 @id @default(cuid())
+  templateId String
+  template   RecurringEntryTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  /// Preserves the line's position in the editor grid.
+  order Int
+
+  accountNumber    String
+  auxAccountNumber String?
+
+  vatRateId String?
+  vatRate   VatRate? @relation(fields: [vatRateId], references: [id])
+
+  debit  Decimal @default(0) @db.Decimal(15, 2)
+  credit Decimal @default(0) @db.Decimal(15, 2)
+
+  @@index([templateId])
 }

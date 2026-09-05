@@ -9,6 +9,7 @@ import { Account, DepreciationEntry, FiscalYear, FixedAsset, JournalType } from 
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { Money } from '../../common/decimal';
+import { findFiscalYearContaining } from '../../common/ledger/find-fiscal-year-containing';
 import { EntriesService } from '../entries/entries.service';
 import { CreateEcritureDto } from '../entries/dto/create-ecriture.dto';
 import { CreateEcritureLigneDto } from '../entries/dto/create-ecriture-ligne.dto';
@@ -19,7 +20,11 @@ import { CessionFixedAssetDto } from './dto/cession-fixed-asset.dto';
 import { CessionResultDto } from './dto/cession-result.dto';
 import { computeLinearSchedule } from './depreciation-schedule';
 import { computeFinalPeriodDotation } from './cession-proration';
-import { CESSION_ACCOUNTS, resolveCessionNature, assertValidCompteReglement } from './cession-invariants';
+import {
+  CESSION_ACCOUNTS,
+  resolveCessionNature,
+  assertValidCompteReglement,
+} from './cession-invariants';
 import {
   assertValidAccountTriplet,
   assertWithinDepreciableBase,
@@ -93,7 +98,10 @@ export class DepreciationService {
   }
 
   /** Read-only: fetches the already-computed schedule without regenerating it. */
-  async findSchedule(company: CompanyContext, fixedAssetId: string): Promise<DepreciationEntryDto[]> {
+  async findSchedule(
+    company: CompanyContext,
+    fixedAssetId: string,
+  ): Promise<DepreciationEntryDto[]> {
     await this.findOne(company, fixedAssetId); // 404s + company-scopes
     const entries = await this.prisma.depreciationEntry.findMany({
       where: { fixedAssetId, companyId: company.companyId },
@@ -153,7 +161,10 @@ export class DepreciationService {
         linesToUpsert.map((line) =>
           this.prisma.depreciationEntry.upsert({
             where: {
-              fixedAssetId_fiscalYearId: { fixedAssetId: asset.id, fiscalYearId: line.fiscalYearId },
+              fixedAssetId_fiscalYearId: {
+                fixedAssetId: asset.id,
+                fiscalYearId: line.fiscalYearId,
+              },
             },
             create: {
               companyId: company.companyId,
@@ -305,7 +316,7 @@ export class DepreciationService {
       );
     }
 
-    const disposalFiscalYear = await this.findFiscalYearContaining(company, cessionDate);
+    const disposalFiscalYear = await findFiscalYearContaining(this.prisma, company, cessionDate);
     if (!disposalFiscalYear) {
       throw new NotFoundException(`No fiscal year covers cessionDate ${dto.cessionDate}.`);
     }
@@ -349,7 +360,7 @@ export class DepreciationService {
       throw new ConflictException(
         `The dotation for "${asset.label}" (${disposalFiscalYear.label}) is already posted at ` +
           `${Money.fromDecimal(existingDisposalEntry.amount).toApiString()} — a mid-year disposal ` +
-          "needs a prorated amount instead. Reverse (contre-passer) that écriture first, then retry.",
+          'needs a prorated amount instead. Reverse (contre-passer) that écriture first, then retry.',
       );
     }
 
@@ -358,7 +369,10 @@ export class DepreciationService {
     if (!proratedAmount.isZero()) {
       const entry = await this.prisma.depreciationEntry.upsert({
         where: {
-          fixedAssetId_fiscalYearId: { fixedAssetId: asset.id, fiscalYearId: disposalFiscalYear.id },
+          fixedAssetId_fiscalYearId: {
+            fixedAssetId: asset.id,
+            fiscalYearId: disposalFiscalYear.id,
+          },
         },
         create: {
           companyId: company.companyId,
@@ -393,7 +407,10 @@ export class DepreciationService {
 
     const lignes: CreateEcritureLigneDto[] = [];
     if (!amortissementsCumules.isZero()) {
-      lignes.push({ compteId: asset.depreciationAccountId, debit: amortissementsCumules.toApiString() });
+      lignes.push({
+        compteId: asset.depreciationAccountId,
+        debit: amortissementsCumules.toApiString(),
+      });
     }
     if (!vnc.isZero()) {
       lignes.push({ compteId: vncAccount.id, debit: vnc.toApiString() });
@@ -432,15 +449,6 @@ export class DepreciationService {
     };
   }
 
-  private async findFiscalYearContaining(
-    company: CompanyContext,
-    date: Date,
-  ): Promise<FiscalYear | null> {
-    return this.prisma.fiscalYear.findFirst({
-      where: { companyId: company.companyId, startDate: { lte: date }, endDate: { gte: date } },
-    });
-  }
-
   private async requireAccountByNumber(company: CompanyContext, number: string): Promise<Account> {
     const account = await this.prisma.account.findFirst({
       where: { companyId: company.companyId, number },
@@ -468,7 +476,8 @@ export class DepreciationService {
     asset: FixedAsset,
     disposalFiscalYear: FiscalYear,
   ): Promise<void> {
-    const serviceStartFiscalYear = await this.findFiscalYearContaining(
+    const serviceStartFiscalYear = await findFiscalYearContaining(
+      this.prisma,
       company,
       asset.serviceStartDate,
     );
@@ -501,7 +510,7 @@ export class DepreciationService {
       throw new ConflictException(
         `${priorEntries.length} of ${priorFiscalYears.length} fiscal year(s) before the disposal ` +
           `year (${disposalFiscalYear.label}) have a posted dotation for "${asset.label}" — post the ` +
-          "missing one(s) first (see generateSchedule()/postDotation()), otherwise VNC at cession " +
+          'missing one(s) first (see generateSchedule()/postDotation()), otherwise VNC at cession ' +
           'would be understated.',
       );
     }
@@ -559,7 +568,7 @@ export class DepreciationService {
       amount: Money.fromDecimal(entry.amount).toApiString(),
       postedEcritureId: entry.postedEcritureId,
       postedEcritureNum: entry.postedEcritureId
-        ? ecritureNumById.get(entry.postedEcritureId) ?? null
+        ? (ecritureNumById.get(entry.postedEcritureId) ?? null)
         : null,
     }));
   }
@@ -568,7 +577,9 @@ export class DepreciationService {
     company: CompanyContext,
     dto: { accountId: string; depreciationAccountId: string; expenseAccountId: string },
   ): Promise<{ asset: Account; depreciation: Account; expense: Account }> {
-    const uniqueIds = [...new Set([dto.accountId, dto.depreciationAccountId, dto.expenseAccountId])];
+    const uniqueIds = [
+      ...new Set([dto.accountId, dto.depreciationAccountId, dto.expenseAccountId]),
+    ];
     const accounts = await this.prisma.account.findMany({
       where: { id: { in: uniqueIds }, companyId: company.companyId },
     });

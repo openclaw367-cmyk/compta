@@ -57,7 +57,7 @@ reordered):
 4. **Traceability drill-down — Tiers 1, 2, AND 3 SHIPPED (all 2026-08-29).** No dependency on 1–3; already has its own detailed spec (folded in below); the "→ justificatif" extension (document attachments, shipped) is done as part of Tier 1. Tier 3 (VAT rate lines, 2058 `WJ`/`WG`, 2059-A) was the spec's last defined tier — this feature's scope is now fully closed — see the spec's own §4/§5/§6 and CLAUDE.md's "Traceability drill-down (Tier 1)"/"(Tier 2)"/"(Tier 3)" sections.
 5. **Invoicing / facturation — Phase A SHIPPED (backend only), 2026-08-30.** Moved up from "noted, not planned" — a key feature, not a nice-to-have. See §4 below, `specs/invoicing-plan.md` (regulatory research + phased plan) and `specs/invoicing-phase-a-implementation-spec.md` (the design-then-verify pass, now implemented and verified live). Monaco is architecturally wired (one jurisdiction-parameterized engine) but its rule content is an explicit pending stub, not guessed. Phase B (PA/e-transmission) remains a later, likely separate initiative.
 6. **Anomaly surfacing** — benefits from bank-rec (lettrage/matching data) and drill-down (to explain *why* something's flagged) existing first, though not hard-blocked by either.
-7. **Recurring entries / templates** — no dependency on anything above. Genuinely independent; flagged as the lowest-complexity gated item on this list, worth considering as a filler/quick-win if a later item stalls on a decision.
+7. **Recurring entries / templates** — SHIPPED 2026-09-05. Was genuinely independent, no dependency on anything above — picked as the lower-risk quick win over Anomaly surfacing.
 8. **Reporting/export flexibility** — no dependency on anything above; enhances every report already shipped. Could run anytime.
 9. **Multi-user / roles & permissions** — no hard dependency on 1–8, but see the cross-cutting note below: this is the one item that, if pulled forward, retroactively closes the "no who" gap already logged in the document-attachment audit trail (CLAUDE.md: *"this app has no authentication/user-identity model anywhere... the log honestly records only when and what, never a fabricated actor"*) and would apply to any future audit trail too. Not proposing a reorder — just flagging that its cost is more front-loaded the longer it waits, since more features will exist that a future auth layer needs to retrofit around.
 
@@ -538,13 +538,32 @@ gates everywhere else.
 
 ---
 
-## 6. Recurring entries / templates
+## 6. Recurring entries / templates — SHIPPED (2026-09-05)
+
+Built and verified live: `src/modules/recurring-entries/`
+(`RecurringEntriesService` — CRUD + `previewApplication()`, which
+resolves accounts/journal/fiscal year and validates via the SAME
+`EntryValidationService` methods `propose_ecriture` uses, never persists
+itself), `RecurringTemplatesPage` (`/modeles`, reachable from
+Paramètres), and a "Depuis un modèle" flow on `JournalEntriesPage`
+opening the ordinary `EcritureEditor` pre-filled via a new additive
+`prefill` prop. Both decisions below resolved to the recommended option
+(v1: on-demand apply only, no scheduler at all — confirmed the app has
+zero background-job infrastructure; fixed default amounts per line,
+freely editable at apply time since the editor already supports that
+for free). See CLAUDE.md "Recurring entries / templates" for the full
+design and verification record, including the account-by-NUMBER /
+journal-by-ID storage decision and why the template-apply editor
+instance deliberately ignores the journal grid's own currently-selected
+tab/fiscal year.
 
 **Classification: GATED, lightly.** It creates real écritures, but only
 ever through the normal `EntriesService.create()`/`validate()` path
 already used everywhere else — no new write primitive, no new
 computation. The gate here is about template *scheduling/application*
 logic being correct, not about a new kind of ledger risk.
+
+### Original scope note, below
 
 - **What it is**: book repeating entries (rent, salaries, subscriptions)
   from a saved template, on a schedule or on demand.
@@ -670,15 +689,18 @@ roadmap's scope.
 
 ## Closing note
 
-This document is a **map**, current as of 2026-08-31. Nothing above has
+This document is a **map**, current as of 2026-09-05. Nothing above has
 been designed, and nothing above should be built from this document
 alone — each feature gets its own design-then-verify pass, reviewed and
 confirmed before any code is written, when we reach it. Update this
 file as items ship, as decisions get made, or as priorities shift, so
 it stays the accurate shared reference rather than a stale snapshot.
 
-**Next up**: Anomaly surfacing (§5) or Recurring entries / templates
-(§6) — the next design-then-build pass among the unstarted items.
+**Next up**: Anomaly surfacing (§5) is now the only unstarted item left
+on the main numbered list (Reporting/export flexibility (§7) and
+Multi-user (§8) remain open too, lower down the discussed priority
+order). Recurring entries / templates (§6) is now fully shipped — see
+CLAUDE.md "Recurring entries / templates" for the full record.
 Invoicing (§4) Phase A is now fully shipped (generation, gated
 posting, Factur-X rendering, and the frontend) on both required
 companies; Phase B (PA/e-transmission) stays blocked on an external,

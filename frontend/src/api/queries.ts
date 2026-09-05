@@ -40,6 +40,8 @@ import type {
   LineTraceResult,
   LocalModelAvailability,
   Regime,
+  RecurringEntryApplicationPreview,
+  RecurringEntryTemplate,
   ResultatFiscalLineTraceResult,
   ResultatFiscalResult,
   ResultatFiscalTraceCode,
@@ -67,10 +69,12 @@ import type {
   CreateFixedAssetDto,
   CreateInvoiceDto,
   CreateJournalDto,
+  CreateRecurringEntryTemplateDto,
   CreateTiersDto,
   CreateVatRateDto,
   DevisRequestDto,
   FinalizeInvoiceDto,
+  PreviewRecurringEntryTemplateDto,
   SendChatMessageDto,
   SetCloudCredentialDto,
   UpdateAccountDto,
@@ -1303,5 +1307,68 @@ export function useMarkAsEncaisse() {
     mutationFn: (invoiceId: string) =>
       api.post<Invoice>(`/invoicing/invoices/${invoiceId}/mark-encaisse`, {}),
     onSuccess: () => invalidateInvoices(queryClient),
+  });
+}
+
+/**
+ * Recurring entry templates — see CLAUDE.md "Recurring entries /
+ * templates". Applying a template never persists by itself:
+ * usePreviewRecurringTemplate() resolves and validates but returns an
+ * UNPERSISTED CreateEcritureDto-shaped dto; the actual draft is created
+ * through the ordinary useCreateEcriture(), then
+ * useMarkTemplateApplied() stamps the purely-informational
+ * lastAppliedAt/nextDueDate hint.
+ */
+function invalidateRecurringTemplates(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: ['recurring-templates'] });
+}
+
+export function useRecurringTemplates() {
+  return useQuery({
+    queryKey: ['recurring-templates'],
+    queryFn: () => api.get<RecurringEntryTemplate[]>('/recurring-entries/templates'),
+  });
+}
+
+export function useCreateRecurringTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateRecurringEntryTemplateDto) =>
+      api.post<RecurringEntryTemplate>('/recurring-entries/templates', dto),
+    onSuccess: () => invalidateRecurringTemplates(queryClient),
+  });
+}
+
+export function useUpdateRecurringTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: CreateRecurringEntryTemplateDto }) =>
+      api.put<RecurringEntryTemplate>(`/recurring-entries/templates/${id}`, dto),
+    onSuccess: () => invalidateRecurringTemplates(queryClient),
+  });
+}
+
+export function useDeleteRecurringTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/recurring-entries/templates/${id}`),
+    onSuccess: () => invalidateRecurringTemplates(queryClient),
+  });
+}
+
+/** Never persists — see this file's own doc comment above and CLAUDE.md. */
+export function usePreviewRecurringTemplate() {
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: PreviewRecurringEntryTemplateDto }) =>
+      api.post<RecurringEntryApplicationPreview>(`/recurring-entries/templates/${id}/preview`, dto),
+  });
+}
+
+export function useMarkTemplateApplied() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<RecurringEntryTemplate>(`/recurring-entries/templates/${id}/mark-applied`, {}),
+    onSuccess: () => invalidateRecurringTemplates(queryClient),
   });
 }

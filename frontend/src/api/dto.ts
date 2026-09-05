@@ -30,3 +30,6 @@ export type { CreateInvoiceDto } from '../../../backend/src/modules/invoicing/dt
 export type { CreateInvoiceLineDto } from '../../../backend/src/modules/invoicing/dto/create-invoice-line.dto';
 export type { FinalizeInvoiceDto } from '../../../backend/src/modules/invoicing/dto/finalize-invoice.dto';
 export type { DevisRequestDto } from '../../../backend/src/modules/invoicing/dto/devis-request.dto';
+export type { CreateRecurringEntryTemplateDto } from '../../../backend/src/modules/recurring-entries/dto/create-recurring-entry-template.dto';
+export type { RecurringEntryTemplateLineDto } from '../../../backend/src/modules/recurring-entries/dto/recurring-entry-template-line.dto';
+export type { PreviewRecurringEntryTemplateDto } from '../../../backend/src/modules/recurring-entries/dto/preview-recurring-entry-template.dto';

@@ -248,3 +248,13 @@ export function IconInvoice(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/** Two cyclic arrows — recurring entry templates. */
+export function IconRepeat(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4.5 8.5V6.5A2.5 2.5 0 0 1 7 4h6.5M13.5 4l-2-2M13.5 4l-2 2" />
+      <path d="M15.5 11.5v2a2.5 2.5 0 0 1-2.5 2.5H6.5M6.5 16l2 2M6.5 16l2-2" />
+    </svg>
+  );
+}

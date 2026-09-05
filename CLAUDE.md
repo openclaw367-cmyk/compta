@@ -4286,6 +4286,139 @@ option), a written plan reviewed and approved before implementation.
   discipline) and Monaco devis (same gate as Monaco invoicing
   generally).
 
+## Recurring entries / templates
+
+`src/modules/recurring-entries/` (2026-09-05) is the roadmap's next
+unstarted item after invoicing Phase A — see `specs/roadmap.md` §6. Lets
+a bookkeeper save a template of a repeating écriture (rent, a
+subscription, a loan installment) and apply it on demand to prefill a
+new draft, instead of re-typing the same journal entry every period.
+Confirmed via research before design: the app has **zero**
+background-job/scheduler infrastructure (`@nestjs/schedule`/cron/etc. —
+none installed) and no auth model, so v1 ships **on-demand apply only,
+always producing an editable draft** — never auto-posted on a schedule.
+
+- **Never a new write primitive.** `RecurringEntriesService.previewApplication()`
+  resolves a `CreateEcritureDto`-shaped preview and runs it through the
+  **same four `EntryValidationService` methods** `ProposeToolsService`
+  (AI chatbot Phase 2's `propose_ecriture`) already calls, in the same
+  order (`buildBalancedLignes`, `assertReferencesBelongToCompany`,
+  `assertVatRatesBelongToCompany`, `computeOrphanedImmobilisationWarnings`)
+  — it **never calls `EntriesService.create()`**. The actual draft is
+  created through the ORDINARY `POST /entries`
+  (`useCreateEcriture()`) once the frontend opens the resulting dto in
+  the normal `EcritureEditor`, exactly like a confirmed AI proposal.
+- **Accounts stored by NUMBER, journal stored by ID — a deliberate,
+  confirmed-not-guessed choice.** `AccountsService.rename()`
+  (confirmed by reading it directly) only ever changes `label`, never
+  `number` — so both are equally stable — but this app's own
+  established idiom for "system-composed écritures"
+  (`DepreciationService.requireAccountByNumber()`, `a-nouveau.service.ts`'s
+  account-by-number lookups) resolves accounts by their PCG `number` at
+  apply-time, reused verbatim here for consistency. `Journal` has no
+  delete/update endpoint at all (see "Known scope boundaries" below),
+  so a raw `journalId` is exactly as safe as a code lookup and needs no
+  new resolution helper. `vatRateId` is stored raw too (no natural
+  human key), re-validated at apply-time by the existing
+  `assertVatRatesBelongToCompany`.
+- **Fiscal year is never stored on the template** — resolved at
+  apply-time from the chosen application date via a newly-shared
+  `findFiscalYearContaining()` (`src/common/ledger/find-fiscal-year-containing.ts`),
+  extracted from a private helper `DepreciationService.disposeFixedAsset()`
+  already had of the exact same shape — one definition, two callers now,
+  zero behavior change (`depreciation.service.spec.ts`'s existing tests
+  pass unmodified after the extraction).
+- **A template is pure metadata, safe to hard-delete** — unlike
+  Journal/Account/VatRate/FiscalYear (referenced forever by immutable
+  écritures), a `RecurringEntryTemplate` never itself becomes part of
+  the ledger, so `DELETE /recurring-entries/templates/:id` is a real
+  hard delete, not a gap to flag. Editing (`PUT`) replaces all lines
+  transactionally (delete+recreate).
+- **`lastAppliedAt` is stamped by an explicit, separate call** —
+  `POST .../mark-applied`, called by the frontend right after its own
+  `useCreateEcriture()` succeeds for a draft built from the preview.
+  Purely a "next due" reminder input, not an audit trail: no link to
+  which écriture resulted is kept, and a template can be applied many
+  times. This keeps the module's only write being non-ledger metadata,
+  never écriture creation — mirrors `InvoicingService.markAsEncaisse()`'s
+  "explicit human action stamps metadata" precedent.
+- **A recurrence (`frequency`/`anchorDay`/`anchorMonth`) is purely
+  informational** — feeds `computeNextDueDate()` (`recurring-entry-schedule.ts`,
+  a pure function) for a "prochaine échéance" hint in the templates
+  list. QUARTERLY assumes calendar-quarter alignment (Jan-Mar, ...,
+  Oct-Dec, matching this app's own VAT-declaration quarter convention),
+  with `anchorMonth` (1-3) selecting the month within the quarter;
+  YEARLY uses `anchorMonth` (1-12) as the absolute calendar month. No
+  auto-posting is ever attached to this — applying is always the
+  explicit "Depuis un modèle" flow below.
+- **A stale template fails loud, never silently.** If a stored account
+  number no longer resolves (renamed — impossible, per the `rename()`
+  finding above — or deleted), `previewApplication()` throws a
+  `NotFoundException` naming the account number AND the template name,
+  same "fail loud, name the gap" discipline as
+  `requireAccountByNumber()`. Same for a date outside any fiscal year,
+  or a journal that's disappeared.
+- **Frontend**: reachable from **Paramètres** (`/modeles`,
+  `RecurringTemplatesPage`), same "lightweight admin screen" convention
+  as Comptes & journaux / TVA — Taux — not the main sidebar nav.
+  `TemplateEditor` is a lighter `EcritureEditor` (no lettrage/
+  dateEcheance/document-attach/Comptable IA — a template is metadata,
+  not a real écriture), reusing `AccountCombobox` — the only place this
+  app translates between a stored account NUMBER and a live Account id.
+  On `JournalEntriesPage`, a new "Depuis un modèle" button opens
+  `ApplyTemplateDialog` (template + date picker → calls
+  `usePreviewRecurringTemplate()`) → on success, opens the SAME
+  `EcritureEditor` component via a new `prefill?: CreateEcritureDto`
+  prop (additive, same precedent as the batch invoice queue's own
+  `initialFile?: File` prop on this exact component) — **rendered as a
+  fully separate editor instance, using the preview's own resolved
+  `journalId`/`fiscalYearId`, deliberately independent of whatever
+  journal tab/fiscal year the page currently has selected** — a
+  template can target a different journal than the one currently
+  viewed, and forcing the page's own tab/global-fiscal-year state to
+  follow it would have collided with the existing
+  `useEffect(() => setEditor({mode:'closed'}), [fiscalYearId])` guard
+  that closes the editor on fiscal-year change. `draftLigneFromProposed()`
+  (extracted from `EcritureEditor`'s pre-existing `applySuggestion()`,
+  zero behavior change) is the one shared mapping both a cloud
+  "Comptable IA" suggestion and a template prefill use to seed draft
+  rows. `lineNeedsVatRate()` was promoted from `EcritureEditor`-local to
+  `lib/accounts.ts` (alongside `isAuxiliaryBearingAccount`) so
+  `TemplateEditor` could reuse the identical "don't imply every line
+  needs a rate" gating without duplicating it.
+- **Verified two ways.** New unit tests: `recurring-entry-schedule.spec.ts`
+  (pure oracle — monthly/quarterly/yearly, anchor day already passed vs.
+  not, no `lastAppliedAt` yet), `recurring-entries.service.spec.ts`
+  (CRUD, line validation including a tiers-not-a-valid-sub-account
+  rejection, `previewApplication()` resolving by number/id and throwing
+  named errors for a missing fiscal year/account/journal, `markApplied()`),
+  `find-fiscal-year-containing.spec.ts` — 712 backend tests passing
+  overall (up from 680); `tsc`/`eslint` clean both sides, `vite build`
+  clean. **Live, against the FR demo company, via curl AND a real
+  browser, cleaned up afterward**: created a real "Loyer bureau"
+  template (613000 débit / 512000 crédit, MONTHLY, anchor day 5) —
+  confirmed `nextDueDate` computed correctly (today's date, since the
+  anchor day hadn't passed yet); previewed it for today, confirmed the
+  resolved dto's `compteId`s/`fiscalYearId` matched the real accounts/
+  fiscal year; confirmed a preview against a date outside any fiscal
+  year, and an update naming a bogus account number, both correctly
+  threw `NotFoundException` naming the gap; created the draft via the
+  ordinary `POST /entries`; called `mark-applied` and confirmed
+  `nextDueDate` advanced one full period (2026-10-05). Then, in the
+  real browser: opened `/modeles`, confirmed the template list showed
+  the correct journal/line-count/total/next-due-date; opened it for
+  edit and confirmed both lines' `AccountCombobox`es resolved the
+  stored numbers back to the correct live accounts; on `/ecritures`
+  (with the "AC" journal tab selected, deliberately NOT the template's
+  own "OD" journal), clicked "Depuis un modèle," picked the template,
+  confirmed the `EcritureEditor` opened pre-filled with both lines and
+  a live "Équilibrée" balance indicator, saved it, and confirmed via
+  curl that `lastAppliedAt`/`nextDueDate` updated — proving the
+  separate-editor-instance design correctly posts to the template's OWN
+  journal/fiscal year regardless of the page's current tab selection.
+  Both test draft écritures and the test template deleted afterward,
+  confirmed via a follow-up read that no residual state remained.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't

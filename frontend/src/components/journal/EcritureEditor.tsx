@@ -27,7 +27,7 @@ import {
   normalizeMoneyInput,
   sanitizeAmountBuffer,
 } from '../../lib/money';
-import { isAuxiliaryBearingAccount } from '../../lib/accounts';
+import { isAuxiliaryBearingAccount, lineNeedsVatRate } from '../../lib/accounts';
 import { formatVatRateOption } from '../../lib/vatRates';
 import { AccountCombobox } from './AccountCombobox';
 import { BalanceIndicator } from './BalanceIndicator';
@@ -52,6 +52,25 @@ function nextKey(): string {
   return `l${keySeq}`;
 }
 
+/**
+ * Shared by applySuggestion() (a cloud "Comptable IA" proposal) and the
+ * `prefill` effect below (a recurring-entry-template application) — both
+ * hand this component a CreateEcritureLigneDto-shaped line to seed a
+ * fresh row from, and both need the identical mapping.
+ */
+function draftLigneFromProposed(l: CreateEcritureLigneDto): DraftLigne {
+  return {
+    key: nextKey(),
+    compteId: l.compteId,
+    compteAuxId: l.compteAuxId ?? null,
+    debit: l.debit && !isZeroMoney(l.debit) ? l.debit.replace('.', ',') : '',
+    credit: l.credit && !isZeroMoney(l.credit) ? l.credit.replace('.', ',') : '',
+    lettrage: '',
+    vatRateId: l.vatRateId ?? null,
+    dateEcheance: l.dateEcheance ?? '',
+  };
+}
+
 function emptyLigne(): DraftLigne {
   return {
     key: nextKey(),
@@ -63,16 +82,6 @@ function emptyLigne(): DraftLigne {
     vatRateId: null,
     dateEcheance: '',
   };
-}
-
-/**
- * A line's TVA rate only matters for a collectée line (account 4457x)
- * or a produit line (class 7) — see computeCa3Declaration on the
- * backend. Shown only then so the column doesn't imply every line needs
- * a rate.
- */
-function lineNeedsVatRate(account: Account | undefined): boolean {
-  return Boolean(account && (account.number.startsWith('4457') || account.pcgClass === 7));
 }
 
 /**
@@ -142,6 +151,7 @@ export function EcritureEditor({
   fiscalYearId,
   accounts,
   existing,
+  prefill,
   initialFile,
   onSaved,
   onCancel,
@@ -150,6 +160,18 @@ export function EcritureEditor({
   fiscalYearId: string;
   accounts: Account[];
   existing: Ecriture | null;
+  /**
+   * Pre-fills a brand-new entry from an already-resolved,
+   * UNPERSISTED CreateEcritureDto — e.g. a recurring-entry-template
+   * application preview (see CLAUDE.md "Recurring entries / templates").
+   * The caller is responsible for passing `journalId`/`fiscalYearId`
+   * that MATCH `prefill`'s own values (this component always submits
+   * using its own journalId/fiscalYearId props, never re-reads them off
+   * `prefill`). Ignored when `existing` is set, same "new entries only"
+   * scoping `initialFile` below already has. Every row stays freely
+   * editable afterward — this only seeds the initial state.
+   */
+  prefill?: CreateEcritureDto;
   /**
    * Pre-seeds the attach-at-creation flow with a file the CALLER already
    * has (e.g. BatchInvoiceQueuePage.tsx, one file per queued invoice) —
@@ -166,12 +188,16 @@ export function EcritureEditor({
   onCancel: () => void;
 }) {
   const [ecritureDate, setEcritureDate] = useState(
-    existing ? toIsoDate(existing.ecritureDate) : new Date().toISOString().slice(0, 10),
+    existing
+      ? toIsoDate(existing.ecritureDate)
+      : (prefill?.ecritureDate ?? new Date().toISOString().slice(0, 10)),
   );
-  const [pieceRef, setPieceRef] = useState(existing?.pieceRef ?? '');
-  const [libelle, setLibelle] = useState(existing?.libelle ?? '');
+  const [pieceRef, setPieceRef] = useState(existing?.pieceRef ?? prefill?.pieceRef ?? '');
+  const [libelle, setLibelle] = useState(existing?.libelle ?? prefill?.libelle ?? '');
   const [lignes, setLignes] = useState<DraftLigne[]>(
-    existing ? fromExisting(existing) : [emptyLigne(), emptyLigne()],
+    existing
+      ? fromExisting(existing)
+      : (prefill?.lignes.map(draftLigneFromProposed) ?? [emptyLigne(), emptyLigne()]),
   );
   const [submitError, setSubmitError] = useState<string[] | null>(null);
 
@@ -342,18 +368,7 @@ export function EcritureEditor({
   function applySuggestion() {
     const proposal = suggestion?.proposal;
     if (!proposal) return;
-    setLignes(
-      proposal.dto.lignes.map((l) => ({
-        key: nextKey(),
-        compteId: l.compteId,
-        compteAuxId: l.compteAuxId ?? null,
-        debit: l.debit && !isZeroMoney(l.debit) ? l.debit.replace('.', ',') : '',
-        credit: l.credit && !isZeroMoney(l.credit) ? l.credit.replace('.', ',') : '',
-        lettrage: '',
-        vatRateId: l.vatRateId ?? null,
-        dateEcheance: l.dateEcheance ?? '',
-      })),
-    );
+    setLignes(proposal.dto.lignes.map(draftLigneFromProposed));
     if (proposal.dto.libelle) setLibelle(proposal.dto.libelle);
     if (proposal.dto.pieceRef) setPieceRef(proposal.dto.pieceRef);
     setSuggestionApplied(true);

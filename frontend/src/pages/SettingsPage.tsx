@@ -15,6 +15,7 @@ import {
   IconMoon,
   IconPercent,
   IconPlus,
+  IconRepeat,
   IconSun,
 } from '../components/layout/icons';
 
@@ -132,6 +133,12 @@ export function SettingsPage() {
             Icon={IconPercent}
             title="TVA — Taux"
             description="Taux de TVA applicables et leur période de validité"
+          />
+          <SettingsCard
+            to="/modeles"
+            Icon={IconRepeat}
+            title="Modèles récurrents"
+            description="Loyer, abonnements — écritures répétitives à appliquer depuis Écritures"
           />
           <SettingsCard
             to="/assistant/parametres"

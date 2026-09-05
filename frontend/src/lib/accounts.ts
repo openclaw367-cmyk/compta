@@ -18,3 +18,14 @@ export function isAuxiliaryBearingAccount(account: Account): boolean {
     account.number.startsWith('455')
   );
 }
+
+/**
+ * A line's TVA rate only matters for a collectée line (account 4457x) or
+ * a produit line (class 7) — see computeCa3Declaration on the backend.
+ * Extracted from EcritureEditor.tsx (2026-09-05) so
+ * RecurringTemplateEditor can show the same "don't imply every line
+ * needs a rate" gating without duplicating the predicate.
+ */
+export function lineNeedsVatRate(account: Account | undefined): boolean {
+  return Boolean(account && (account.number.startsWith('4457') || account.pcgClass === 7));
+}
