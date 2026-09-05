@@ -4957,6 +4957,205 @@ ever forcing a surprise re-login.
   removed afterward via temporary scripts, confirmed via a follow-up
   `GET /companies` showing only the original three seeded companies.
 
+## UI/UX pass — section tabs, toasts, command palette, onboarding checklist, needs-attention panel, activity feed
+
+A dedicated UI/UX audit pass (2026-09-05), explicitly scoped to display/
+interaction only — **no calculation-engine file was touched**, confirmed
+throughout via `git status --short | grep backend/` returning empty
+after every frontend-only step. Two parts: first, an "obvious
+improvements" pass converting several long, scroll-heavy pages to a
+shared horizontal-tab pattern plus a generic loading skeleton; second,
+five "bigger swing" features proposed afterward and then all approved
+and built in the same session.
+
+- **`SectionTabs`** (`frontend/src/components/layout/SectionTabs.tsx`)
+  + **`useSectionTab`** (`frontend/src/lib/useSectionTab.ts`) is the new
+  shared abstraction: a sticky horizontal tab strip, URL-synced via
+  `?section=` (so a tab is deep-linkable and survives a reload/share),
+  with keyboard ArrowLeft/ArrowRight cycling and a scroll-to-top on tab
+  switch. Applied to `LiassePage.tsx` (the flagship case — bilan/CDR/
+  immobilisations/provisions/créances-dettes/plus-values/comparaison,
+  previously one long scroll), `ResultatFiscalPage.tsx`,
+  `VatPage.tsx`, `FinancialAnalysisPage.tsx`, `CashFlowPage.tsx`,
+  `BankReconciliationPage.tsx`, and `AccountsJournalsPage.tsx`.
+  **Deliberately NOT applied** to `DashboardPage`, `AssistantPage`,
+  `CompanyProfilePage`, `CreateCompanyPage`, or any list-detail screen
+  (Écritures, Factures, Tiers, Immobilisations) — a fork-based audit of
+  every remaining page confirmed each of those has its own reason a
+  tab strip would be the wrong pattern (a chat UI, a single form, a
+  master-detail layout that already has its own navigation). Only the
+  top-level page composition was touched in every conversion — no
+  section-renderer component's internals changed, only which one is
+  gated behind `activeTab === 'x' &&`. Always-visible chrome (a
+  banner, a headline total) stays outside the tab gate so the page's
+  own "does this reconcile" narrative isn't lost behind a tab click.
+- **`PageSkeleton`** (`frontend/src/components/layout/PageSkeleton.tsx`)
+  replaces a bare "Chargement…" string with a shape-matched
+  `animate-pulse` placeholder (`maxWidth`/`blocks` props) — applied to
+  `CompanyProfilePage`, `FiscalYearsPage`, `FecExportPage`,
+  `ImportExcelPage`. A cosmetic-only change, not a data-fetching one.
+- **Toast notifications** (`frontend/src/context/toastStore.ts` +
+  `ToastProvider.tsx`, wired `AppProvider > ToastProvider > AppShell`
+  inside `RequireAuth`) are for fire-and-forget confirmations
+  (validate/delete an écriture, finalize/mark-encaissé an invoice,
+  close a fiscal year, confirm a bank match, invite/change-role/
+  remove/revoke a member) — a stacked, auto-dismissing
+  (`AUTO_DISMISS_MS = 4500`) card in the bottom-right, tone-colored
+  (success/error/info). **Deliberately NOT used to replace every
+  inline banner** — a message carrying an actionable next step (e.g.
+  `JournalEntriesPage`'s own reverse-confirmation banner, which tells
+  the user to go select the reversal to validate) stays a persistent,
+  dismissible `<Banner>`; only the purely-confirmatory messages became
+  toasts. **A real, previously-shipped bug found and fixed as a byproduct**:
+  `JournalEntriesPage.tsx`'s `actionSuccess` state was declared and
+  rendered but never actually `set` anywhere except by `handleReverse`
+  — validate and delete had silently had NO success feedback at all
+  since whenever that code first shipped. Fixed by wiring
+  `toast.show('success', ...)`/`toast.show('info', ...)` into
+  `handleValidate`/`handleDelete` respectively, leaving `handleReverse`'s
+  own banner untouched.
+- **`CommandPalette`** (`frontend/src/components/command/CommandPalette.tsx`,
+  wired into `TopBar.tsx`'s right-aligned control cluster) — Ctrl/Cmd+K
+  opens a fuzzy-search modal over every static nav destination
+  (`HOME_ITEM`/`NAV_GROUPS`/`ASSISTANT_ITEM`/`SETTINGS_ITEM` plus a
+  short list of "reachable by drilling in, not from the sidebar"
+  extras) and every account/tiers (reusing the SAME cached
+  `['accounts']` query `useAccounts()` already warms elsewhere — opening
+  the palette is never itself a new network round trip once any other
+  screen has loaded once this session). Matching is accent-insensitive
+  (`normalize()`: lowercase, NFD-decompose, strip the U+0300–U+036F
+  combining-diacritical-mark range) so "ecritures" finds "Écritures".
+  Arrow keys move a highlighted index, Enter activates, Escape closes,
+  the query/highlight reset on every open. **Verified live in the real
+  browser**: Ctrl+K opens/closes correctly from anywhere in the app;
+  typing "tva" surfaces both the "TVA" nav page AND every
+  `445660`/`445662`/`445710`/`445800` account simultaneously, correctly
+  filtered; arrow-key highlight moves correctly; Enter on a
+  highlighted account navigates to `/grand-livre?compte=<id>` with
+  that account's row correctly highlighted on arrival; the global
+  Ctrl+K shortcut reopens the palette fresh (empty query) from a
+  totally different page.
+- **`OnboardingChecklist`** (`frontend/src/components/dashboard/OnboardingChecklist.tsx`,
+  rendered at the top of `DashboardPage`) is a dismissible "Bien
+  démarrer" card for a freshly-created company — four steps (has a
+  fiscal year? a VAT rate? more than one member? a bank account?),
+  each "done" signal read from data this app already fetches elsewhere
+  (`useAppContext().fiscalYears`, `useVatRates()`, `useMemberships()`,
+  `useBankAccounts()`) — zero new backend aggregation. Auto-hides once
+  every step is done; a manual "✕ Masquer" dismissal persists to
+  `localStorage` under `compta:onboarding-dismissed:<companyId>` —
+  per-company (a bookkeeper mid-setup on one dossier may be fully
+  onboarded on another), same "per-viewer convenience, not something
+  that must persist reliably or be shared" discipline as the existing
+  theme/density preferences in `PreferencesProvider.tsx`. Verified
+  live: renders "2 sur 4 étapes terminées" correctly on the FR demo
+  company (fiscal year + VAT rate done, team + bank account not),
+  dismiss hides it and persists across reload, clearing the
+  `localStorage` key brings it back.
+- **`NeedsAttentionPanel`** (`frontend/src/components/dashboard/NeedsAttentionPanel.tsx`)
+  **replaces** the dashboard's former anomalies-only tile (the old
+  `AnomaliesSection` function in `DashboardPage.tsx` was deleted, not
+  kept dead) with a broader "À surveiller" card merging three signals,
+  most-actionable first: (1) draft écritures for the current fiscal
+  year — the exact same `validatedAt === null` filter
+  `FecExportPage`/`LiassePage`/`VatPage` already use to block report
+  generation, surfaced here BEFORE a user hits that wall on a report
+  screen; (2) pending team invites, shown ONLY when
+  `currentCompany.role === 'OWNER'` (a MEMBER/READ_ONLY can't act on
+  one anyway) — the exact `Company.role` field `SettingsPage.tsx`
+  already reads for its own OWNER-gated card; (3) the pre-existing
+  `useAnomaliesSummary()` feed (HIGH-tier payment matches, then
+  spending anomalies by multiplier, then remaining payment anomalies
+  by days-overdue), unchanged. Capped at 6 items total. Adds zero new
+  aggregation of its own — a merge-and-order layer over three
+  already-computed sources, same "pure presentation" discipline
+  `DashboardService`/`AnomaliesService` themselves already follow.
+- **Activity feed** — the one piece of this pass needing real backend
+  work, deliberately scoped narrow. New `ActivityEvent` model +
+  `ActivityEventType` enum (migration `20260905184824_add_activity_events`,
+  `src/modules/activity/`) is an append-only trail of TEAM actions
+  only — `MEMBER_INVITED`/`MEMBER_INVITE_ACCEPTED`/
+  `MEMBER_ROLE_CHANGED`/`MEMBER_REMOVED` — **not** a generic audit log
+  of every write this app makes. `actorEmail`/`targetEmail` are
+  snapshots (plain strings, no FK to `User`) so a later email change
+  or account deletion never rewrites history — the same snapshot
+  discipline `Invoice` already applies to client identity (see
+  "Invoicing — Phase A" above). `ActivityService.log()` never throws
+  into its caller (wrapped in try/catch, logged via `Logger` on
+  failure) — a failed audit write must never block the actual action
+  it's describing, same "must never itself become the thing that
+  breaks the feature it's observing" discipline as `AnomaliesService`'s
+  own skip-not-throw design. `GET /activity` (new
+  `ActivityController`, added to `app.module.ts`'s
+  `companyScopedControllers` allowlist) returns the 20 most recent
+  events for the current company.
+  - **Deliberately NOT instrumented this pass**: écriture validation,
+    invoice finalization, fiscal-year close. `EntriesService.validate()`/
+    `InvoicingService.finalize()`/`FiscalYearsService.close()` all take
+    only a `CompanyContext` today, never an `AuthenticatedUser` — adding
+    those events would mean threading the caller's identity through
+    several more service call chains, real, separately-scoped plumbing
+    work flagged in `ActivityService`'s own doc comment rather than
+    folded in silently. `MembershipsService.updateRole()`/`.remove()`
+    DID gain a `caller: AuthenticatedUser` parameter this pass (both in
+    the service and `MembershipsController`) purely to support their own
+    two new log calls — a small, additive signature change, not the
+    same class of plumbing gap.
+  - **A real gap found live, not by inspection, and fixed the same
+    day**: after wiring the backend and the `ActivityFeedSection`
+    frontend component (`frontend/src/components/activity/ActivityFeedSection.tsx`,
+    rendered on `MembersPage.tsx` below the existing members/invites
+    tables), inviting a member through the real UI correctly posted
+    (`201`) but the "Activité récente" list stayed on its stale
+    "Aucune activité pour le moment." — `useInviteMember()`/
+    `useUpdateMemberRole()`/`useRemoveMember()` each only invalidated
+    `['memberships']`, never `['activity']`. Fixed by adding
+    `queryClient.invalidateQueries({ queryKey: ['activity'] })`
+    alongside the existing `['memberships']` invalidation in all three
+    mutations (`api/queries.ts`) — confirmed live afterward: inviting a
+    real throwaway address immediately (no reload) populated a new
+    "admin@compta.local a invité …" row with a correct relative
+    timestamp (`Intl.RelativeTimeFormat`-based `formatRelativeTime()`,
+    a small local helper — no existing helper of this shape lived in
+    `lib/` before this). `revokeInvite()` is deliberately NOT one of the
+    four logged event types (revoking a never-accepted invite isn't
+    meaningful team history the same way accepting one is), so it
+    doesn't need this same invalidation.
+  - **Verified two ways.** New `activity.service.spec.ts` (log
+    records the right shape, log never throws even when the underlying
+    `create()` rejects, `listRecent()` queries with the right
+    where/orderBy/take) plus updated `memberships.service.spec.ts`/
+    `auth.service.spec.ts` asserting the exact `activity.log(...)` call
+    args for each of the four event types — 810 backend tests passing
+    overall (up from 739); `tsc`/`eslint` clean both sides, frontend
+    `vite build` clean. Live against the FR demo company, via the real
+    browser UI: invited a real throwaway address twice (confirming
+    duplicate invites to an unaccepted email are allowed, a
+    pre-existing, unrelated behavior — `invite()` only rejects an email
+    that's already a real `Membership`, never a second pending invite),
+    confirmed both `MEMBER_INVITED` events rendered with correct
+    relative times, then revoked both invites (confirmed via direct
+    network inspection that the underlying `DELETE
+    /memberships/invites/:id` calls succeeded, `200` each) — the
+    `ActivityEvent` rows themselves were deliberately LEFT in place
+    afterward (no delete endpoint exists for them, by design, same
+    "no delete/deactivate on an audit-log-shaped entity" precedent as
+    `LettrageAuditLog`/`EcritureDocumentAuditLog` — and, as with those,
+    a genuine historical record of a real invite-then-revoke sequence
+    is itself useful evidence the feature works, not noise to scrub).
+- **Verified two ways, throughout the whole pass.** `tsc --noEmit`/
+  `eslint src/`/`vite build` all clean on the frontend after every
+  individual conversion and after all five new features; the full
+  backend suite (810 tests) passing after the activity-feed backend
+  work. Live browser verification for every tab conversion (switching,
+  `?section=` deep-linking including a fresh-load-lands-on-the-right-tab
+  case, scroll-reset, keyboard arrow navigation) and for all five new
+  features individually, as detailed above. `git status --short | grep
+  -c "^backend/"` returned `0` after every purely-frontend step,
+  confirming the standing "don't touch the calculation engine, only
+  the display/UX" constraint held for the whole pass except the one
+  explicitly-scoped, explicitly-flagged activity-feed backend addition.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
@@ -5327,6 +5526,17 @@ A-1 §VIII uncross-checked).
    courants d'associés movements weren't classified into any of the
    three flux sections) — **found and fixed the same day**, see
    "Tableau des flux de trésorerie" above.
+6. **UI/UX pass — section tabs, toasts, command palette, onboarding
+   checklist, needs-attention panel, activity feed** (2026-09-05) — see
+   "UI/UX pass" above. Cross-cutting, display/interaction only (per its
+   own standing constraint, verified throughout via `git status`), with
+   one narrow, explicitly-scoped exception: a new `ActivityEvent`
+   model/module for a team-actions-only activity feed. Every one of the
+   five "bigger swing" features proposed after the tab-conversion pass
+   was approved and built the same session; a real live-found bug
+   (activity feed not refreshing after a membership mutation — a
+   missing `['activity']` query invalidation) was found and fixed as
+   part of verifying the last of them.
 
 Not on this numbered list but still open whenever it's picked back up:
 widening either VAT computation — FR: remaining taux particuliers beyond

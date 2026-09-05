@@ -9,8 +9,16 @@ import type { CashFlowStatement, FluxExploitation, FluxFinancement, FluxInvestis
 import { ApiError } from '../api/client';
 import { useAppContext } from '../context/appContextStore';
 import { formatMoneyFr, isZeroMoney, subtractMoneyStrings } from '../lib/money';
+import { useSectionTab } from '../lib/useSectionTab';
+import { SectionTabs, type TabSection } from '../components/layout/SectionTabs';
 
 const NO_ECRITURES: never[] = [];
+
+const FLUX_TABS: TabSection[] = [
+  { id: 'exploitation', label: "Exploitation" },
+  { id: 'investissement', label: 'Investissement' },
+  { id: 'financement', label: 'Financement' },
+];
 
 export function CashFlowPage() {
   const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
@@ -18,6 +26,10 @@ export function CashFlowPage() {
   const generateCashFlow = useGenerateCashFlow();
   const downloadPdf = useDownloadCashFlowPdf();
   const downloadExcel = useDownloadCashFlowExcel();
+  const [activeTab, setActiveTab] = useSectionTab(
+    FLUX_TABS.map((t) => t.id),
+    'exploitation',
+  );
 
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
 
@@ -135,9 +147,12 @@ export function CashFlowPage() {
       {statement && (
         <>
           <ReconciliationBanner statement={statement} />
-          <FluxExploitationSection flux={statement.fluxExploitation} />
-          <FluxInvestissementSection flux={statement.fluxInvestissement} />
-          <FluxFinancementSection flux={statement.fluxFinancement} />
+
+          <SectionTabs sections={FLUX_TABS} activeId={activeTab} onChange={setActiveTab} />
+
+          {activeTab === 'exploitation' && <FluxExploitationSection flux={statement.fluxExploitation} />}
+          {activeTab === 'investissement' && <FluxInvestissementSection flux={statement.fluxInvestissement} />}
+          {activeTab === 'financement' && <FluxFinancementSection flux={statement.fluxFinancement} />}
         </>
       )}
     </div>

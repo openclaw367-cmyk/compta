@@ -79,6 +79,22 @@ export interface PendingInvite {
   createdAt: string;
 }
 
+export type ActivityEventType =
+  | 'MEMBER_INVITED'
+  | 'MEMBER_INVITE_ACCEPTED'
+  | 'MEMBER_ROLE_CHANGED'
+  | 'MEMBER_REMOVED';
+
+/** A single row from GET /activity — see CLAUDE.md "Activity feed". */
+export interface ActivityEvent {
+  id: string;
+  type: ActivityEventType;
+  actorEmail: string;
+  targetEmail: string | null;
+  detail: string | null;
+  createdAt: string;
+}
+
 export interface MembershipsList {
   members: Member[];
   pendingInvites: PendingInvite[];

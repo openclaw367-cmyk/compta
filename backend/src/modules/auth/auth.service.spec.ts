@@ -5,6 +5,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AccessTokenService } from '../../common/auth/access-token.service';
 import { hashOpaqueToken } from '../../common/auth/opaque-token';
 import { CompaniesService } from '../companies/companies.service';
+import { ActivityService } from '../activity/activity.service';
 
 function makePrismaMock() {
   return {
@@ -42,13 +43,15 @@ function makeService(prisma: ReturnType<typeof makePrismaMock>) {
     sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
     sendCompanyInviteEmail: jest.fn().mockResolvedValue(undefined),
   };
+  const activity = { log: jest.fn().mockResolvedValue(undefined) };
   const service = new AuthService(
     prisma as unknown as PrismaService,
     companiesService as unknown as CompaniesService,
     accessTokens as unknown as AccessTokenService,
     mailer,
+    activity as unknown as ActivityService,
   );
-  return { service, prisma, companiesService, accessTokens, mailer };
+  return { service, prisma, companiesService, accessTokens, mailer, activity };
 }
 
 describe('AuthService', () => {
@@ -268,7 +271,7 @@ describe('AuthService', () => {
 
   describe('acceptInvite', () => {
     it('creates a brand-new user + membership when the invited email has no account yet', async () => {
-      const { service, prisma } = makeService(makePrismaMock());
+      const { service, prisma, activity } = makeService(makePrismaMock());
       prisma.companyInvite.findUnique.mockResolvedValue({
         id: 'invite-1',
         companyId: 'company-1',
@@ -286,6 +289,11 @@ describe('AuthService', () => {
       expect(prisma.user.create).toHaveBeenCalled();
       expect(prisma.$transaction).toHaveBeenCalled();
       expect(result.user.email).toBe('new@example.com');
+      expect(activity.log).toHaveBeenCalledWith(
+        { companyId: 'company-1', role: 'MEMBER' },
+        'MEMBER_INVITE_ACCEPTED',
+        'new@example.com',
+      );
     });
 
     it('rejects when creating a new account and no password is supplied', async () => {

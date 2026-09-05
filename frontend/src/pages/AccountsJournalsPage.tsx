@@ -4,9 +4,16 @@ import type { CreateAccountDto, CreateJournalDto } from '../api/dto';
 import { ApiError } from '../api/client';
 import type { Journal } from '../api/types';
 import { SettingsBackLink } from '../components/layout/SettingsBackLink';
+import { SectionTabs, type TabSection } from '../components/layout/SectionTabs';
+import { useSectionTab } from '../lib/useSectionTab';
 
 const NO_JOURNALS: never[] = [];
 const NO_ACCOUNTS: never[] = [];
+
+const ACCOUNTS_JOURNALS_TABS: TabSection[] = [
+  { id: 'journaux', label: 'Journaux' },
+  { id: 'comptes', label: 'Comptes' },
+];
 
 const JOURNAL_TYPE_LABEL: Record<Journal['type'], string> = {
   ACHATS: 'Achats',
@@ -29,6 +36,11 @@ const PCG_CLASS_LABEL: Record<number, string> = {
 };
 
 export function AccountsJournalsPage() {
+  const [activeTab, setActiveTab] = useSectionTab(
+    ACCOUNTS_JOURNALS_TABS.map((t) => t.id),
+    'journaux',
+  );
+
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-8 px-8 py-8">
       <SettingsBackLink />
@@ -39,8 +51,10 @@ export function AccountsJournalsPage() {
         </p>
       </header>
 
-      <JournalsSection />
-      <AccountsSection />
+      <SectionTabs sections={ACCOUNTS_JOURNALS_TABS} activeId={activeTab} onChange={setActiveTab} />
+
+      {activeTab === 'journaux' && <JournalsSection />}
+      {activeTab === 'comptes' && <AccountsSection />}
     </div>
   );
 }

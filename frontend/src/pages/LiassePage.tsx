@@ -38,9 +38,11 @@ import type {
 import { ApiError } from '../api/client';
 import { useAppContext } from '../context/appContextStore';
 import { addMoneyStrings, formatMoneyFr, subtractMoneyStrings } from '../lib/money';
+import { useSectionTab } from '../lib/useSectionTab';
 import { LineTraceDrilldown } from '../components/ledger/LineTraceDrilldown';
 import { MovementTraceDrilldown } from '../components/ledger/MovementTraceDrilldown';
 import { AccountLedgerDrilldown } from '../components/ledger/AccountLedgerDrilldown';
+import { SectionTabs, type TabSection } from '../components/layout/SectionTabs';
 
 const NO_ECRITURES: never[] = [];
 const NO_JOURNALS: never[] = [];
@@ -223,6 +225,23 @@ const REGIME_LABEL: Record<'REEL_NORMAL' | 'REEL_SIMPLIFIE', string> = {
   REEL_SIMPLIFIE: 'réel simplifié (2033-A/2033-B)',
 };
 
+/** REEL_SIMPLIFIE has no 2054-2059 annexes — see CLAUDE.md "Liasse fiscale — régime réel simplifié". */
+const REEL_NORMAL_TABS: TabSection[] = [
+  { id: 'bilan', label: 'Bilan (2050-2051)' },
+  { id: 'resultat', label: 'Compte de résultat (2052-2053)' },
+  { id: 'immobilisations', label: 'Immobilisations (2054-2055)' },
+  { id: 'provisions', label: 'Provisions (2056)' },
+  { id: 'creances-dettes', label: 'Créances et dettes (2057)' },
+  { id: 'plus-values', label: 'Plus/moins-values (2059-A)' },
+  { id: 'comparaison', label: 'Comparaison' },
+];
+
+const REEL_SIMPLIFIE_TABS: TabSection[] = [
+  { id: 'bilan', label: 'Bilan (2033-A)' },
+  { id: 'resultat', label: 'Compte de résultat (2033-B)' },
+  { id: 'comparaison', label: 'Comparaison' },
+];
+
 export function LiassePage() {
   const companyQuery = useCompany();
   const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
@@ -266,6 +285,12 @@ export function LiassePage() {
   const isLoading = companyQuery.isLoading || fiscalYearsLoading || ecrituresQuery.isLoading;
   const result = generatedForFiscalYearId === fiscalYearId ? (generateLiasse.data ?? null) : null;
   const officialRegime = companyQuery.data?.regime;
+
+  const tabs = result?.regime === 'REEL_SIMPLIFIE' ? REEL_SIMPLIFIE_TABS : REEL_NORMAL_TABS;
+  const [activeTab, setActiveTab] = useSectionTab(
+    tabs.map((t) => t.id),
+    'bilan',
+  );
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-8 py-8">
@@ -348,11 +373,26 @@ export function LiassePage() {
 
       {result && (
         <>
-          {result.regime === 'REEL_NORMAL' ? (
-            <>
-              <BalanceBanner totalActifNet={result.bilan.totalActifNet} totalPassif={result.bilan.totalPassif} />
+          <BalanceBanner totalActifNet={result.bilan.totalActifNet} totalPassif={result.bilan.totalPassif} />
+
+          <SectionTabs sections={tabs} activeId={activeTab} onChange={setActiveTab} />
+
+          {activeTab === 'bilan' &&
+            (result.regime === 'REEL_NORMAL' ? (
               <BilanSection bilan={result.bilan} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
+            ) : (
+              <Bilan2033ASection bilan={result.bilan} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
+            ))}
+
+          {activeTab === 'resultat' &&
+            (result.regime === 'REEL_NORMAL' ? (
               <CompteResultatSection compteResultat={result.compteResultat} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
+            ) : (
+              <CompteResultat2033BSection compteResultat={result.compteResultat} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
+            ))}
+
+          {result.regime === 'REEL_NORMAL' && activeTab === 'immobilisations' && (
+            <>
               <TableauxArticulationBanner
                 bilan={result.bilan}
                 tableau2054={result.tableau2054}
@@ -360,32 +400,41 @@ export function LiassePage() {
               />
               <Tableau2054Section tableau2054={result.tableau2054} fiscalYearId={fiscalYearId!} fiscalYears={fiscalYears} journals={journals} />
               <Tableau2055Section tableau2055={result.tableau2055} fiscalYearId={fiscalYearId!} fiscalYears={fiscalYears} journals={journals} />
-              <Tableau2056ArticulationBanner bilan={result.bilan} tableau2056={result.tableau2056} />
-              <Tableau2056Section tableau2056={result.tableau2056} fiscalYearId={fiscalYearId!} fiscalYears={fiscalYears} journals={journals} />
-              <Tableau2057ArticulationBanner bilan={result.bilan} tableau2057={result.tableau2057} />
-              <Tableau2057Section tableau2057={result.tableau2057} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
-              <Tableau2059Section tableau2059={result.tableau2059} fiscalYearId={fiscalYearId!} journals={journals} />
-            </>
-          ) : (
-            <>
-              <BalanceBanner totalActifNet={result.bilan.totalActifNet} totalPassif={result.bilan.totalPassif} />
-              <Bilan2033ASection bilan={result.bilan} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
-              <CompteResultat2033BSection compteResultat={result.compteResultat} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
             </>
           )}
 
-          <ComparisonSection
-            isPending={generateSecondary.isPending}
-            isError={generateSecondary.isError}
-            errorMessage={
-              generateSecondary.error instanceof ApiError
-                ? generateSecondary.error.message
-                : 'Erreur inconnue.'
-            }
-            result={generateSecondary.data ?? null}
-            fiscalYearId={fiscalYearId!}
-            journals={journals}
-          />
+          {result.regime === 'REEL_NORMAL' && activeTab === 'provisions' && (
+            <>
+              <Tableau2056ArticulationBanner bilan={result.bilan} tableau2056={result.tableau2056} />
+              <Tableau2056Section tableau2056={result.tableau2056} fiscalYearId={fiscalYearId!} fiscalYears={fiscalYears} journals={journals} />
+            </>
+          )}
+
+          {result.regime === 'REEL_NORMAL' && activeTab === 'creances-dettes' && (
+            <>
+              <Tableau2057ArticulationBanner bilan={result.bilan} tableau2057={result.tableau2057} />
+              <Tableau2057Section tableau2057={result.tableau2057} fiscalYearId={fiscalYearId!} regime={result.regime} journals={journals} />
+            </>
+          )}
+
+          {result.regime === 'REEL_NORMAL' && activeTab === 'plus-values' && (
+            <Tableau2059Section tableau2059={result.tableau2059} fiscalYearId={fiscalYearId!} journals={journals} />
+          )}
+
+          {activeTab === 'comparaison' && (
+            <ComparisonSection
+              isPending={generateSecondary.isPending}
+              isError={generateSecondary.isError}
+              errorMessage={
+                generateSecondary.error instanceof ApiError
+                  ? generateSecondary.error.message
+                  : 'Erreur inconnue.'
+              }
+              result={generateSecondary.data ?? null}
+              fiscalYearId={fiscalYearId!}
+              journals={journals}
+            />
+          )}
         </>
       )}
     </div>

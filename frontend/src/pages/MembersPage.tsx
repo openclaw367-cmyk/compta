@@ -10,7 +10,9 @@ import {
 import { ApiError } from '../api/client';
 import { useAppContext } from '../context/appContextStore';
 import { useAuth } from '../context/authContextStore';
+import { useToast } from '../context/toastStore';
 import { SettingsBackLink } from '../components/layout/SettingsBackLink';
+import { ActivityFeedSection } from '../components/activity/ActivityFeedSection';
 
 const ROLE_LABEL: Record<MembershipRole, string> = {
   OWNER: 'Propriétaire',
@@ -36,6 +38,7 @@ const ROLE_DESCRIPTION: Record<MembershipRole, string> = {
 export function MembersPage() {
   const { currentCompany } = useAppContext();
   const { user } = useAuth();
+  const toast = useToast();
   const membershipsQuery = useMemberships();
   const inviteMember = useInviteMember();
   const revokeInvite = useRevokeInvite();
@@ -56,10 +59,13 @@ export function MembersPage() {
     setError(null);
     try {
       await inviteMember.mutateAsync({ email: inviteEmail.trim(), role: inviteRole });
+      toast.show('success', `Invitation envoyée à ${inviteEmail.trim()}.`);
       setInviteEmail('');
       setInviteRole('MEMBER');
     } catch (err) {
-      setError(err instanceof ApiError ? err.details : ["L'invitation a échoué."]);
+      const details = err instanceof ApiError ? err.details : ["L'invitation a échoué."];
+      setError(details);
+      toast.show('error', details[0]);
     }
   }
 
@@ -67,8 +73,11 @@ export function MembersPage() {
     setError(null);
     try {
       await updateRole.mutateAsync({ membershipId, role });
+      toast.show('success', 'Rôle mis à jour.');
     } catch (err) {
-      setError(err instanceof ApiError ? err.details : ['Le changement de rôle a échoué.']);
+      const details = err instanceof ApiError ? err.details : ['Le changement de rôle a échoué.'];
+      setError(details);
+      toast.show('error', details[0]);
     }
   }
 
@@ -77,8 +86,11 @@ export function MembersPage() {
     setError(null);
     try {
       await removeMember.mutateAsync(member.id);
+      toast.show('success', `${member.email} a été retiré de la société.`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.details : ['La suppression a échoué.']);
+      const details = err instanceof ApiError ? err.details : ['La suppression a échoué.'];
+      setError(details);
+      toast.show('error', details[0]);
     }
   }
 
@@ -86,8 +98,11 @@ export function MembersPage() {
     setError(null);
     try {
       await revokeInvite.mutateAsync(invite.id);
+      toast.show('info', `Invitation à ${invite.email} annulée.`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.details : ["L'annulation a échoué."]);
+      const details = err instanceof ApiError ? err.details : ["L'annulation a échoué."];
+      setError(details);
+      toast.show('error', details[0]);
     }
   }
 
@@ -235,6 +250,8 @@ export function MembersPage() {
           </div>
         </section>
       )}
+
+      <ActivityFeedSection />
     </div>
   );
 }

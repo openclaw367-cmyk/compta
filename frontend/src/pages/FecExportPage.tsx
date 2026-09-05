@@ -9,6 +9,7 @@ import {
 } from '../api/queries';
 import { ApiError } from '../api/client';
 import { downloadTextFile } from '../lib/download';
+import { PageSkeleton } from '../components/layout/PageSkeleton';
 
 const NO_FISCAL_YEARS: never[] = [];
 const NO_JOURNALS: never[] = [];
@@ -89,11 +90,7 @@ export function FecExportPage() {
     fiscalYearsQuery.isLoading || journalsQuery.isLoading || ecrituresQuery.isLoading;
 
   if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center text-[13px] text-ink-faint">
-        Chargement…
-      </div>
-    );
+    return <PageSkeleton maxWidth="max-w-3xl" blocks={1} />;
   }
 
   // The backend refuses the whole export — never a partial one — while

@@ -18,6 +18,7 @@ import { EcrituresList } from '../components/journal/EcrituresList';
 import { EcritureEditor } from '../components/journal/EcritureEditor';
 import { ApplyTemplateDialog } from '../components/journal/ApplyTemplateDialog';
 import { useAppContext } from '../context/appContextStore';
+import { useToast } from '../context/toastStore';
 
 type EditorState =
   | { mode: 'closed' }
@@ -50,11 +51,16 @@ export function JournalEntriesPage() {
   const validateEcriture = useValidateEcriture();
   const reverseEcriture = useReverseEcriture();
   const markTemplateApplied = useMarkTemplateApplied();
+  const toast = useToast();
 
   const [journalId, setJournalId] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState>({ mode: 'closed' });
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Reverse's own confirmation stays a persistent, dismissible banner
+  // (not a toast) since it carries an actionable next step — "select it
+  // to validate" — worth more than a few seconds on screen. Validate/
+  // delete are pure fire-and-forget confirmations, a toast fits better.
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionWarnings, setActionWarnings] = useState<string[] | null>(null);
   const [searchParams] = useSearchParams();
@@ -141,6 +147,7 @@ export function JournalEntriesPage() {
     setActionSuccess(null);
     try {
       await deleteEcriture.mutateAsync(ecriture.id);
+      toast.show('info', `Brouillon « ${label} » supprimé.`);
       if (editor.mode === 'edit' && editor.ecriture.id === ecriture.id) {
         setEditor({ mode: 'closed' });
       }
@@ -163,6 +170,7 @@ export function JournalEntriesPage() {
     setActionSuccess(null);
     try {
       await validateEcriture.mutateAsync(ecriture.id);
+      toast.show('success', `Écriture « ${label} » validée.`);
       if (editor.mode === 'edit' && editor.ecriture.id === ecriture.id) {
         setEditor({ mode: 'closed' });
       }

@@ -8,6 +8,7 @@ import { MembershipsService } from './memberships.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { MailerPort } from '../mailer/mailer.port';
+import { ActivityService } from '../activity/activity.service';
 
 const owner: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 const member: CompanyContext = { companyId: 'company-1', role: 'MEMBER' };
@@ -37,18 +38,20 @@ function makePrismaMock() {
 
 function makeService(prisma: ReturnType<typeof makePrismaMock>) {
   const mailer = { sendCompanyInviteEmail: jest.fn().mockResolvedValue(undefined) };
+  const activity = { log: jest.fn().mockResolvedValue(undefined) };
   const service = new MembershipsService(
     prisma as unknown as PrismaService,
     mailer as unknown as MailerPort,
+    activity as unknown as ActivityService,
   );
-  return { service, mailer };
+  return { service, mailer, activity };
 }
 
 describe('MembershipsService', () => {
   describe('invite', () => {
     it('an OWNER can invite a new email, creating the invite and emailing it', async () => {
       const prisma = makePrismaMock();
-      const { service, mailer } = makeService(prisma);
+      const { service, mailer, activity } = makeService(prisma);
 
       await service.invite(owner, caller, { email: 'New@Example.com', role: 'MEMBER' });
 
@@ -68,6 +71,9 @@ describe('MembershipsService', () => {
         expect.stringContaining('/invitation?token='),
         'owner@example.com',
       );
+      expect(activity.log).toHaveBeenCalledWith(owner, 'MEMBER_INVITED', caller.email, {
+        targetEmail: 'new@example.com',
+      });
     });
 
     it('a non-owner (MEMBER) cannot invite — this service enforces its own OWNER-only check', async () => {
@@ -95,13 +101,18 @@ describe('MembershipsService', () => {
         id: 'membership-2',
         companyId: 'company-1',
         role: 'MEMBER',
+        user: { email: 'member@example.com' },
       });
-      const { service } = makeService(prisma);
+      const { service, activity } = makeService(prisma);
 
-      await service.updateRole(owner, 'membership-2', 'READ_ONLY');
+      await service.updateRole(owner, caller, 'membership-2', 'READ_ONLY');
       expect(prisma.membership.update).toHaveBeenCalledWith({
         where: { id: 'membership-2' },
         data: { role: 'READ_ONLY' },
+      });
+      expect(activity.log).toHaveBeenCalledWith(owner, 'MEMBER_ROLE_CHANGED', caller.email, {
+        targetEmail: 'member@example.com',
+        detail: 'MEMBER → READ_ONLY',
       });
     });
 
@@ -111,11 +122,12 @@ describe('MembershipsService', () => {
         id: 'membership-1',
         companyId: 'company-1',
         role: 'OWNER',
+        user: { email: 'owner2@example.com' },
       });
       prisma.membership.count.mockResolvedValue(0); // no other owners
       const { service } = makeService(prisma);
 
-      await expect(service.updateRole(owner, 'membership-1', 'MEMBER')).rejects.toThrow(
+      await expect(service.updateRole(owner, caller, 'membership-1', 'MEMBER')).rejects.toThrow(
         BadRequestException,
       );
       expect(prisma.membership.update).not.toHaveBeenCalled();
@@ -127,11 +139,12 @@ describe('MembershipsService', () => {
         id: 'membership-1',
         companyId: 'company-1',
         role: 'OWNER',
+        user: { email: 'owner2@example.com' },
       });
       prisma.membership.count.mockResolvedValue(1); // one other owner exists
       const { service } = makeService(prisma);
 
-      await service.updateRole(owner, 'membership-1', 'MEMBER');
+      await service.updateRole(owner, caller, 'membership-1', 'MEMBER');
       expect(prisma.membership.update).toHaveBeenCalled();
     });
 
@@ -141,10 +154,11 @@ describe('MembershipsService', () => {
         id: 'membership-x',
         companyId: 'some-other-company',
         role: 'MEMBER',
+        user: { email: 'other@example.com' },
       });
       const { service } = makeService(prisma);
 
-      await expect(service.updateRole(owner, 'membership-x', 'READ_ONLY')).rejects.toThrow(
+      await expect(service.updateRole(owner, caller, 'membership-x', 'READ_ONLY')).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -157,11 +171,15 @@ describe('MembershipsService', () => {
         id: 'membership-2',
         companyId: 'company-1',
         role: 'MEMBER',
+        user: { email: 'member@example.com' },
       });
-      const { service } = makeService(prisma);
+      const { service, activity } = makeService(prisma);
 
-      await service.remove(owner, 'membership-2');
+      await service.remove(owner, caller, 'membership-2');
       expect(prisma.membership.delete).toHaveBeenCalledWith({ where: { id: 'membership-2' } });
+      expect(activity.log).toHaveBeenCalledWith(owner, 'MEMBER_REMOVED', caller.email, {
+        targetEmail: 'member@example.com',
+      });
     });
 
     it('refuses to remove the LAST remaining owner', async () => {
@@ -170,11 +188,14 @@ describe('MembershipsService', () => {
         id: 'membership-1',
         companyId: 'company-1',
         role: 'OWNER',
+        user: { email: 'owner2@example.com' },
       });
       prisma.membership.count.mockResolvedValue(0);
       const { service } = makeService(prisma);
 
-      await expect(service.remove(owner, 'membership-1')).rejects.toThrow(BadRequestException);
+      await expect(service.remove(owner, caller, 'membership-1')).rejects.toThrow(
+        BadRequestException,
+      );
       expect(prisma.membership.delete).not.toHaveBeenCalled();
     });
   });

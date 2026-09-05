@@ -3,6 +3,7 @@ import { useAppContext } from '../../context/appContextStore';
 import { useAuth } from '../../context/authContextStore';
 import { usePreferences, type ThemePreference } from '../../context/preferencesStore';
 import { labelForPath } from '../../lib/navigation';
+import { CommandPalette } from '../command/CommandPalette';
 import { IconLogout, IconMonitor, IconMoon, IconPlus, IconSun } from './icons';
 
 const THEME_OPTIONS: { value: ThemePreference; label: string; Icon: typeof IconSun }[] = [
@@ -89,6 +90,8 @@ export function TopBar() {
           <span className="shrink-0 text-[13px] font-medium text-ink">{currentCompany.name}</span>
         )
       )}
+
+      <CommandPalette />
 
       <Link
         to="/parametres/nouvelle-societe"

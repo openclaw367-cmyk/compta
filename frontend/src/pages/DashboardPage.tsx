@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import { useAnomaliesSummary, useCompany, useDashboardSummary } from '../api/queries';
+import { useCompany, useDashboardSummary } from '../api/queries';
 import { useAppContext } from '../context/appContextStore';
 import type {
   DashboardAssocieBalance,
@@ -19,7 +19,8 @@ import {
   subtractMoneyStrings,
 } from '../lib/money';
 import { IconDocument, IconTrendUp, IconWallet } from '../components/layout/icons';
-import { PaymentAnomalyRow, SpendingAnomalyRow } from '../components/anomalies/AnomalyRows';
+import { OnboardingChecklist } from '../components/dashboard/OnboardingChecklist';
+import { NeedsAttentionPanel } from '../components/dashboard/NeedsAttentionPanel';
 
 type IconComponent = (props: { className?: string }) => ReactNode;
 
@@ -76,7 +77,9 @@ export function DashboardPage() {
         </p>
       </header>
 
-      {fiscalYearId && <AnomaliesSection fiscalYearId={fiscalYearId} />}
+      <OnboardingChecklist />
+
+      <NeedsAttentionPanel />
 
       {!summary.available ? (
         <div className="rounded-lg border border-warning bg-warning-soft p-5 text-[13px] text-warning">
@@ -456,74 +459,12 @@ function RevenusDepensesChart({
 }
 
 // ---------------------------------------------------------------------------
-// Anomalies — see CLAUDE.md "Anomaly surfacing". A SEPARATE, independently-
-// loading query from useDashboardSummary() (its own useAnomaliesSummary()
-// call) — a failure or slow load here must never block the rest of the
-// dashboard, so this section renders nothing rather than an error banner
-// on failure, same as it renders nothing while still loading.
+// The former anomalies-only tile has been superseded by
+// NeedsAttentionPanel (components/dashboard/NeedsAttentionPanel.tsx),
+// which folds the same anomalies feed into a broader "what needs a look
+// today" card alongside draft-écriture and pending-invite signals — see
+// CLAUDE.md "Anomaly surfacing" for the underlying data this still reads.
 // ---------------------------------------------------------------------------
-
-function AnomaliesSection({ fiscalYearId }: { fiscalYearId: string }) {
-  const anomaliesQuery = useAnomaliesSummary(fiscalYearId);
-
-  if (anomaliesQuery.isLoading) {
-    return <div className="h-20 w-full animate-pulse rounded-lg bg-border" />;
-  }
-  if (anomaliesQuery.isError || !anomaliesQuery.data) {
-    return null;
-  }
-
-  const { spending, payments } = anomaliesQuery.data;
-  const totalCount = spending.length + payments.length;
-  const highPayments = payments.filter((p) => p.matchTier === 'HIGH');
-  const otherPayments = payments
-    .filter((p) => p.matchTier !== 'HIGH')
-    .sort((a, b) => b.daysOverdue - a.daysOverdue);
-  const sortedSpending = [...spending].sort((a, b) => Number(b.multiplier) - Number(a.multiplier));
-
-  type Item =
-    | { kind: 'spending'; key: string; anomaly: (typeof spending)[number] }
-    | { kind: 'payment'; key: string; anomaly: (typeof payments)[number] };
-  const items: Item[] = [
-    ...highPayments.map((a): Item => ({ kind: 'payment', key: a.invoiceId, anomaly: a })),
-    ...sortedSpending.map((a): Item => ({ kind: 'spending', key: `${a.accountId}-${a.month}`, anomaly: a })),
-    ...otherPayments.map((a): Item => ({ kind: 'payment', key: a.invoiceId, anomaly: a })),
-  ].slice(0, 5);
-
-  return (
-    <div className="rounded-lg border border-border bg-surface p-5 shadow-card">
-      <div className="flex items-center justify-between gap-3">
-        <SectionTitle
-          title="Anomalies"
-          description="Signaux à surveiller — jamais bloquants, jamais appliqués automatiquement."
-        />
-        {totalCount > 0 && (
-          <Link
-            to="/anomalies"
-            className="shrink-0 text-[12px] font-medium text-accent hover:text-accent-hover"
-          >
-            Tout voir ({totalCount}) →
-          </Link>
-        )}
-      </div>
-      {items.length === 0 ? (
-        <p className="mt-4 text-[12.5px] text-ink-faint">
-          Aucune anomalie détectée pour cet exercice.
-        </p>
-      ) : (
-        <div className="mt-3 flex flex-col gap-2">
-          {items.map((item) =>
-            item.kind === 'spending' ? (
-              <SpendingAnomalyRow key={`s-${item.key}`} anomaly={item.anomaly} />
-            ) : (
-              <PaymentAnomalyRow key={`p-${item.key}`} anomaly={item.anomaly} />
-            ),
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Recent bank transactions — class-5 entries, already filtered/sorted

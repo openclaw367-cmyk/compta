@@ -3,6 +3,7 @@ import { AppShell } from './components/layout/AppShell';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { AppProvider } from './context/AppProvider';
 import { AuthProvider } from './context/AuthProvider';
+import { ToastProvider } from './context/ToastProvider';
 import { PreferencesProvider } from './context/PreferencesProvider';
 import { usePreferences } from './context/preferencesStore';
 import { LoginPage } from './pages/LoginPage';
@@ -70,37 +71,39 @@ export default function App() {
             element={
               <RequireAuth>
                 <AppProvider>
-                  <AppShell>
-                    <Routes>
-                      <Route path="/" element={<HomeRedirect />} />
-                      <Route path="/tableau-de-bord" element={<DashboardPage />} />
-                      <Route path="/ecritures" element={<JournalEntriesPage />} />
-                      <Route path="/factures" element={<InvoicingPage />} />
-                      <Route path="/factures/lot" element={<BatchInvoiceQueuePage />} />
-                      <Route path="/modeles" element={<RecurringTemplatesPage />} />
-                      <Route path="/anomalies" element={<AnomaliesPage />} />
-                      <Route path="/exercices" element={<FiscalYearsPage />} />
-                      <Route path="/tiers" element={<TiersPage />} />
-                      <Route path="/comptes" element={<AccountsJournalsPage />} />
-                      <Route path="/societe" element={<CompanyProfilePage />} />
-                      <Route path="/grand-livre" element={<GrandLivrePage />} />
-                      <Route path="/import" element={<ImportExcelPage />} />
-                      <Route path="/rapprochement-bancaire" element={<BankReconciliationPage />} />
-                      <Route path="/fec" element={<FecExportPage />} />
-                      <Route path="/immobilisations" element={<ImmobilisationsPage />} />
-                      <Route path="/immobilisations/:id" element={<FixedAssetDetailPage />} />
-                      <Route path="/tva" element={<VatPage />} />
-                      <Route path="/liasse" element={<LiassePage />} />
-                      <Route path="/flux-tresorerie" element={<CashFlowPage />} />
-                      <Route path="/analyse-financiere" element={<FinancialAnalysisPage />} />
-                      <Route path="/resultat-fiscal" element={<ResultatFiscalPage />} />
-                      <Route path="/assistant" element={<AssistantPage />} />
-                      <Route path="/assistant/parametres" element={<AssistantSettingsPage />} />
-                      <Route path="/parametres" element={<SettingsPage />} />
-                      <Route path="/parametres/nouvelle-societe" element={<CreateCompanyPage />} />
-                      <Route path="/parametres/membres" element={<MembersPage />} />
-                    </Routes>
-                  </AppShell>
+                  <ToastProvider>
+                    <AppShell>
+                      <Routes>
+                        <Route path="/" element={<HomeRedirect />} />
+                        <Route path="/tableau-de-bord" element={<DashboardPage />} />
+                        <Route path="/ecritures" element={<JournalEntriesPage />} />
+                        <Route path="/factures" element={<InvoicingPage />} />
+                        <Route path="/factures/lot" element={<BatchInvoiceQueuePage />} />
+                        <Route path="/modeles" element={<RecurringTemplatesPage />} />
+                        <Route path="/anomalies" element={<AnomaliesPage />} />
+                        <Route path="/exercices" element={<FiscalYearsPage />} />
+                        <Route path="/tiers" element={<TiersPage />} />
+                        <Route path="/comptes" element={<AccountsJournalsPage />} />
+                        <Route path="/societe" element={<CompanyProfilePage />} />
+                        <Route path="/grand-livre" element={<GrandLivrePage />} />
+                        <Route path="/import" element={<ImportExcelPage />} />
+                        <Route path="/rapprochement-bancaire" element={<BankReconciliationPage />} />
+                        <Route path="/fec" element={<FecExportPage />} />
+                        <Route path="/immobilisations" element={<ImmobilisationsPage />} />
+                        <Route path="/immobilisations/:id" element={<FixedAssetDetailPage />} />
+                        <Route path="/tva" element={<VatPage />} />
+                        <Route path="/liasse" element={<LiassePage />} />
+                        <Route path="/flux-tresorerie" element={<CashFlowPage />} />
+                        <Route path="/analyse-financiere" element={<FinancialAnalysisPage />} />
+                        <Route path="/resultat-fiscal" element={<ResultatFiscalPage />} />
+                        <Route path="/assistant" element={<AssistantPage />} />
+                        <Route path="/assistant/parametres" element={<AssistantSettingsPage />} />
+                        <Route path="/parametres" element={<SettingsPage />} />
+                        <Route path="/parametres/nouvelle-societe" element={<CreateCompanyPage />} />
+                        <Route path="/parametres/membres" element={<MembersPage />} />
+                      </Routes>
+                    </AppShell>
+                  </ToastProvider>
                 </AppProvider>
               </RequireAuth>
             }

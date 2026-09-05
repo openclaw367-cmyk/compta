@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useCompany, useUpdateCompany } from '../api/queries';
 import { SettingsBackLink } from '../components/layout/SettingsBackLink';
+import { PageSkeleton } from '../components/layout/PageSkeleton';
 import type { UpdateCompanyDto } from '../api/dto';
 import { ApiError } from '../api/client';
 import type { Company, RegimeTvaServices } from '../api/types';
@@ -110,11 +111,7 @@ export function CompanyProfilePage() {
   }
 
   if (companyQuery.isLoading || !draft) {
-    return (
-      <div className="flex h-full items-center justify-center text-[13px] text-ink-faint">
-        Chargement…
-      </div>
-    );
+    return <PageSkeleton maxWidth="max-w-2xl" blocks={2} />;
   }
 
   return (

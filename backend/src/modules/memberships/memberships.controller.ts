@@ -41,10 +41,11 @@ export class MembershipsController {
   @Patch(':membershipId')
   updateRole(
     @CurrentCompany() company: CompanyContext,
+    @CurrentUser() user: AuthenticatedUser,
     @Param('membershipId') membershipId: string,
     @Body() dto: UpdateMemberRoleDto,
   ) {
-    return this.membershipsService.updateRole(company, membershipId, dto.role);
+    return this.membershipsService.updateRole(company, user, membershipId, dto.role);
   }
 
   @ApiOperation({
@@ -53,7 +54,11 @@ export class MembershipsController {
       'last remaining owner.',
   })
   @Delete(':membershipId')
-  remove(@CurrentCompany() company: CompanyContext, @Param('membershipId') membershipId: string) {
-    return this.membershipsService.remove(company, membershipId);
+  remove(
+    @CurrentCompany() company: CompanyContext,
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('membershipId') membershipId: string,
+  ) {
+    return this.membershipsService.remove(company, user, membershipId);
   }
 }

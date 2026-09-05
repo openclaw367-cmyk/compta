@@ -4,6 +4,7 @@ import { downloadBlob } from '../lib/download';
 import type {
   Account,
   AccountLedgerResponse,
+  ActivityEvent,
   BankAccount,
   BankAggregatorLinkSummary,
   BankStatementImport,
@@ -437,6 +438,7 @@ export function useInviteMember() {
     mutationFn: (dto: InviteMemberDto) => api.post<void>('/memberships/invite', dto),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['memberships'] });
+      void queryClient.invalidateQueries({ queryKey: ['activity'] });
     },
   });
 }
@@ -451,6 +453,14 @@ export function useRevokeInvite() {
   });
 }
 
+/** Recent team activity for the current company — see NeedsAttentionPanel/ActivityFeedSection. */
+export function useActivityFeed() {
+  return useQuery({
+    queryKey: ['activity'],
+    queryFn: () => api.get<ActivityEvent[]>('/activity'),
+  });
+}
+
 export function useUpdateMemberRole() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -458,6 +468,7 @@ export function useUpdateMemberRole() {
       api.patch<void>(`/memberships/${membershipId}`, { role }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['memberships'] });
+      void queryClient.invalidateQueries({ queryKey: ['activity'] });
     },
   });
 }
@@ -468,6 +479,7 @@ export function useRemoveMember() {
     mutationFn: (membershipId: string) => api.delete<void>(`/memberships/${membershipId}`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['memberships'] });
+      void queryClient.invalidateQueries({ queryKey: ['activity'] });
     },
   });
 }

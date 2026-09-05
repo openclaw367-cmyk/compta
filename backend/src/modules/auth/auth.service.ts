@@ -13,6 +13,7 @@ import { AccessTokenService } from '../../common/auth/access-token.service';
 import { generateOpaqueToken, hashOpaqueToken } from '../../common/auth/opaque-token';
 import { CompaniesService } from '../companies/companies.service';
 import { MAILER_PORT, MailerPort } from '../mailer/mailer.port';
+import { ActivityService } from '../activity/activity.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
@@ -45,6 +46,7 @@ export class AuthService {
     private readonly companiesService: CompaniesService,
     private readonly accessTokens: AccessTokenService,
     @Inject(MAILER_PORT) private readonly mailer: MailerPort,
+    private readonly activity: ActivityService,
   ) {}
 
   /**
@@ -234,6 +236,12 @@ export class AuthService {
         data: { acceptedAt: new Date() },
       }),
     ]);
+
+    await this.activity.log(
+      { companyId: invite.companyId, role: invite.role },
+      'MEMBER_INVITE_ACCEPTED',
+      user.email,
+    );
 
     return this.issueTokenPair(user);
   }

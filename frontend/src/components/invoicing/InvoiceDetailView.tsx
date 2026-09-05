@@ -3,6 +3,7 @@ import { useDownloadFacturX, useInvoiceMentions, useMarkAsEncaisse } from '../..
 import { ApiError } from '../../api/client';
 import { formatMoneyFr } from '../../lib/money';
 import { useState } from 'react';
+import { useToast } from '../../context/toastStore';
 
 /**
  * A FINALIZED invoice, read-only — its content can never change (a
@@ -29,6 +30,7 @@ export function InvoiceDetailView({
   const mentionsQuery = useInvoiceMentions(invoice.id);
   const downloadFacturX = useDownloadFacturX();
   const markAsEncaisse = useMarkAsEncaisse();
+  const toast = useToast();
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [encaisseError, setEncaisseError] = useState<string | null>(null);
 
@@ -53,6 +55,7 @@ export function InvoiceDetailView({
     setEncaisseError(null);
     try {
       const updated = await markAsEncaisse.mutateAsync(invoice.id);
+      toast.show('success', `Facture n° ${updated.invoiceNumber} marquée comme encaissée.`);
       onEncaisseMarked(updated);
     } catch (e) {
       setEncaisseError(e instanceof ApiError ? e.message : "L'opération a échoué.");

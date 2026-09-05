@@ -278,3 +278,71 @@ export function IconAlertTriangle(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/** A checkmark in a circle — toast success, checklist completion. */
+export function IconCheckCircle(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="10" cy="10" r="7.5" />
+      <path d="M6.8 10.2l2.1 2.1 4.3-4.6" />
+    </svg>
+  );
+}
+
+/** An "x" in a circle — toast errors. */
+export function IconXCircle(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="10" cy="10" r="7.5" />
+      <path d="M7.5 7.5l5 5M12.5 7.5l-5 5" />
+    </svg>
+  );
+}
+
+/** An "i" in a circle — toast/info banners. */
+export function IconInfoCircle(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="10" cy="10" r="7.5" />
+      <path d="M10 9.3v4M10 6.8v.01" />
+    </svg>
+  );
+}
+
+/** A plain "x" — closing a toast/dialog. */
+export function IconX(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M5.5 5.5l9 9M14.5 5.5l-9 9" />
+    </svg>
+  );
+}
+
+/** A stylized sparkle — command palette trigger, "magic" affordances. */
+export function IconSparkle(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M10 3v3.2M10 13.8V17M3 10h3.2M13.8 10H17M5.5 5.5l1.8 1.8M12.7 12.7l1.8 1.8M14.5 5.5l-1.8 1.8M7.3 12.7l-1.8 1.8" />
+    </svg>
+  );
+}
+
+/** A search glass — command palette / global search. */
+export function IconSearch(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="9" cy="9" r="5.5" />
+      <path d="M13.2 13.2 17 17" />
+    </svg>
+  );
+}
+
+/** A bell — activity feed / notifications. */
+export function IconBell(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M6 8a4 4 0 0 1 8 0c0 3.2 1 4.5 1.5 5H4.5c.5-.5 1.5-1.8 1.5-5Z" />
+      <path d="M8.5 15.5a1.5 1.5 0 0 0 3 0" />
+    </svg>
+  );
+}

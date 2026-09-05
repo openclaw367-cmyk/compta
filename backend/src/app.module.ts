@@ -61,6 +61,8 @@ import { RecurringEntriesModule } from './modules/recurring-entries/recurring-en
 import { RecurringEntriesController } from './modules/recurring-entries/recurring-entries.controller';
 import { AnomaliesModule } from './modules/anomalies/anomalies.module';
 import { AnomaliesController } from './modules/anomalies/anomalies.controller';
+import { ActivityModule } from './modules/activity/activity.module';
+import { ActivityController } from './modules/activity/activity.controller';
 import { DevModule } from './modules/dev/dev.module';
 import { DevController } from './modules/dev/dev.controller';
 
@@ -100,6 +102,7 @@ const companyScopedControllers = [
   RecurringEntriesController,
   AnomaliesController,
   MembershipsController,
+  ActivityController,
   ...(isProduction ? [] : [DevController]),
 ];
 
@@ -136,6 +139,7 @@ const companyScopedControllers = [
     InvoicingModule,
     RecurringEntriesModule,
     AnomaliesModule,
+    ActivityModule,
     ...(isProduction ? [] : [DevModule]),
   ],
   providers: [{ provide: APP_GUARD, useClass: ReadOnlyGuard }],

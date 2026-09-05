@@ -12,6 +12,7 @@ import { CompanyContext } from '../../common/tenant/company-context';
 import { AuthenticatedUser } from '../../common/auth/request-with-user';
 import { generateOpaqueToken } from '../../common/auth/opaque-token';
 import { MAILER_PORT, MailerPort } from '../mailer/mailer.port';
+import { ActivityService } from '../activity/activity.service';
 import { InviteMemberDto } from './dto/invite-member.dto';
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -30,6 +31,7 @@ export class MembershipsService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(MAILER_PORT) private readonly mailer: MailerPort,
+    private readonly activity: ActivityService,
   ) {}
 
   async list(company: CompanyContext) {
@@ -88,6 +90,7 @@ export class MembershipsService {
     });
     const inviteUrl = `${this.frontendOrigin()}/invitation?token=${raw}`;
     await this.mailer.sendCompanyInviteEmail(email, companyRow.name, inviteUrl, caller.email);
+    await this.activity.log(company, 'MEMBER_INVITED', caller.email, { targetEmail: email });
   }
 
   async revokeInvite(company: CompanyContext, inviteId: string): Promise<void> {
@@ -101,6 +104,7 @@ export class MembershipsService {
 
   async updateRole(
     company: CompanyContext,
+    caller: AuthenticatedUser,
     membershipId: string,
     role: MembershipRole,
   ): Promise<Membership> {
@@ -109,16 +113,31 @@ export class MembershipsService {
     if (membership.role === 'OWNER' && role !== 'OWNER') {
       await this.assertNotLastOwner(company, membershipId);
     }
-    return this.prisma.membership.update({ where: { id: membershipId }, data: { role } });
+    const updated = await this.prisma.membership.update({
+      where: { id: membershipId },
+      data: { role },
+    });
+    await this.activity.log(company, 'MEMBER_ROLE_CHANGED', caller.email, {
+      targetEmail: membership.user.email,
+      detail: `${membership.role} → ${role}`,
+    });
+    return updated;
   }
 
-  async remove(company: CompanyContext, membershipId: string): Promise<void> {
+  async remove(
+    company: CompanyContext,
+    caller: AuthenticatedUser,
+    membershipId: string,
+  ): Promise<void> {
     this.assertOwner(company);
     const membership = await this.findMembershipOrThrow(company, membershipId);
     if (membership.role === 'OWNER') {
       await this.assertNotLastOwner(company, membershipId);
     }
     await this.prisma.membership.delete({ where: { id: membershipId } });
+    await this.activity.log(company, 'MEMBER_REMOVED', caller.email, {
+      targetEmail: membership.user.email,
+    });
   }
 
   private assertOwner(company: CompanyContext): void {
@@ -130,8 +149,11 @@ export class MembershipsService {
   private async findMembershipOrThrow(
     company: CompanyContext,
     membershipId: string,
-  ): Promise<Membership> {
-    const membership = await this.prisma.membership.findUnique({ where: { id: membershipId } });
+  ): Promise<Membership & { user: { email: string } }> {
+    const membership = await this.prisma.membership.findUnique({
+      where: { id: membershipId },
+      include: { user: { select: { email: true } } },
+    });
     if (!membership || membership.companyId !== company.companyId) {
       throw new NotFoundException('Membership not found.');
     }

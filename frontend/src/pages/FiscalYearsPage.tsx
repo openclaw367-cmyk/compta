@@ -10,6 +10,8 @@ import {
 import type { CreateFiscalYearDto } from '../api/dto';
 import type { FiscalYear } from '../api/types';
 import { ApiError } from '../api/client';
+import { PageSkeleton } from '../components/layout/PageSkeleton';
+import { useToast } from '../context/toastStore';
 
 const NO_FISCAL_YEARS: never[] = [];
 const NO_ECRITURES: never[] = [];
@@ -42,6 +44,7 @@ export function FiscalYearsPage() {
   const createFiscalYear = useCreateFiscalYear();
   const closeFiscalYear = useCloseFiscalYear();
   const generateANouveau = useGenerateANouveau();
+  const toast = useToast();
 
   const fiscalYears = fiscalYearsQuery.data ?? NO_FISCAL_YEARS;
   const sorted = [...fiscalYears].sort((a, b) => b.startDate.localeCompare(a.startDate));
@@ -97,6 +100,7 @@ export function FiscalYearsPage() {
     setClosingId(id);
     try {
       await closeFiscalYear.mutateAsync(id);
+      toast.show('success', `Exercice « ${label} » clôturé.`);
     } catch (error) {
       setCloseError(error instanceof ApiError ? error.message : 'La clôture a échoué.');
     } finally {
@@ -133,11 +137,7 @@ export function FiscalYearsPage() {
   }
 
   if (fiscalYearsQuery.isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center text-[13px] text-ink-faint">
-        Chargement…
-      </div>
-    );
+    return <PageSkeleton maxWidth="max-w-3xl" blocks={2} />;
   }
 
   return (

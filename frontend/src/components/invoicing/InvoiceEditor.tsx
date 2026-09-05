@@ -11,6 +11,7 @@ import { ApiError } from '../../api/client';
 import { AccountCombobox } from '../journal/AccountCombobox';
 import { InvoiceLinesEditor } from './InvoiceLinesEditor';
 import { emptyInvoiceLine, type DraftInvoiceLine } from '../../lib/invoiceLines';
+import { useToast } from '../../context/toastStore';
 
 function isClientAccount(account: Account): boolean {
   return account.number.startsWith('411') && account.isAuxiliary;
@@ -364,6 +365,7 @@ function FinalizeSection({
   onFinalized: (invoice: Invoice) => void;
 }) {
   const finalizeInvoice = useFinalizeInvoice();
+  const toast = useToast();
   const [draft, setDraft] = useState<ClientIdentityDraft>(emptyClientIdentityDraft());
   const [error, setError] = useState<string | null>(null);
 
@@ -390,6 +392,8 @@ function FinalizeSection({
     };
     try {
       const result = await finalizeInvoice.mutateAsync({ id: invoice.id, dto });
+      const kind = invoice.type === 'CREDIT_NOTE' ? 'Avoir' : 'Facture';
+      toast.show('success', `${kind} n° ${result.invoice.invoiceNumber} finalisé${invoice.type === 'CREDIT_NOTE' ? '' : 'e'}.`);
       onFinalized(result.invoice);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'La finalisation a échoué.');

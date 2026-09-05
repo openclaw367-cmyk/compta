@@ -16,10 +16,17 @@ import type { Ca3Declaration, Ca3RateLine, Ca3TraceColumn, FiscalYear } from '..
 import { ApiError } from '../api/client';
 import { formatMoneyFr, normalizeMoneyInput, sanitizeAmountBuffer } from '../lib/money';
 import { useAppContext } from '../context/appContextStore';
+import { useSectionTab } from '../lib/useSectionTab';
+import { SectionTabs, type TabSection } from '../components/layout/SectionTabs';
 
 const NO_RATES: never[] = [];
 const NO_ECRITURES: never[] = [];
 const TODAY = new Date().toISOString().slice(0, 10);
+
+const VAT_TABS: TabSection[] = [
+  { id: 'declaration', label: 'Déclaration CA3' },
+  { id: 'taux', label: 'Taux de TVA' },
+];
 
 function formatDate(iso: string): string {
   const [year, month, day] = iso.slice(0, 10).split('-');
@@ -31,6 +38,11 @@ function formatPercent(value: string): string {
 }
 
 export function VatPage() {
+  const [activeTab, setActiveTab] = useSectionTab(
+    VAT_TABS.map((t) => t.id),
+    'declaration',
+  );
+
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-8 py-8">
       <header>
@@ -40,8 +52,10 @@ export function VatPage() {
         </p>
       </header>
 
-      <DeclarationSection />
-      <RatesSection />
+      <SectionTabs sections={VAT_TABS} activeId={activeTab} onChange={setActiveTab} />
+
+      {activeTab === 'declaration' && <DeclarationSection />}
+      {activeTab === 'taux' && <RatesSection />}
     </div>
   );
 }

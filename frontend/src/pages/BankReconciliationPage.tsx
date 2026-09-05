@@ -31,8 +31,16 @@ import {
 import { ApiError } from '../api/client';
 import { formatMoneyFr, isNegativeMoney } from '../lib/money';
 import { isAuxiliaryBearingAccount } from '../lib/accounts';
+import { useSectionTab } from '../lib/useSectionTab';
 import { AccountCombobox } from '../components/journal/AccountCombobox';
 import { IconWallet } from '../components/layout/icons';
+import { SectionTabs, type TabSection } from '../components/layout/SectionTabs';
+import { useToast } from '../context/toastStore';
+
+const BANK_RECONCILIATION_TABS: TabSection[] = [
+  { id: 'releves', label: 'Relevés' },
+  { id: 'rapprochement', label: 'Rapprochement' },
+];
 
 function formatDate(iso: string): string {
   const [year, month, day] = iso.slice(0, 10).split('-');
@@ -55,6 +63,10 @@ export function BankReconciliationPage() {
 
   const bankAccounts = bankAccountsQuery.data ?? [];
   const selected = bankAccounts.find((b) => b.id === selectedId) ?? null;
+  const [activeTab, setActiveTab] = useSectionTab(
+    BANK_RECONCILIATION_TABS.map((t) => t.id),
+    'releves',
+  );
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6 px-8 py-8">
@@ -76,9 +88,19 @@ export function BankReconciliationPage() {
 
       {selected && (
         <>
-          <AggregatorSection bankAccount={selected} />
-          <StatementImportSection bankAccount={selected} />
-          <ReconciliationReview bankAccount={selected} />
+          <SectionTabs
+            sections={BANK_RECONCILIATION_TABS}
+            activeId={activeTab}
+            onChange={setActiveTab}
+          />
+
+          {activeTab === 'releves' && (
+            <>
+              <AggregatorSection bankAccount={selected} />
+              <StatementImportSection bankAccount={selected} />
+            </>
+          )}
+          {activeTab === 'rapprochement' && <ReconciliationReview bankAccount={selected} />}
         </>
       )}
     </div>
@@ -630,6 +652,7 @@ function ReviewSection({
 }) {
   const confirmMatch = useConfirmMatch(bankAccount.id);
   const ignoreLine = useIgnoreStatementLine(bankAccount.id);
+  const toast = useToast();
   const [selectedCandidate, setSelectedCandidate] = useState<Record<string, string>>({});
 
   return (
@@ -681,7 +704,9 @@ function ReviewSection({
                     type="button"
                     disabled={confirmMatch.isPending}
                     onClick={() =>
-                      void confirmMatch.mutateAsync({ statementLineId: line.id, ecritureLigneId: chosenId })
+                      void confirmMatch
+                        .mutateAsync({ statementLineId: line.id, ecritureLigneId: chosenId })
+                        .then(() => toast.show('success', 'Correspondance confirmée.'))
                     }
                     className="shrink-0 rounded-md bg-positive px-2.5 py-1 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-50"
                   >

@@ -4,6 +4,7 @@ import { useConfirmImport, useFiscalYears, usePreviewImport } from '../api/queri
 import { ApiError } from '../api/client';
 import type { ImportBatch, ImportPreviewResponse } from '../api/types';
 import { ImportPreviewTable } from '../components/import/ImportPreviewTable';
+import { PageSkeleton } from '../components/layout/PageSkeleton';
 
 const NO_FISCAL_YEARS: never[] = [];
 
@@ -78,11 +79,7 @@ export function ImportExcelPage() {
     !confirmImport.isPending;
 
   if (fiscalYearsQuery.isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center text-[13px] text-ink-faint">
-        Chargement…
-      </div>
-    );
+    return <PageSkeleton maxWidth="max-w-4xl" blocks={1} />;
   }
 
   return (

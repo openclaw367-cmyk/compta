@@ -28,8 +28,19 @@ import {
   isZeroMoney,
   subtractMoneyStrings,
 } from '../lib/money';
+import { useSectionTab } from '../lib/useSectionTab';
+import { SectionTabs, type TabSection } from '../components/layout/SectionTabs';
 
 const NO_ECRITURES: never[] = [];
+
+const ANALYSIS_TABS: TabSection[] = [
+  { id: 'sig', label: 'Soldes de gestion' },
+  { id: 'marges', label: 'Marges' },
+  { id: 'bfr', label: 'BFR & trésorerie' },
+  { id: 'fcf', label: 'Free cash flow' },
+  { id: 'endettement', label: 'Endettement' },
+  { id: 'ratios', label: 'Ratios' },
+];
 
 /** Day count (DSO/DPO/rotation stocks). */
 function formatDays(value: string | null): string {
@@ -45,6 +56,10 @@ export function FinancialAnalysisPage() {
   const downloadExcel = useDownloadFinancialAnalysisExcel();
 
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
+  const [activeTab, setActiveTab] = useSectionTab(
+    ANALYSIS_TABS.map((t) => t.id),
+    'sig',
+  );
 
   const [error, setError] = useState<string[] | null>(null);
   // See CashFlowPage.tsx's identical guard — never show a previous year's
@@ -155,14 +170,26 @@ export function FinancialAnalysisPage() {
 
       {result && (
         <>
-          <SigSection sig={result.sig} />
-          <MarginsSection margins={result.margins} />
-          <BfrSection bfr={result.bfr} fr={result.fondsDeRoulement} />
-          <TresorerieSection tresorerie={result.tresorerieNette} />
-          <FreeCashFlowSection fcf={result.freeCashFlow} />
-          <EndettementSection endettement={result.endettementEtCapitaux} />
-          <CoutDeLaDetteSection cout={result.coutDeLaDette} dettesFinancieres={result.endettementEtCapitaux.dettesFinancieres} />
-          <RatiosSection ratios={result.ratios} endettement={result.endettementEtCapitaux} />
+          <SectionTabs sections={ANALYSIS_TABS} activeId={activeTab} onChange={setActiveTab} />
+
+          {activeTab === 'sig' && <SigSection sig={result.sig} />}
+          {activeTab === 'marges' && <MarginsSection margins={result.margins} />}
+          {activeTab === 'bfr' && (
+            <>
+              <BfrSection bfr={result.bfr} fr={result.fondsDeRoulement} />
+              <TresorerieSection tresorerie={result.tresorerieNette} />
+            </>
+          )}
+          {activeTab === 'fcf' && <FreeCashFlowSection fcf={result.freeCashFlow} />}
+          {activeTab === 'endettement' && (
+            <>
+              <EndettementSection endettement={result.endettementEtCapitaux} />
+              <CoutDeLaDetteSection cout={result.coutDeLaDette} dettesFinancieres={result.endettementEtCapitaux.dettesFinancieres} />
+            </>
+          )}
+          {activeTab === 'ratios' && (
+            <RatiosSection ratios={result.ratios} endettement={result.endettementEtCapitaux} />
+          )}
         </>
       )}
     </div>

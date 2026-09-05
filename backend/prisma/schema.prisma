@@ -219,6 +219,7 @@ model Company {
   recurringEntryTemplates RecurringEntryTemplate[]
   memberships           Membership[]
   companyInvites        CompanyInvite[]
+  activityEvents        ActivityEvent[]
 }
 
 /// Exercice comptable. Ecritures are validated (locked) relative to a
@@ -1229,4 +1230,37 @@ model CompanyInvite {
 
   @@index([companyId])
   @@index([email])
+}
+
+/// The kinds of team/membership actions the activity feed surfaces — see
+/// CLAUDE.md "Activity feed" for why this is scoped to team actions only
+/// this pass, not a generic audit log of every write in the app.
+enum ActivityEventType {
+  MEMBER_INVITED
+  MEMBER_INVITE_ACCEPTED
+  MEMBER_ROLE_CHANGED
+  MEMBER_REMOVED
+}
+
+/// A lightweight, append-only trail of team/membership actions for a
+/// company — see CLAUDE.md "Activity feed". Deliberately NOT a generic
+/// audit log of every write this app makes (a much larger, separately-
+/// scoped project — see ActivityService's own doc comment) and
+/// deliberately NOT a live FK to User: actorEmail/targetEmail are
+/// snapshots of the email at the moment the event happened, so a later
+/// email change or account removal never rewrites history — the same
+/// snapshot discipline Invoice already applies to client identity (see
+/// CLAUDE.md "Invoicing — Phase A").
+model ActivityEvent {
+  id          String            @id @default(cuid())
+  companyId   String
+  type        ActivityEventType
+  actorEmail  String
+  targetEmail String?
+  detail      String?
+  createdAt   DateTime          @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
 }

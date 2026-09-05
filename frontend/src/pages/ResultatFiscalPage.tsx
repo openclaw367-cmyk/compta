@@ -13,8 +13,22 @@ import type { Journal, ResultatFiscalResult, ResultatFiscalTraceCode } from '../
 import { ApiError } from '../api/client';
 import { useAppContext } from '../context/appContextStore';
 import { formatMoneyFr, normalizeMoneyInput, sanitizeAmountBuffer } from '../lib/money';
+import { useSectionTab } from '../lib/useSectionTab';
 import { AccountLedgerDrilldown } from '../components/ledger/AccountLedgerDrilldown';
 import { LineTraceDrilldown } from '../components/ledger/LineTraceDrilldown';
+import { SectionTabs, type TabSection } from '../components/layout/SectionTabs';
+
+/**
+ * Only the two worksheets (réintégrations/déductions — the genuinely
+ * long, form-heavy parts) are tabbed; the honesty banner and the
+ * headline résultat comptable/résultat fiscal numbers stay always
+ * visible around them, so the "starting number → detail → ending
+ * number" flow of this worksheet is never hidden behind a click.
+ */
+const WORKSHEET_TABS: TabSection[] = [
+  { id: 'reintegrations', label: 'Réintégrations' },
+  { id: 'deductions', label: 'Déductions' },
+];
 
 const NO_JOURNALS: never[] = [];
 
@@ -78,6 +92,10 @@ export function ResultatFiscalPage() {
   const [wg, setWg] = useState<ConfirmableState>({ confirmed: false, value: '0.00' });
   const [declaredReintegrations, setDeclaredReintegrations] = useState<DeclaredRow[]>([]);
   const [declaredDeductions, setDeclaredDeductions] = useState<DeclaredRow[]>([]);
+  const [activeWorksheet, setActiveWorksheet] = useSectionTab(
+    WORKSHEET_TABS.map((t) => t.id),
+    'reintegrations',
+  );
 
   function resetWorksheet() {
     setHasGeneratedOnce(false);
@@ -256,25 +274,33 @@ export function ResultatFiscalPage() {
         <>
           <HonestyBanner />
           <ResultatComptableSection montant={result.resultatComptable} />
-          <ReintegrationsSection
-            fiscalYearId={fiscalYearId!}
-            journals={journals}
-            impotSurLesSocietes={result.impotSurLesSocietes}
-            wj={wj}
-            setWj={setWj}
-            wjLigne={result.reintegrationsConfirmables.find((l) => l.code === 'WJ')}
-            wg={wg}
-            setWg={setWg}
-            wgLigne={result.reintegrationsConfirmables.find((l) => l.code === 'WG')}
-            declared={declaredReintegrations}
-            setDeclared={setDeclaredReintegrations}
-            total={result.totalReintegrations}
-          />
-          <DeductionsSection
-            declared={declaredDeductions}
-            setDeclared={setDeclaredDeductions}
-            total={result.totalDeductions}
-          />
+
+          <SectionTabs sections={WORKSHEET_TABS} activeId={activeWorksheet} onChange={setActiveWorksheet} />
+
+          {activeWorksheet === 'reintegrations' && (
+            <ReintegrationsSection
+              fiscalYearId={fiscalYearId!}
+              journals={journals}
+              impotSurLesSocietes={result.impotSurLesSocietes}
+              wj={wj}
+              setWj={setWj}
+              wjLigne={result.reintegrationsConfirmables.find((l) => l.code === 'WJ')}
+              wg={wg}
+              setWg={setWg}
+              wgLigne={result.reintegrationsConfirmables.find((l) => l.code === 'WG')}
+              declared={declaredReintegrations}
+              setDeclared={setDeclaredReintegrations}
+              total={result.totalReintegrations}
+            />
+          )}
+          {activeWorksheet === 'deductions' && (
+            <DeductionsSection
+              declared={declaredDeductions}
+              setDeclared={setDeclaredDeductions}
+              total={result.totalDeductions}
+            />
+          )}
+
           <ResultatFiscalTotal montant={result.resultatFiscal} />
         </>
       )}
