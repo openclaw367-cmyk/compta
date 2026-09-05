@@ -4555,6 +4555,160 @@ report in this app.
   707000 revenue spike from earlier session activity, not test data)
   was correctly left untouched.
 
+## Reporting/export flexibility
+
+`backend/src/common/pdf/pdf-report-renderer.ts` +
+`backend/src/common/excel/excel-report-helpers.ts` (2026-09-05) give
+every report already computed and displayed on screen — trial balance/
+grand livre, cash flow, analyse financière, CA3/Monaco VAT, résultat
+fiscal, and the liasse fiscale (both regimes) — a real PDF and Excel
+export, per `specs/roadmap.md` §7. Per the user's own scope choices,
+all three went to the LARGER option over the recommended narrower one
+except the shared-renderer decision itself: build a shared, reusable
+PDF renderer (this one WAS the recommended choice); include the liasse
+fiscale in this same pass rather than deferring it; and give every
+report BOTH formats rather than splitting PDF-for-some/Excel-for-others.
+
+- **`PdfReportBuilder`** (`pdf-report-renderer.ts`) is a small, generic
+  wrapper over `pdf-lib` — `addSectionTitle()`, `addParagraph()`
+  (wrapped text), `addKeyValueTable()` (label/value pairs — the shape
+  cash flow/analyse financière/CA3/résultat fiscal all need), and
+  `addTable(columns, rows, totalsRow?)` (a REAL paginating table —
+  tracks vertical space, starts a new page and re-draws column headers
+  when a row would overflow). Built as new shared infrastructure
+  because the only prior PDF code, `invoicing/factur-x-pdf.ts`, is
+  confirmed invoice-specific (a single fixed A4 page, no pagination at
+  all) — that file is untouched, since its own shape never needed
+  pagination. Money/percent/ratio/day-count formatting for a PDF
+  context (`formatMoneyForPdf()`, `formatPercentForPdf()`,
+  `formatRatioForPdf()`, `formatDaysForPdf()`) is deliberately
+  RE-IMPLEMENTED here rather than imported from the frontend's own
+  `lib/money.ts` — only TYPES cross the frontend/backend boundary in
+  this app, never runtime code (same discipline as `lib/accounts.ts`).
+- **A real, two-instance WinAnsi encoding bug, found live both times —
+  not by inspection.** pdf-lib's `StandardFonts` (Helvetica/
+  HelveticaBold, the only fonts this builder embeds) use the WinAnsi
+  encoding, which covers ASCII plus accented Western-European letters
+  and a handful of typographic characters (€, em/en dash, curly
+  quotes) but not every Unicode character that merely looks similar.
+  First occurrence: a hand-typed section label containing a proper
+  Unicode minus sign ("−", U+2212 — the same character this app's own
+  frontend money formatters use for negatives) threw `WinAnsi cannot
+  encode "−"` the first time a report tried to draw it — fixed with
+  `formatMoneyForPdf()`/etc. using an ASCII hyphen instead, PLUS a
+  defensive `sanitizeForWinAnsi()` backstop inside `PdfReportBuilder`'s
+  own `drawText()`/`measureWidth()`, so no future report file has to
+  independently remember this constraint. **Second occurrence, a
+  genuinely different root cause**: exporting the FR demo company's
+  REAL trial balance 500'd — account `445800`'s own label (free-text,
+  entered live during the cash-basis-VAT invoicing pass) had already
+  lost data at some earlier point and now literally contains U+FFFD,
+  the Unicode replacement character. Not a look-alike glyph this time,
+  genuinely corrupted data with no "correct" character to restore —
+  fixed by extending the SAME `sanitizeForWinAnsi()` map
+  (`[/�/g, '?']`, an honest marker, not a silent guess at what was
+  lost), with a dedicated regression test
+  (`pdf-report-renderer.spec.ts`) asserting `addSectionTitle()`/
+  `addParagraph()`/`addKeyValueTable()`/`addTable()` all survive a
+  U+FFFD-containing string, not just `drawText()` in isolation.
+  Reproduced and fixed via a temporary `ts-node` script pulling the
+  exact real API response data (same "temporary verification script,
+  deleted after use" discipline as everywhere else in this app), not
+  by guessing from the error alone.
+- **No new shared Excel abstraction beyond `exceljs` itself** —
+  `styleHeaderRow()` and `moneyToExcelNumber()`/
+  `numericStringOrNullToExcelValue()` are the only two genuinely-reused
+  helpers; `moneyToExcelNumber()` is documented as the one sanctioned
+  money→JS-number boundary crossing for writing an Excel numeric cell
+  (XLSX/OOXML has no decimal cell type), mirroring `Money.fromNumber()`'s
+  own "edge conversion only" discipline from the money-handling rule
+  above. Each report's Excel export function calls `exceljs` directly
+  — wrapping it further would be premature abstraction.
+- **Each report's own `-pdf.ts`/`-excel.ts` is a pure function over an
+  already-computed result** (e.g. `renderCashFlowPdf(statement,
+  company, fiscalYear)`) — no Prisma access of its own. The controller
+  calls the existing `generate()`/`computeDeclaration()`/
+  `trialBalance()` service method first (exactly as the live JSON
+  endpoint already does), then passes the result into the renderer.
+  Every export endpoint mirrors its own report's existing compute
+  endpoint's verb and DTO exactly, at a sibling `.../export/pdf` /
+  `.../export/excel` sub-path — `POST` with the same body DTO for
+  liasse/VAT/résultat-fiscal/cash-flow/financial-analysis, `GET` with
+  the same query params (`TrialBalanceQueryDto`) for ledger's trial
+  balance. Résultat fiscal's export takes the FULL
+  `ComputeResultatFiscalDto` (confirmed WJ/WG overrides + declared
+  lines) since that report's own figure genuinely depends on
+  caller-supplied worksheet state — not just `fiscalYearId`.
+- **Résultat fiscal's export carries the honesty banner verbatim** —
+  `'Ce tableau se recoupe arithmétiquement — cela ne garantit pas que
+  tous les retraitements fiscaux applicables ont été déclarés.'` is the
+  first thing rendered after the title in both formats, matching
+  CLAUDE.md's own "Détermination du résultat fiscal" section, which
+  states the banner is "the single most prominent element" on the live
+  screen. A real Excel-specific bug was found and fixed while building
+  this: `sheet.addRow({ label: HONESTY_BANNER })` followed by
+  `sheet.mergeCells(row, 1, row, 4)` put the banner text in column 2
+  (wherever the `label` key maps to) while the merge anchored on column
+  1 — after merging, exceljs kept only the anchor cell's value, so the
+  banner silently vanished. Fixed by using the positional array form
+  (`sheet.addRow([HONESTY_BANNER])`) so the value lands in column 1,
+  matching the merge anchor.
+- **Liasse fiscale gets 7 PDF/Excel sections for RÉEL_NORMAL (bilan
+  actif/passif, compte de résultat, 2054, 2055, 2056, 2057 Cadre A/B,
+  2059-A) and 2 for RÉEL_SIMPLIFIE (bilan simplifié, compte de résultat
+  simplifié)** — `liasse-pdf.ts`/`liasse-excel.ts` dispatch on
+  `result.regime` exactly like `LiasseService.generate()`/
+  `LiassePage.tsx` already do. A shared `ligneColumns()`/`ligneRows()`
+  pair (PDF) and `addLigneSheet()` (Excel, file-local, deliberately NOT
+  shared with the PDF helpers since the two formats' column-config
+  shapes differ) handle the repeated "code/label/...money columns"
+  shape common to the bilan/CDR/2054/2055/2056 tables. Rows render in
+  the backend's own CERFA-form order — the frontend's extra visual
+  sub-groupings (e.g. `TABLEAU_2054_SECTIONS`) are interactive-screen
+  polish, not reproduced 1:1 in the export, a stated simplification.
+- **Frontend**: each of the 6 report pages (`GrandLivrePage.tsx` was
+  already wired; `CashFlowPage.tsx`, `FinancialAnalysisPage.tsx`,
+  `VatPage.tsx`, `ResultatFiscalPage.tsx`, `LiassePage.tsx` gained the
+  buttons this pass) shows "Télécharger PDF"/"Télécharger Excel" next
+  to its existing "Générer"/"Calculer" action, via new
+  `useDownload*Pdf()`/`useDownload*Excel()` hooks in `api/queries.ts`
+  following the exact `useDownloadFacturX()`/`useDownloadDevis()` shape
+  (`api.getFileBlob()`/`api.postFileBlob()` + `downloadBlob()`). Résultat
+  fiscal's download buttons reuse the exact same DTO-building logic
+  (`buildCurrentDto()`) the page's own live-recompute effect already
+  uses, so an export always reflects the worksheet state currently on
+  screen, never a re-derived one.
+- **Verified two ways.** `pdf-report-renderer.spec.ts` (pagination via
+  `getPageCount()` round-tripped through `PDFDocument.load()`, wrapping,
+  empty-table, and the U+FFFD regression) plus a dedicated PDF and
+  Excel spec per report (12 files) — 761 backend tests passing overall;
+  `tsc`/`eslint` clean both sides, frontend `vite build` clean. Live
+  against the FR demo company via curl: every report's PDF and Excel
+  downloaded successfully (200/201), with sensible page counts
+  confirmed via `pypdf` (liasse 5 pages; cash flow, VAT, résultat
+  fiscal, trial balance 1 page each; analyse financière 2 pages) and a
+  `pymupdf`-rendered image of the résultat fiscal PDF confirming the
+  honesty banner, € signs, and accented French text all render
+  correctly. **RÉEL_SIMPLIFIE's liasse export was NOT verified live** —
+  no such company exists in the current dev DB (all three seeded/hand-
+  built companies are RÉEL_NORMAL), and, same reasoning already
+  recorded for the 2033-series build itself, creating a throwaway one
+  isn't possible without permanently cluttering the dev DB
+  (`Company.regime` isn't updatable, `Company` has no delete endpoint)
+  — the REEL_SIMPLIFIE branch is covered by `liasse-pdf.spec.ts`/
+  `liasse-excel.spec.ts`'s own full fixtures instead, judged sufficient
+  without a live run, same precedent already accepted there. **The
+  frontend download buttons were confirmed rendering correctly in a
+  real browser** (screenshot of `CashFlowPage`'s new button row) but a
+  full click-through wasn't completed — Chrome's automation tooling hit
+  a repeated CDP timeout specifically after triggering the blob
+  download click, on a fresh tab, twice; the download code itself
+  (`downloadBlob()`) is byte-identical to the already-live-verified
+  FEC/Factur-X/devis pattern, so this is judged a browser-automation
+  tooling artifact rather than an application bug, but a human click in
+  an ordinary browser window is worth a quick confirmation in a future
+  session.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't

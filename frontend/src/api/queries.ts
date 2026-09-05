@@ -189,6 +189,29 @@ export function useComputeVatDeclaration() {
 }
 
 /**
+ * CA3/DSF declaration PDF/Excel export — see CLAUDE.md "Reporting/export
+ * flexibility". Same `api.postFileBlob()` + `downloadBlob()` shape as
+ * every other file-download feature.
+ */
+export function useDownloadVatDeclarationPdf() {
+  return useMutation({
+    mutationFn: async (params: { periodStart: string; periodEnd: string }) => {
+      const { filename, blob } = await api.postFileBlob('/vat/export/pdf', params);
+      downloadBlob(filename, blob);
+    },
+  });
+}
+
+export function useDownloadVatDeclarationExcel() {
+  return useMutation({
+    mutationFn: async (params: { periodStart: string; periodEnd: string }) => {
+      const { filename, blob } = await api.postFileBlob('/vat/export/excel', params);
+      downloadBlob(filename, blob);
+    },
+  });
+}
+
+/**
  * Generates the liasse fiscale for a fiscal year — read-only, never
  * writes to the ledger. See LiasseService.generate on the backend:
  * branches on Company.regime (REEL_NORMAL → full 2050-series,
@@ -201,6 +224,30 @@ export function useGenerateLiasse() {
   return useMutation({
     mutationFn: (params: { fiscalYearId: string }) =>
       api.post<LiasseAnyResult>('/liasse/generate', params),
+  });
+}
+
+/**
+ * Liasse fiscale PDF/Excel export — see CLAUDE.md "Reporting/export
+ * flexibility". Same `ComputeLiasseDto` body as `/liasse/generate`;
+ * the backend branches on `Company.regime` internally (7 sections for
+ * RÉEL_NORMAL, 2 for RÉEL_SIMPLIFIE), same as the on-screen result.
+ */
+export function useDownloadLiassePdf() {
+  return useMutation({
+    mutationFn: async (params: { fiscalYearId: string }) => {
+      const { filename, blob } = await api.postFileBlob('/liasse/export/pdf', params);
+      downloadBlob(filename, blob);
+    },
+  });
+}
+
+export function useDownloadLiasseExcel() {
+  return useMutation({
+    mutationFn: async (params: { fiscalYearId: string }) => {
+      const { filename, blob } = await api.postFileBlob('/liasse/export/excel', params);
+      downloadBlob(filename, blob);
+    },
   });
 }
 
@@ -235,6 +282,29 @@ export function useGenerateCashFlow() {
 }
 
 /**
+ * Tableau des flux de trésorerie PDF/Excel export — see CLAUDE.md
+ * "Reporting/export flexibility". Same `ComputeCashFlowDto` body as
+ * `/cash-flow/generate`.
+ */
+export function useDownloadCashFlowPdf() {
+  return useMutation({
+    mutationFn: async (params: { fiscalYearId: string }) => {
+      const { filename, blob } = await api.postFileBlob('/cash-flow/export/pdf', params);
+      downloadBlob(filename, blob);
+    },
+  });
+}
+
+export function useDownloadCashFlowExcel() {
+  return useMutation({
+    mutationFn: async (params: { fiscalYearId: string }) => {
+      const { filename, blob } = await api.postFileBlob('/cash-flow/export/excel', params);
+      downloadBlob(filename, blob);
+    },
+  });
+}
+
+/**
  * Computes the retraitement analytique (SIG, BFR/FR/trésorerie, ratios) for
  * a fiscal year — read-only, never writes to the ledger. See
  * FinancialAnalysisService.generate on the backend: refuses (409) if any
@@ -245,6 +315,31 @@ export function useGenerateFinancialAnalysis() {
   return useMutation({
     mutationFn: (params: { fiscalYearId: string }) =>
       api.post<FinancialAnalysisResult>('/financial-analysis/generate', params),
+  });
+}
+
+/**
+ * Analyse financière PDF/Excel export — see CLAUDE.md "Reporting/export
+ * flexibility". Same body as `/financial-analysis/generate`.
+ */
+export function useDownloadFinancialAnalysisPdf() {
+  return useMutation({
+    mutationFn: async (params: { fiscalYearId: string }) => {
+      const { filename, blob } = await api.postFileBlob('/financial-analysis/export/pdf', params);
+      downloadBlob(filename, blob);
+    },
+  });
+}
+
+export function useDownloadFinancialAnalysisExcel() {
+  return useMutation({
+    mutationFn: async (params: { fiscalYearId: string }) => {
+      const { filename, blob } = await api.postFileBlob(
+        '/financial-analysis/export/excel',
+        params,
+      );
+      downloadBlob(filename, blob);
+    },
   });
 }
 
@@ -261,6 +356,31 @@ export function useGenerateResultatFiscal() {
   return useMutation({
     mutationFn: (dto: ComputeResultatFiscalDto) =>
       api.post<ResultatFiscalResult>('/resultat-fiscal/generate', dto),
+  });
+}
+
+/**
+ * Détermination du résultat fiscal PDF/Excel export — see CLAUDE.md
+ * "Reporting/export flexibility". Takes the FULL `ComputeResultatFiscalDto`
+ * (confirmed WJ/WG overrides + declared lines), same as `/generate` —
+ * this report's own figure genuinely depends on caller-supplied
+ * worksheet state. Both formats carry the honesty banner verbatim.
+ */
+export function useDownloadResultatFiscalPdf() {
+  return useMutation({
+    mutationFn: async (dto: ComputeResultatFiscalDto) => {
+      const { filename, blob } = await api.postFileBlob('/resultat-fiscal/export/pdf', dto);
+      downloadBlob(filename, blob);
+    },
+  });
+}
+
+export function useDownloadResultatFiscalExcel() {
+  return useMutation({
+    mutationFn: async (dto: ComputeResultatFiscalDto) => {
+      const { filename, blob } = await api.postFileBlob('/resultat-fiscal/export/excel', dto);
+      downloadBlob(filename, blob);
+    },
   });
 }
 
@@ -516,6 +636,34 @@ export function useTrialBalance(params: PeriodParams) {
     queryFn: () =>
       api.get<TrialBalanceResponse>(`/ledger/trial-balance${periodQueryString(params)}`),
     enabled: Boolean(params.fiscalYearId),
+  });
+}
+
+/**
+ * Trial balance (balance générale) PDF/Excel export — see CLAUDE.md
+ * "Reporting/export flexibility". Same `api.getFileBlob()` +
+ * `downloadBlob()` shape every other file-download feature already
+ * uses (FEC, Factur-X, devis).
+ */
+export function useDownloadTrialBalancePdf() {
+  return useMutation({
+    mutationFn: async (params: PeriodParams) => {
+      const { filename, blob } = await api.getFileBlob(
+        `/ledger/trial-balance/export/pdf${periodQueryString(params)}`,
+      );
+      downloadBlob(filename, blob);
+    },
+  });
+}
+
+export function useDownloadTrialBalanceExcel() {
+  return useMutation({
+    mutationFn: async (params: PeriodParams) => {
+      const { filename, blob } = await api.getFileBlob(
+        `/ledger/trial-balance/export/excel${periodQueryString(params)}`,
+      );
+      downloadBlob(filename, blob);
+    },
   });
 }
 

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
+  useDownloadResultatFiscalExcel,
+  useDownloadResultatFiscalPdf,
   useEcritures,
   useGenerateResultatFiscal,
   useJournals,
@@ -62,6 +64,8 @@ export function ResultatFiscalPage() {
   const ecrituresQuery = useEcritures();
   const journalsQuery = useJournals();
   const generate = useGenerateResultatFiscal();
+  const downloadPdf = useDownloadResultatFiscalPdf();
+  const downloadExcel = useDownloadResultatFiscalExcel();
 
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
   const journals = journalsQuery.data ?? NO_JOURNALS;
@@ -144,6 +148,19 @@ export function ResultatFiscalPage() {
 
   const isLoading = fiscalYearsLoading || ecrituresQuery.isLoading;
 
+  // Same DTO shape as the live-recompute effect above — the export must
+  // reflect the exact worksheet state on screen, never a re-derived one.
+  function buildCurrentDto(): ComputeResultatFiscalDto | null {
+    if (!fiscalYearId) return null;
+    return {
+      fiscalYearId,
+      confirmedAmendesEtPenalites: wj.confirmed ? wj.value : '0.00',
+      confirmedTaxeVehicules: wg.confirmed ? wg.value : '0.00',
+      reintegrationsDeclarees: declaredReintegrations.map(toDeclaredLineDto),
+      deductionsDeclarees: declaredDeductions.map(toDeclaredLineDto),
+    };
+  }
+
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-8 py-8">
       <header>
@@ -174,14 +191,42 @@ export function ResultatFiscalPage() {
               </span>{' '}
               <span className="text-ink-faint">(changez-le en haut de l'écran)</span>
             </p>
-            <button
-              type="button"
-              disabled={!canGenerate}
-              onClick={() => void handleInitialGenerate()}
-              className="ml-auto rounded-md bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
-            >
-              {generate.isPending && !hasGeneratedOnce ? 'Calcul…' : 'Générer'}
-            </button>
+            <div className="ml-auto flex items-center gap-2">
+              {hasGeneratedOnce && (
+                <>
+                  <button
+                    type="button"
+                    disabled={downloadPdf.isPending}
+                    onClick={() => {
+                      const dto = buildCurrentDto();
+                      if (dto) void downloadPdf.mutate(dto);
+                    }}
+                    className="rounded-md border border-border px-3 py-2 text-[12.5px] font-medium text-ink transition-colors hover:bg-bg disabled:cursor-not-allowed disabled:text-ink-faint"
+                  >
+                    {downloadPdf.isPending ? 'Génération…' : 'Télécharger PDF'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={downloadExcel.isPending}
+                    onClick={() => {
+                      const dto = buildCurrentDto();
+                      if (dto) void downloadExcel.mutate(dto);
+                    }}
+                    className="rounded-md border border-border px-3 py-2 text-[12.5px] font-medium text-ink transition-colors hover:bg-bg disabled:cursor-not-allowed disabled:text-ink-faint"
+                  >
+                    {downloadExcel.isPending ? 'Génération…' : 'Télécharger Excel'}
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                disabled={!canGenerate}
+                onClick={() => void handleInitialGenerate()}
+                className="rounded-md bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
+              >
+                {generate.isPending && !hasGeneratedOnce ? 'Calcul…' : 'Générer'}
+              </button>
+            </div>
           </div>
 
           {draftsInYear.length > 0 && (

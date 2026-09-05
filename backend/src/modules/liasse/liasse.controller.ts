@@ -1,7 +1,10 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
-import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Post, Query, Res } from '@nestjs/common';
+import { ApiHeader, ApiOperation, ApiProduces, ApiTags } from '@nestjs/swagger';
+import { Response } from 'express';
 import { CurrentCompany } from '../../common/tenant/current-company.decorator';
 import { CompanyContext } from '../../common/tenant/company-context';
+import { CompaniesService } from '../companies/companies.service';
+import { FiscalYearsService } from '../fiscal-years/fiscal-years.service';
 import { LiasseService } from './liasse.service';
 import { ComputeLiasseDto } from './dto/compute-liasse.dto';
 import { LineTraceQueryDto } from './dto/line-trace-query.dto';
@@ -9,6 +12,8 @@ import { Tableau2054TraceQueryDto } from './dto/tableau-2054-trace-query.dto';
 import { Tableau2055TraceQueryDto } from './dto/tableau-2055-trace-query.dto';
 import { Tableau2056TraceQueryDto } from './dto/tableau-2056-trace-query.dto';
 import { Tableau2059TraceQueryDto } from './dto/tableau-2059-trace-query.dto';
+import { renderLiassePdf } from './liasse-pdf';
+import { renderLiasseExcel } from './liasse-excel';
 
 @ApiTags('liasse')
 @ApiHeader({
@@ -18,7 +23,11 @@ import { Tableau2059TraceQueryDto } from './dto/tableau-2059-trace-query.dto';
 })
 @Controller('liasse')
 export class LiasseController {
-  constructor(private readonly liasseService: LiasseService) {}
+  constructor(
+    private readonly liasseService: LiasseService,
+    private readonly companiesService: CompaniesService,
+    private readonly fiscalYearsService: FiscalYearsService,
+  ) {}
 
   @ApiOperation({
     summary: 'Generate the liasse fiscale for a fiscal year — regime-dependent shape.',
@@ -138,5 +147,58 @@ export class LiasseController {
     @Query() dto: Tableau2059TraceQueryDto,
   ) {
     return this.liasseService.traceTableau2059(company, dto);
+  }
+
+  @ApiOperation({
+    summary: 'Download the liasse fiscale as a PDF.',
+    description:
+      '7 sections for RÉEL_NORMAL, 2 for RÉEL_SIMPLIFIE — same regime branch as /generate.',
+  })
+  @ApiProduces('application/pdf')
+  @Post('export/pdf')
+  async exportPdf(
+    @CurrentCompany() company: CompanyContext,
+    @Body() dto: ComputeLiasseDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const [result, companyEntity, fiscalYear] = await Promise.all([
+      this.liasseService.generate(company, dto),
+      this.companiesService.findCurrent(company),
+      this.fiscalYearsService.findOne(company, dto.fiscalYearId),
+    ]);
+    const pdf = await renderLiassePdf(result, companyEntity, fiscalYear);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="liasse-fiscale-${fiscalYear.label}.pdf"`,
+    );
+    res.send(Buffer.from(pdf));
+  }
+
+  @ApiOperation({
+    summary: 'Download the liasse fiscale as an Excel workbook.',
+    description: 'One sheet per tableau — 8 for RÉEL_NORMAL, 3 for RÉEL_SIMPLIFIE.',
+  })
+  @ApiProduces('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @Post('export/excel')
+  async exportExcel(
+    @CurrentCompany() company: CompanyContext,
+    @Body() dto: ComputeLiasseDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const [result, fiscalYear] = await Promise.all([
+      this.liasseService.generate(company, dto),
+      this.fiscalYearsService.findOne(company, dto.fiscalYearId),
+    ]);
+    const excel = await renderLiasseExcel(result);
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="liasse-fiscale-${fiscalYear.label}.xlsx"`,
+    );
+    res.send(excel);
   }
 }

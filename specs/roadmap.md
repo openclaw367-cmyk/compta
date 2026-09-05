@@ -58,7 +58,7 @@ reordered):
 5. **Invoicing / facturation — Phase A SHIPPED (backend only), 2026-08-30.** Moved up from "noted, not planned" — a key feature, not a nice-to-have. See §4 below, `specs/invoicing-plan.md` (regulatory research + phased plan) and `specs/invoicing-phase-a-implementation-spec.md` (the design-then-verify pass, now implemented and verified live). Monaco is architecturally wired (one jurisdiction-parameterized engine) but its rule content is an explicit pending stub, not guessed. Phase B (PA/e-transmission) remains a later, likely separate initiative.
 6. **Anomaly surfacing** — benefits from bank-rec (lettrage/matching data) and drill-down (to explain *why* something's flagged) existing first, though not hard-blocked by either.
 7. **Recurring entries / templates** — SHIPPED 2026-09-05. Was genuinely independent, no dependency on anything above — picked as the lower-risk quick win over Anomaly surfacing.
-8. **Reporting/export flexibility** — no dependency on anything above; enhances every report already shipped. Could run anytime.
+8. **Reporting/export flexibility** — SHIPPED 2026-09-05. No dependency on anything above; enhanced every report already shipped.
 9. **Multi-user / roles & permissions** — no hard dependency on 1–8, but see the cross-cutting note below: this is the one item that, if pulled forward, retroactively closes the "no who" gap already logged in the document-attachment audit trail (CLAUDE.md: *"this app has no authentication/user-identity model anywhere... the log honestly records only when and what, never a fabricated actor"*) and would apply to any future audit trail too. Not proposing a reorder — just flagging that its cost is more front-loaded the longer it waits, since more features will exist that a future auth layer needs to retrofit around.
 
 Noted but not planned: **Mobile** — see the closing section.
@@ -605,12 +605,42 @@ logic being correct, not about a new kind of ledger risk.
 
 ---
 
-## 7. Reporting/export flexibility
+## 7. Reporting/export flexibility — SHIPPED (2026-09-05)
 
-**Classification: MOSTLY PRESENTATION**, with a per-export flag: any
-export requiring a **new** computed figure (something not already
-produced by an existing, verified service) is GATED for that figure
-specifically, even if the export mechanism itself is presentation.
+Built and verified live: a new shared PDF renderer
+(`src/common/pdf/pdf-report-renderer.ts`, `PdfReportBuilder` — generic
+section/key-value/paginating-table primitives, extracted since the
+only prior PDF code, Factur-X's `factur-x-pdf.ts`, is confirmed
+invoice-specific with no reusable pagination) plus two tiny Excel
+helpers (`src/common/excel/excel-report-helpers.ts`). Every report
+already computed and displayed on screen now has BOTH a PDF and an
+Excel export — trial balance/grand livre, cash flow, analyse
+financière, CA3/Monaco VAT, résultat fiscal, and the liasse fiscale
+(both regimes) — via sibling `.../export/pdf` / `.../export/excel`
+endpoints mirroring each report's own existing compute endpoint's verb
+and DTO exactly (all `POST` with a body except ledger's trial balance,
+which stays `GET` with query params). All three of the user's own
+scope choices went to the LARGER, non-recommended option: build the
+shared renderer (this was actually the recommended one), include the
+liasse fiscale in this same pass rather than deferring it, and give
+every report both formats rather than splitting PDF-for-some/
+Excel-for-others. See CLAUDE.md "Reporting/export flexibility" for the
+full design and verification record, including a real production bug
+found and fixed along the way: exporting the FR demo company's own
+real trial balance 500'd because a real account's label (free-text,
+entered live during an earlier pass) had genuinely lost data at some
+point and now contains the literal Unicode replacement character
+(U+FFFD), which pdf-lib's WinAnsi encoding can't draw — fixed by
+extending the renderer's existing `sanitizeForWinAnsi()` backstop
+(originally built for a different encoding gap, the Unicode minus
+sign), with a regression test locking it in.
+
+**Classification: MOSTLY PRESENTATION**, confirmed correct in
+hindsight — no report in this pass needed a new computed figure; every
+export is a pure rendering of an already-verified service's own
+output.
+
+### Original scope note, below
 
 - **What it is**: PDF/Excel export of reports already computed and
   displayed on screen (liasse, CA3, résultat fiscal, cash flow, analyse
@@ -713,12 +743,14 @@ confirmed before any code is written, when we reach it. Update this
 file as items ship, as decisions get made, or as priorities shift, so
 it stays the accurate shared reference rather than a stale snapshot.
 
-**Next up**: every item on the main priority-ordered list (§1-§6) is now
-SHIPPED. **Reporting/export flexibility (§7)** and **Multi-user / roles
-& permissions (§8)** are the only two items left, both explicitly
-lower-priority/independent of the numbered sequencing discussion — §8
-in particular is flagged as its own multi-phase project, not a
-single design-then-build pass like everything shipped so far. Anomaly
+**Next up**: every item on the main priority-ordered list (§1-§7) is now
+SHIPPED. **Multi-user / roles & permissions (§8)** is the only item
+left — it's flagged as its own multi-phase project, not a
+single design-then-build pass like everything shipped so far.
+Reporting/export flexibility (§7) is now fully shipped — see CLAUDE.md
+"Reporting/export flexibility" for the full record, including a real
+production bug (a corrupted Unicode replacement character in a real
+account label) found and fixed before shipping. Anomaly
 surfacing (§5) is now fully shipped — see CLAUDE.md "Anomaly
 surfacing" for the full record, including a real false-positive bug
 found and fixed before shipping. Recurring entries / templates (§6) is

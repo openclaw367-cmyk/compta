@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useJournals, useTrialBalance } from '../api/queries';
+import {
+  useDownloadTrialBalanceExcel,
+  useDownloadTrialBalancePdf,
+  useJournals,
+  useTrialBalance,
+} from '../api/queries';
 import { TrialBalanceTable } from '../components/ledger/TrialBalanceTable';
 import { useAppContext } from '../context/appContextStore';
 
@@ -24,6 +29,8 @@ export function GrandLivrePage() {
     periodStart: periodStart || undefined,
     periodEnd: periodEnd || undefined,
   });
+  const downloadPdf = useDownloadTrialBalancePdf();
+  const downloadExcel = useDownloadTrialBalanceExcel();
 
   const isLoading = fiscalYearsLoading || journalsQuery.isLoading;
 
@@ -79,6 +86,34 @@ export function GrandLivrePage() {
               Réinitialiser
             </button>
           )}
+          <button
+            type="button"
+            disabled={!fiscalYearId || downloadPdf.isPending}
+            onClick={() =>
+              void downloadPdf.mutate({
+                fiscalYearId,
+                periodStart: periodStart || undefined,
+                periodEnd: periodEnd || undefined,
+              })
+            }
+            className="rounded-md border border-border px-3 py-2 text-[12.5px] font-medium text-ink transition-colors hover:bg-bg disabled:cursor-not-allowed disabled:text-ink-faint"
+          >
+            {downloadPdf.isPending ? 'Génération…' : 'Télécharger PDF'}
+          </button>
+          <button
+            type="button"
+            disabled={!fiscalYearId || downloadExcel.isPending}
+            onClick={() =>
+              void downloadExcel.mutate({
+                fiscalYearId,
+                periodStart: periodStart || undefined,
+                periodEnd: periodEnd || undefined,
+              })
+            }
+            className="rounded-md border border-border px-3 py-2 text-[12.5px] font-medium text-ink transition-colors hover:bg-bg disabled:cursor-not-allowed disabled:text-ink-faint"
+          >
+            {downloadExcel.isPending ? 'Génération…' : 'Télécharger Excel'}
+          </button>
         </div>
       </header>
 

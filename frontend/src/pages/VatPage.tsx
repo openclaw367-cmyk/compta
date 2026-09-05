@@ -5,6 +5,8 @@ import {
   useAccounts,
   useComputeVatDeclaration,
   useCreateVatRate,
+  useDownloadVatDeclarationExcel,
+  useDownloadVatDeclarationPdf,
   useEcritures,
   useTraceCa3Line,
   useVatRates,
@@ -120,6 +122,8 @@ function DeclarationSection() {
   const ecrituresQuery = useEcritures();
   const accountsQuery = useAccounts();
   const computeDeclaration = useComputeVatDeclaration();
+  const downloadPdf = useDownloadVatDeclarationPdf();
+  const downloadExcel = useDownloadVatDeclarationExcel();
 
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
   // Ligne 19/20 are each fed by exactly one hardcoded PCG account (see
@@ -250,14 +254,44 @@ function DeclarationSection() {
                 ))}
               </select>
             </Field>
-            <button
-              type="button"
-              disabled={!canCompute}
-              onClick={() => void handleCompute()}
-              className="ml-auto rounded-md bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
-            >
-              {computeDeclaration.isPending ? 'Calcul…' : 'Calculer'}
-            </button>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                type="button"
+                disabled={!selectedPeriod || downloadPdf.isPending}
+                onClick={() =>
+                  selectedPeriod &&
+                  void downloadPdf.mutate({
+                    periodStart: selectedPeriod.periodStart,
+                    periodEnd: selectedPeriod.periodEnd,
+                  })
+                }
+                className="rounded-md border border-border px-3 py-2 text-[12.5px] font-medium text-ink transition-colors hover:bg-bg disabled:cursor-not-allowed disabled:text-ink-faint"
+              >
+                {downloadPdf.isPending ? 'Génération…' : 'Télécharger PDF'}
+              </button>
+              <button
+                type="button"
+                disabled={!selectedPeriod || downloadExcel.isPending}
+                onClick={() =>
+                  selectedPeriod &&
+                  void downloadExcel.mutate({
+                    periodStart: selectedPeriod.periodStart,
+                    periodEnd: selectedPeriod.periodEnd,
+                  })
+                }
+                className="rounded-md border border-border px-3 py-2 text-[12.5px] font-medium text-ink transition-colors hover:bg-bg disabled:cursor-not-allowed disabled:text-ink-faint"
+              >
+                {downloadExcel.isPending ? 'Génération…' : 'Télécharger Excel'}
+              </button>
+              <button
+                type="button"
+                disabled={!canCompute}
+                onClick={() => void handleCompute()}
+                className="rounded-md bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
+              >
+                {computeDeclaration.isPending ? 'Calcul…' : 'Calculer'}
+              </button>
+            </div>
           </div>
 
           {selectedPeriod && (

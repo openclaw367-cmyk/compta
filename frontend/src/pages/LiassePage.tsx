@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   useCompany,
+  useDownloadLiasseExcel,
+  useDownloadLiassePdf,
   useEcritures,
   useGenerateLiasse,
   useGenerateLiasseSecondary,
@@ -228,6 +230,8 @@ export function LiassePage() {
   const journalsQuery = useJournals();
   const generateLiasse = useGenerateLiasse();
   const generateSecondary = useGenerateLiasseSecondary();
+  const downloadPdf = useDownloadLiassePdf();
+  const downloadExcel = useDownloadLiasseExcel();
 
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
   const journals = journalsQuery.data ?? NO_JOURNALS;
@@ -291,14 +295,32 @@ export function LiassePage() {
               </span>{' '}
               <span className="text-ink-faint">(changez-le en haut de l'écran)</span>
             </p>
-            <button
-              type="button"
-              disabled={!canGenerate}
-              onClick={() => void handleGenerate()}
-              className="ml-auto rounded-md bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
-            >
-              {generateLiasse.isPending ? 'Calcul…' : 'Générer'}
-            </button>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                type="button"
+                disabled={!fiscalYearId || downloadPdf.isPending}
+                onClick={() => fiscalYearId && void downloadPdf.mutate({ fiscalYearId })}
+                className="rounded-md border border-border px-3 py-2 text-[12.5px] font-medium text-ink transition-colors hover:bg-bg disabled:cursor-not-allowed disabled:text-ink-faint"
+              >
+                {downloadPdf.isPending ? 'Génération…' : 'Télécharger PDF'}
+              </button>
+              <button
+                type="button"
+                disabled={!fiscalYearId || downloadExcel.isPending}
+                onClick={() => fiscalYearId && void downloadExcel.mutate({ fiscalYearId })}
+                className="rounded-md border border-border px-3 py-2 text-[12.5px] font-medium text-ink transition-colors hover:bg-bg disabled:cursor-not-allowed disabled:text-ink-faint"
+              >
+                {downloadExcel.isPending ? 'Génération…' : 'Télécharger Excel'}
+              </button>
+              <button
+                type="button"
+                disabled={!canGenerate}
+                onClick={() => void handleGenerate()}
+                className="rounded-md bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
+              >
+                {generateLiasse.isPending ? 'Calcul…' : 'Générer'}
+              </button>
+            </div>
           </div>
 
           {draftsInYear.length > 0 && (
