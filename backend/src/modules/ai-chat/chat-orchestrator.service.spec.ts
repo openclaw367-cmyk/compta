@@ -6,7 +6,7 @@ import {
   ChatModelCompletionResult,
 } from './chat-model/chat-model.types';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 type ToolOutcome = { ok: true; value: unknown } | { ok: false; error: string };
 

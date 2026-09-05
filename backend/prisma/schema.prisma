@@ -217,6 +217,8 @@ model Company {
   invoices              Invoice[]
   invoiceLines          InvoiceLine[]
   recurringEntryTemplates RecurringEntryTemplate[]
+  memberships           Membership[]
+  companyInvites        CompanyInvite[]
 }
 
 /// Exercice comptable. Ecritures are validated (locked) relative to a
@@ -1104,4 +1106,127 @@ model RecurringEntryTemplateLine {
   credit Decimal @default(0) @db.Decimal(15, 2)
 
   @@index([templateId])
+}
+
+/// A real account able to sign in — see CLAUDE.md "Multi-user / roles &
+/// permissions". `email` is always stored LOWERCASED (the enforced
+/// invariant everywhere it's read/written, since Postgres has no
+/// case-insensitive-unique primitive without the citext extension, not
+/// worth adding for this). `passwordHash` is bcrypt, never anything
+/// reversible — a User has no direct company access of its own; every
+/// company relationship goes through Membership.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships    Membership[]
+  refreshTokens  RefreshToken[]
+  passwordResets PasswordResetToken[]
+  sentInvites    CompanyInvite[]
+}
+
+/// Coarse per-company access level — see CLAUDE.md "Multi-user / roles &
+/// permissions" for why this is deliberately NOT a fine-grained
+/// permission-table shape (that's an explicitly deferred later phase;
+/// building the extensibility hook now would be dead weight). OWNER can
+/// manage members/roles and everything a MEMBER can; MEMBER can post/
+/// validate/edit business data; READ_ONLY is blocked from any non-GET/
+/// HEAD request by ReadOnlyGuard, enforced once, generically, for the
+/// entire existing controller surface.
+enum MembershipRole {
+  OWNER
+  MEMBER
+  READ_ONLY
+}
+
+/// The User↔Company join — one shape that covers BOTH named use cases at
+/// once: an accountant serving several clients is just a user with
+/// several memberships; a team within one company is just several users
+/// each with a membership in that one company. See
+/// CompanyContextMiddleware, which resolves this per-request to attach
+/// {companyId, role} to req.companyContext.
+model Membership {
+  id        String         @id @default(cuid())
+  userId    String
+  companyId String
+  role      MembershipRole
+
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId])
+  @@index([companyId])
+}
+
+/// Refresh-token rotation with reuse-detection — see CLAUDE.md
+/// "Multi-user / roles & permissions". The raw opaque token is NEVER
+/// stored; only its SHA-256 hash. `familyId` groups one login's entire
+/// rotation chain: presenting an already-`revokedAt` token (a replayed,
+/// stolen token) revokes every row sharing that familyId, not just the
+/// one presented — real reuse-detection, not just single-token
+/// revocation. `replacedById` points forward to the row that superseded
+/// this one on a successful rotation.
+model RefreshToken {
+  id           String    @id @default(cuid())
+  userId       String
+  tokenHash    String    @unique
+  familyId     String
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?   @unique
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+/// A one-time password-reset link's token, hashed at rest like
+/// RefreshToken (never store the raw token). `usedAt` makes it single-use;
+/// a request for a NEW reset simply creates a new row — an old, unused
+/// row is left to expire naturally rather than being explicitly revoked
+/// (harmless: whichever the user actually clicks wins, and an expired or
+/// already-used one is rejected).
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Invites someone (by email — they may or may not have a User account
+/// yet) to join a company at a given role. Accepting one (via the
+/// emailed token) either creates a brand-new User + Membership, or, if
+/// that email already has an account, just adds the Membership — see
+/// AuthService/MembershipsService. tokenHash follows the same
+/// never-store-the-raw-token discipline as RefreshToken/
+/// PasswordResetToken.
+model CompanyInvite {
+  id         String         @id @default(cuid())
+  companyId  String
+  email      String
+  role       MembershipRole
+  tokenHash  String         @unique
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime       @default(now())
+
+  invitedByUserId String
+  invitedBy       User    @relation(fields: [invitedByUserId], references: [id])
+  company         Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([email])
 }

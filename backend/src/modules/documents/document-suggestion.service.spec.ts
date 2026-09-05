@@ -7,7 +7,7 @@ import { CloudProposeToolsService } from '../ai-chat/tools/cloud-propose-tools.s
 import { CloudCredentialsService } from '../cloud-credentials/cloud-credentials.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 function pdfFile(): Express.Multer.File {
   return {

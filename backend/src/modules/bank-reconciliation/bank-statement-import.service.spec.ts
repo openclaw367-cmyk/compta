@@ -6,7 +6,7 @@ import { Camt053ParserService } from './camt053-parser.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 const xml = readFileSync(join(__dirname, '__fixtures__', 'sample-camt053.xml'), 'utf-8');
 
 function makePrismaMock() {

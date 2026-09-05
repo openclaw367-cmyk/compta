@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Company } from '@prisma/client';
+import { Company, MembershipRole } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { PCG_ACCOUNTS, JOURNALS } from '../../common/pcg/pcg-accounts';
@@ -24,8 +24,15 @@ export class CompaniesService {
    * own via the existing "+ Nouveau taux" screen. One transaction, so a
    * failure partway through never leaves a company with accounts but no
    * journals (or vice versa).
+   *
+   * `options.ownerUserId` (new, see CLAUDE.md "Multi-user / roles &
+   * permissions") — when provided, creates an OWNER Membership for that
+   * user in the SAME transaction, so a company is never left without an
+   * owner if the request fails partway. Used by both AuthService.signup()
+   * (a brand-new user's first company) and CompaniesController.create()
+   * (an existing, authenticated user adding another company).
    */
-  create(dto: CreateCompanyDto): Promise<Company> {
+  create(dto: CreateCompanyDto, options?: { ownerUserId?: string }): Promise<Company> {
     return this.prisma.$transaction(async (tx) => {
       const company = await tx.company.create({ data: dto });
       await tx.account.createMany({
@@ -44,19 +51,32 @@ export class CompaniesService {
           type: journal.type,
         })),
       });
+      if (options?.ownerUserId) {
+        await tx.membership.create({
+          data: { userId: options.ownerUserId, companyId: company.id, role: 'OWNER' },
+        });
+      }
       return company;
     });
   }
 
   /**
-   * Not tenant-scoped, same reason as `create()` — this is the list a
-   * company PICKER chooses from, so it must be reachable before any one
-   * company is selected. See CLAUDE.md "Multi-tenant data model": the
-   * frontend previously never sent `x-company-id` at all (single-company
-   * UX); this is the first read that lets it discover what to send.
+   * Membership-scoped, not global — see CLAUDE.md "Multi-user / roles &
+   * permissions". Before auth existed this returned EVERY company in the
+   * database (the list a company picker chooses from, reachable before
+   * any one company is selected — that reasoning is unchanged); now it's
+   * "every company THIS caller belongs to," resolved via their own
+   * Membership rows. Each result carries the caller's own `role` for
+   * that company inline, so the frontend never needs a second round-trip
+   * to know whether e.g. the "Membres" admin screen should be reachable.
    */
-  findAll(): Promise<Company[]> {
-    return this.prisma.company.findMany({ orderBy: { createdAt: 'asc' } });
+  async findAllForUser(userId: string): Promise<(Company & { role: MembershipRole })[]> {
+    const memberships = await this.prisma.membership.findMany({
+      where: { userId },
+      include: { company: true },
+      orderBy: { company: { createdAt: 'asc' } },
+    });
+    return memberships.map(({ company, role }) => ({ ...company, role }));
   }
 
   async findCurrent(company: CompanyContext): Promise<Company> {

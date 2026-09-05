@@ -8,7 +8,7 @@ import { FinancialAnalysisService } from '../financial-analysis/financial-analys
 import { LedgerService } from '../ledger/ledger.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 function fiscalYear(id: string, label: string, startDate: string, closedAt: string | null = null) {
   return {

@@ -1,7 +1,7 @@
 import { ProposeToolsService } from './propose-tools.service';
 import { CompanyContext } from '../../../common/tenant/company-context';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 function validArgs(overrides: Record<string, unknown> = {}) {
   return {

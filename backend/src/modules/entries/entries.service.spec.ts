@@ -5,7 +5,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { CreateEcritureDto } from './dto/create-ecriture.dto';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 function baseDto(overrides: Partial<CreateEcritureDto> = {}): CreateEcritureDto {
   return {

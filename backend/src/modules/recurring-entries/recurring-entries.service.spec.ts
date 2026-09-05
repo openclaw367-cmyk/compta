@@ -5,7 +5,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { EntryValidationService } from '../entries/entry-validation.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 const JOURNAL_OD = { id: 'journal-od', companyId: 'company-1', code: 'OD' };
 const ACCOUNT_613200 = {

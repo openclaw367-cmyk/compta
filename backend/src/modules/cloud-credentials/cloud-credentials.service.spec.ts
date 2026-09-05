@@ -6,7 +6,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { CredentialEncryptionService } from '../../common/crypto/credential-encryption.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 const ENCRYPTION_KEY = '0'.repeat(64);
 
 function makePrismaMock() {
@@ -134,7 +134,7 @@ describe('CloudCredentialsService', () => {
       apiKey: 'sk-deepseek-key-0000',
     });
     await service.set(
-      { companyId: 'other-company' },
+      { companyId: 'other-company', role: 'OWNER' },
       {
         provider: CloudModelProvider.CLAUDE,
         apiKey: 'sk-ant-belongs-to-someone-else',

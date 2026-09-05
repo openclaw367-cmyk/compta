@@ -2,7 +2,7 @@ import { CloudProposeToolsService } from './cloud-propose-tools.service';
 import { ChatTool } from './chat-tool';
 import { CompanyContext } from '../../../common/tenant/company-context';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 function fakeTool(name: string, execute: ChatTool['execute'] = jest.fn()): ChatTool {
   return { spec: { name, description: 'x', parameters: {} }, execute };

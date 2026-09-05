@@ -44,13 +44,13 @@ describe('BridgeAggregatorAdapter', () => {
         jsonResponse({ url: 'https://connect.bridgeapi.io/session-1' }),
       );
       const adapter = new BridgeAggregatorAdapter(makeConfig());
-      const result = await adapter.createConnectSession({ companyId: 'company-1' });
+      const result = await adapter.createConnectSession({ companyId: 'company-1', role: 'OWNER' });
       expect(result.connectUrl).toBe('https://connect.bridgeapi.io/session-1');
     });
 
     it('throws when BRIDGE_CLIENT_ID/SECRET are not configured — before any network call', async () => {
       const adapter = new BridgeAggregatorAdapter(makeConfig({ BRIDGE_CLIENT_ID: undefined }));
-      await expect(adapter.createConnectSession({ companyId: 'company-1' })).rejects.toThrow(
+      await expect(adapter.createConnectSession({ companyId: 'company-1', role: 'OWNER' })).rejects.toThrow(
         InternalServerErrorException,
       );
       expect(fetchMock).not.toHaveBeenCalled();
@@ -59,7 +59,7 @@ describe('BridgeAggregatorAdapter', () => {
     it('throws a clear error when the response has no url field', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({}));
       const adapter = new BridgeAggregatorAdapter(makeConfig());
-      await expect(adapter.createConnectSession({ companyId: 'company-1' })).rejects.toThrow(
+      await expect(adapter.createConnectSession({ companyId: 'company-1', role: 'OWNER' })).rejects.toThrow(
         InternalServerErrorException,
       );
     });
@@ -69,7 +69,7 @@ describe('BridgeAggregatorAdapter', () => {
         jsonResponse({ url: 'https://connect.bridgeapi.io/session-1' }),
       );
       const adapter = new BridgeAggregatorAdapter(makeConfig());
-      await adapter.createConnectSession({ companyId: 'company-1' });
+      await adapter.createConnectSession({ companyId: 'company-1', role: 'OWNER' });
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
       const sentBody = JSON.parse(init.body as string) as Record<string, unknown>;
       expect(sentBody.scope).toBe('aggregation');
@@ -79,7 +79,7 @@ describe('BridgeAggregatorAdapter', () => {
     it('throws on a non-2xx HTTP response, naming the status', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'nope' }, false, 401));
       const adapter = new BridgeAggregatorAdapter(makeConfig());
-      await expect(adapter.createConnectSession({ companyId: 'company-1' })).rejects.toThrow(/401/);
+      await expect(adapter.createConnectSession({ companyId: 'company-1', role: 'OWNER' })).rejects.toThrow(/401/);
     });
   });
 
@@ -87,7 +87,7 @@ describe('BridgeAggregatorAdapter', () => {
     it('extracts item id / access token / label from a well-formed callback payload', async () => {
       const adapter = new BridgeAggregatorAdapter(makeConfig());
       const result = await adapter.confirmLink(
-        { companyId: 'company-1' },
+        { companyId: 'company-1', role: 'OWNER' },
         { item_id: 'item-1', access_token: 'token-1', bank_name: 'Banque Test' },
       );
       expect(result).toEqual({
@@ -100,7 +100,7 @@ describe('BridgeAggregatorAdapter', () => {
     it('falls back to a generic label when bank_name is absent', async () => {
       const adapter = new BridgeAggregatorAdapter(makeConfig());
       const result = await adapter.confirmLink(
-        { companyId: 'company-1' },
+        { companyId: 'company-1', role: 'OWNER' },
         { item_id: 'item-1', access_token: 'token-1' },
       );
       expect(result.label).toBe('Compte lié via Bridge');
@@ -109,7 +109,7 @@ describe('BridgeAggregatorAdapter', () => {
     it('throws on a callback payload missing item_id or access_token', async () => {
       const adapter = new BridgeAggregatorAdapter(makeConfig());
       await expect(
-        adapter.confirmLink({ companyId: 'company-1' }, { item_id: 'item-1' }),
+        adapter.confirmLink({ companyId: 'company-1', role: 'OWNER' }, { item_id: 'item-1' }),
       ).rejects.toThrow(InternalServerErrorException);
     });
   });

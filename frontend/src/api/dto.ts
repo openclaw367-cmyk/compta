@@ -7,6 +7,13 @@
  * we actually send. See api/types.ts for why response shapes are instead
  * hand-authored rather than imported from Prisma's generated types.
  */
+export type { SignupDto } from '../../../backend/src/modules/auth/dto/signup.dto';
+export type { LoginDto } from '../../../backend/src/modules/auth/dto/login.dto';
+export type { ForgotPasswordDto } from '../../../backend/src/modules/auth/dto/forgot-password.dto';
+export type { ResetPasswordDto } from '../../../backend/src/modules/auth/dto/reset-password.dto';
+export type { AcceptInviteDto } from '../../../backend/src/modules/auth/dto/accept-invite.dto';
+export type { InviteMemberDto } from '../../../backend/src/modules/memberships/dto/invite-member.dto';
+export type { UpdateMemberRoleDto } from '../../../backend/src/modules/memberships/dto/update-member-role.dto';
 export type { CreateEcritureDto } from '../../../backend/src/modules/entries/dto/create-ecriture.dto';
 export type { CreateEcritureLigneDto } from '../../../backend/src/modules/entries/dto/create-ecriture-ligne.dto';
 export type { CreateTiersDto } from '../../../backend/src/modules/accounts/dto/create-tiers.dto';

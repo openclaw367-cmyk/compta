@@ -4,7 +4,7 @@ import { LedgerService } from './ledger.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 const D = (value: string) => new Prisma.Decimal(value);
 
 const account607 = { id: 'acc-607', number: '607000', label: 'Achats de marchandises' };

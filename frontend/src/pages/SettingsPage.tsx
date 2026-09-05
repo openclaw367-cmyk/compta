@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useCompany, useCloudCredentials } from '../api/queries';
+import { useAppContext } from '../context/appContextStore';
 import {
   usePreferences,
   type DensityPreference,
@@ -17,6 +18,7 @@ import {
   IconPlus,
   IconRepeat,
   IconSun,
+  IconUsers,
 } from '../components/layout/icons';
 
 const REGIME_LABEL: Record<'REEL_NORMAL' | 'REEL_SIMPLIFIE', string> = {
@@ -42,11 +44,13 @@ const LANDING_ROUTE_OPTIONS = [HOME_ITEM, ...NAV_GROUPS.flatMap((g) => g.items),
 export function SettingsPage() {
   const companyQuery = useCompany();
   const cloudCredentialsQuery = useCloudCredentials();
+  const { currentCompany } = useAppContext();
   const { theme, setTheme, density, setDensity, defaultLandingRoute, setDefaultLandingRoute } =
     usePreferences();
 
   const company = companyQuery.data;
   const credentials = cloudCredentialsQuery.data ?? [];
+  const isOwner = currentCompany?.role === 'OWNER';
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-9 px-8 py-8">
@@ -156,6 +160,14 @@ export function SettingsPage() {
             title="Nouvelle société"
             description="Créer un nouveau dossier — plan comptable et journaux pré-configurés"
           />
+          {isOwner && (
+            <SettingsCard
+              to="/parametres/membres"
+              Icon={IconUsers}
+              title="Membres"
+              description="Inviter des collaborateurs, gérer leurs rôles"
+            />
+          )}
         </div>
       </SettingsSection>
     </div>

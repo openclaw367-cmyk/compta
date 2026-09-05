@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { JOURNALS, PCG_ACCOUNTS } from '../src/common/pcg/pcg-accounts';
+import { ensureDevAdminMembership } from './seed-dev-admin';
 
 const prisma = new PrismaClient();
 
@@ -56,7 +57,9 @@ async function main(): Promise<void> {
     update: {},
     create: { companyId: company.id, ...DEMO_FISCAL_YEAR },
   });
-  console.log(`Fiscal year: ${fiscalYear.label} (${fiscalYear.startDate.toISOString().slice(0, 10)} — ${fiscalYear.endDate.toISOString().slice(0, 10)})`);
+  console.log(
+    `Fiscal year: ${fiscalYear.label} (${fiscalYear.startDate.toISOString().slice(0, 10)} — ${fiscalYear.endDate.toISOString().slice(0, 10)})`,
+  );
 
   for (const account of PCG_ACCOUNTS) {
     await prisma.account.upsert({
@@ -76,10 +79,17 @@ async function main(): Promise<void> {
     await prisma.journal.upsert({
       where: { companyId_code: { companyId: company.id, code: journal.code } },
       update: { label: journal.label, type: journal.type },
-      create: { companyId: company.id, code: journal.code, label: journal.label, type: journal.type },
+      create: {
+        companyId: company.id,
+        code: journal.code,
+        label: journal.label,
+        type: journal.type,
+      },
     });
   }
   console.log(`Journals: ${JOURNALS.map((j) => j.code).join(', ')}`);
+
+  await ensureDevAdminMembership(prisma, company.id);
 }
 
 main()

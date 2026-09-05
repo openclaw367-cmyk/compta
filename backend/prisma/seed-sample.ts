@@ -232,7 +232,7 @@ async function main(): Promise<void> {
     if (!company) {
       throw new Error('No company found — run `npm run seed` first.');
     }
-    const companyContext: CompanyContext = { companyId: company.id };
+    const companyContext: CompanyContext = { companyId: company.id, role: 'OWNER' };
 
     const fiscalYear = await prisma.fiscalYear.findFirst({
       where: { companyId: company.id, label: FISCAL_YEAR_LABEL },
@@ -289,13 +289,17 @@ async function main(): Promise<void> {
     const referencedVatRateLabels = Array.from(
       new Set(
         SAMPLE_ECRITURES.flatMap((ecriture) =>
-          ecriture.lignes.map((l) => l.vatRateLabel).filter((label): label is string => Boolean(label)),
+          ecriture.lignes
+            .map((l) => l.vatRateLabel)
+            .filter((label): label is string => Boolean(label)),
         ),
       ),
     );
     for (const label of referencedVatRateLabels) {
       if (!vatRateIdByLabel.has(label)) {
-        throw new Error(`VAT rate "${label}" referenced by a sample line is not in SAMPLE_VAT_RATES.`);
+        throw new Error(
+          `VAT rate "${label}" referenced by a sample line is not in SAMPLE_VAT_RATES.`,
+        );
       }
     }
 

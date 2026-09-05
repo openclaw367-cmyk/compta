@@ -30,7 +30,7 @@ import { CessionFixedAssetDto } from './dto/cession-fixed-asset.dto';
  * computation) genuinely needs read-your-writes semantics to exercise
  * correctly, the same way a real Postgres connection would give it.
  */
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 const ASSET_ACCOUNT = { id: 'acc-218200', number: '218200', pcgClass: 2 };
 const DEPRECIATION_ACCOUNT = { id: 'acc-281820', number: '281820', pcgClass: 2 };

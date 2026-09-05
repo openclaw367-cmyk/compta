@@ -6,7 +6,7 @@ import { CompanyContext } from '../../common/tenant/company-context';
 import { Ca3Declaration } from './ca3-declaration';
 import { MonacoDeclaration } from './monaco-declaration';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 function makePrismaMock() {
   return {

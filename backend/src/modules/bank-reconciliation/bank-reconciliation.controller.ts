@@ -41,8 +41,8 @@ const UPLOAD_BODY_SCHEMA = {
 @ApiTags('bank-reconciliation')
 @ApiHeader({
   name: 'x-company-id',
-  required: false,
-  description: 'Tenant id. Falls back to the single existing company if omitted.',
+  required: true,
+  description: 'Tenant id — must name a company the caller (see Authorization header) is a member of.',
 })
 @Controller('bank-reconciliation')
 export class BankReconciliationController {

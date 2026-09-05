@@ -4,7 +4,7 @@ import { ResultatFiscalService } from './resultat-fiscal.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 const FY_2026 = { id: 'fy-2026', companyId: company.companyId, label: '2026' };
 
 function makePrismaMock() {

@@ -11,7 +11,7 @@ import { EntriesService } from '../entries/entries.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { CreateFixedAssetDto } from './dto/create-fixed-asset.dto';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 const ASSET_ACCOUNT = { id: 'acc-218300', number: '218300', pcgClass: 2 };
 const DEPRECIATION_ACCOUNT = { id: 'acc-281830', number: '281830', pcgClass: 2 };

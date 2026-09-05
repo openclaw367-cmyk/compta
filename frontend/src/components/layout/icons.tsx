@@ -231,6 +231,16 @@ export function IconPlus(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconLogout(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M8 4H5.5a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 5.5 16H8" />
+      <path d="M13 14l3-4-3-4" />
+      <path d="M16 10H8" />
+    </svg>
+  );
+}
+
 export function IconPaperclip(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base(props)}>

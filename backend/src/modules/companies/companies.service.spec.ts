@@ -4,7 +4,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { PCG_ACCOUNTS, JOURNALS } from '../../common/pcg/pcg-accounts';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 function makePrismaMock() {
   const tx = {
@@ -17,6 +17,9 @@ function makePrismaMock() {
     journal: {
       createMany: jest.fn().mockResolvedValue({ count: JOURNALS.length }),
     },
+    membership: {
+      create: jest.fn().mockResolvedValue({ id: 'membership-1' }),
+    },
   };
   return {
     company: {
@@ -26,6 +29,9 @@ function makePrismaMock() {
         id: args.where.id,
         ...(args.data as object),
       })),
+    },
+    membership: {
+      findMany: jest.fn().mockResolvedValue([]),
     },
     // Interactive-transaction mock: hands the callback the same tx client
     // every real Prisma transaction would, so create()'s three calls can
@@ -62,14 +68,21 @@ describe('CompaniesService', () => {
     expect(prisma.company.update).not.toHaveBeenCalled();
   });
 
-  it('lists every company, not scoped to one tenant — this is what a company picker chooses from', async () => {
-    prisma.company.findMany.mockResolvedValueOnce([
-      { id: 'company-1', name: 'Société Démo SARL' },
-      { id: 'company-2', name: 'Société Test Multi-Année' },
+  it('lists every company the given user is a member of, with their own role on each — never a global list', async () => {
+    prisma.membership.findMany.mockResolvedValueOnce([
+      { role: 'OWNER', company: { id: 'company-1', name: 'Société Démo SARL' } },
+      { role: 'READ_ONLY', company: { id: 'company-2', name: 'Société Test Multi-Année' } },
+    ] as never);
+    const result = await service.findAllForUser('user-1');
+    expect(prisma.membership.findMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1' },
+      include: { company: true },
+      orderBy: { company: { createdAt: 'asc' } },
+    });
+    expect(result).toEqual([
+      { id: 'company-1', name: 'Société Démo SARL', role: 'OWNER' },
+      { id: 'company-2', name: 'Société Test Multi-Année', role: 'READ_ONLY' },
     ]);
-    const result = await service.findAll();
-    expect(prisma.company.findMany).toHaveBeenCalledWith({ orderBy: { createdAt: 'asc' } });
-    expect(result).toHaveLength(2);
   });
 
   describe('create', () => {
@@ -97,7 +110,20 @@ describe('CompaniesService', () => {
       expect(journalCall.data.map((j) => j.code).sort()).toEqual(['AC', 'AN', 'BQ', 'OD', 'VE']);
       expect(journalCall.data.every((j) => j.companyId === 'new-company-1')).toBe(true);
 
+      // No ownerUserId passed — no Membership row created.
+      expect(prisma.tx.membership.create).not.toHaveBeenCalled();
+
       expect(result).toMatchObject({ id: 'new-company-1', name: 'Nouvelle société' });
+    });
+
+    it('creates an OWNER membership in the SAME transaction when an ownerUserId is given', async () => {
+      await service.create(
+        { name: 'Nouvelle société', jurisdiction: 'FR' },
+        { ownerUserId: 'user-1' },
+      );
+      expect(prisma.tx.membership.create).toHaveBeenCalledWith({
+        data: { userId: 'user-1', companyId: 'new-company-1', role: 'OWNER' },
+      });
     });
 
     it('jurisdiction does not change the scaffolded accounts or journals — same chart for FR and MC', async () => {

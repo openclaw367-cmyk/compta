@@ -12,7 +12,7 @@ jest.mock('fs/promises', () => ({
 }));
 import * as fs from 'fs/promises';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 function pdfFile(overrides: Partial<Express.Multer.File> = {}): Express.Multer.File {
   return {

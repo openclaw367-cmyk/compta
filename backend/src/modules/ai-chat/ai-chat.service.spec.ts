@@ -9,7 +9,7 @@ import { InvoiceExtractionService } from '../invoice-extraction/invoice-extracti
 import { CloudCredentialsService } from '../cloud-credentials/cloud-credentials.service';
 import { CloudProposeToolsService } from './tools/cloud-propose-tools.service';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 function makePrismaMock() {
   let nextId = 1;

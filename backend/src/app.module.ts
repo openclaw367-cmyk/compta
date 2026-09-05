@@ -1,8 +1,15 @@
 import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { CryptoModule } from './common/crypto/crypto.module';
+import { CommonAuthModule } from './common/auth/common-auth.module';
+import { AuthMiddleware } from './common/auth/auth.middleware';
+import { ReadOnlyGuard } from './common/auth/read-only.guard';
 import { CompanyContextMiddleware } from './common/tenant/company-context.middleware';
+import { AuthModule } from './modules/auth/auth.module';
+import { MembershipsModule } from './modules/memberships/memberships.module';
+import { MembershipsController } from './modules/memberships/memberships.controller';
 import { CompaniesModule } from './modules/companies/companies.module';
 import { CompaniesController } from './modules/companies/companies.controller';
 import { AccountsModule } from './modules/accounts/accounts.module';
@@ -60,14 +67,50 @@ import { DevController } from './modules/dev/dev.controller';
 // Dev-only convenience routes (GET /dev/ids) are never mounted when
 // NODE_ENV=production — this isn't a route-level guard, DevModule is
 // absent from the module graph entirely, so there's nothing to hit even
-// by guessing the path.
+// by guessing the path. It's still behind AuthMiddleware/ReadOnlyGuard
+// like everything else below, once auth exists — no unauthenticated
+// backdoor, even a dev-only one.
 const isProduction = process.env.NODE_ENV === 'production';
+
+/** Every controller that requires a signed-in user AND a selected company. */
+const companyScopedControllers = [
+  AccountsController,
+  JournalsController,
+  FiscalYearsController,
+  ANouveauController,
+  EntriesController,
+  FecController,
+  ImportExcelController,
+  DepreciationController,
+  VatController,
+  LiasseController,
+  CashFlowController,
+  FinancialAnalysisController,
+  ResultatFiscalController,
+  LedgerController,
+  AiChatController,
+  CloudCredentialsController,
+  DashboardController,
+  EcritureDocumentsController,
+  DocumentExtractionController,
+  BankAccountsController,
+  BankReconciliationController,
+  BankAggregatorController,
+  InvoicingController,
+  RecurringEntriesController,
+  AnomaliesController,
+  MembershipsController,
+  ...(isProduction ? [] : [DevController]),
+];
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     CryptoModule,
+    CommonAuthModule,
+    AuthModule,
+    MembershipsModule,
     CompaniesModule,
     AccountsModule,
     JournalsModule,
@@ -95,53 +138,34 @@ const isProduction = process.env.NODE_ENV === 'production';
     AnomaliesModule,
     ...(isProduction ? [] : [DevModule]),
   ],
+  providers: [{ provide: APP_GUARD, useClass: ReadOnlyGuard }],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    // Applied to an explicit controller allowlist rather than a wildcard
-    // ('*'). Two reasons: (1) company creation and listing (POST/GET
-    // /companies) must run before a tenant is selected, so they still need
-    // path-level excludes even with an allowlist — the company PICKER
-    // calls GET /companies to discover what to send as x-company-id in
-    // the first place, so it can't itself require that header; (2)
+    // Two SEPARATE .apply() calls, not one combined chain — Nest runs
+    // them in registration order (AuthMiddleware, then
+    // CompanyContextMiddleware) for any route matched by both, but
+    // `companies` itself needs ASYMMETRIC treatment: POST/GET /companies
+    // require a signed-in caller (AuthMiddleware — creating/listing
+    // companies needs to know WHO) but must skip CompanyContextMiddleware
+    // entirely (no company is selected yet — GET /companies is exactly
+    // what lets the frontend discover what to send as x-company-id in
+    // the first place). A single combined `.apply(A, B).exclude(...)`
+    // call can't express "skip B but not A" for the same route, hence
+    // two calls. `/auth/*` is in NEITHER list — login/signup/refresh
+    // must work with no prior identity or company context at all.
     // Swagger's docs UI (mounted in main.ts via SwaggerModule.setup, not
-    // as a Nest controller) is a raw Express route outside this list, so
-    // it never needs a company header and needs no exclude rule at all.
-    // See CLAUDE.md "Multi-tenant data model".
+    // as a Nest controller) is a raw Express route outside this list
+    // too, needing neither. See CLAUDE.md "Multi-user / roles &
+    // permissions" and "Multi-tenant data model".
+    consumer.apply(AuthMiddleware).forRoutes(CompaniesController, ...companyScopedControllers);
+
     consumer
       .apply(CompanyContextMiddleware)
       .exclude(
         { path: 'companies', method: RequestMethod.POST },
         { path: 'companies', method: RequestMethod.GET },
       )
-      .forRoutes(
-        CompaniesController,
-        AccountsController,
-        JournalsController,
-        FiscalYearsController,
-        ANouveauController,
-        EntriesController,
-        FecController,
-        ImportExcelController,
-        DepreciationController,
-        VatController,
-        LiasseController,
-        CashFlowController,
-        FinancialAnalysisController,
-        ResultatFiscalController,
-        LedgerController,
-        AiChatController,
-        CloudCredentialsController,
-        DashboardController,
-        EcritureDocumentsController,
-        DocumentExtractionController,
-        BankAccountsController,
-        BankReconciliationController,
-        BankAggregatorController,
-        InvoicingController,
-        RecurringEntriesController,
-        AnomaliesController,
-        ...(isProduction ? [] : [DevController]),
-      );
+      .forRoutes(CompaniesController, ...companyScopedControllers);
   }
 }

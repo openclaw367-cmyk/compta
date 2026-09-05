@@ -12,7 +12,7 @@ import {
 } from './tableau-2054-2055-oracle-fixture';
 import { ORACLE_2056_TOTALS } from './tableau-2056-oracle-fixture';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 /** Every test in this file exercises the REEL_NORMAL company — narrows the union for property access. */
 function asReelNormal(result: LiasseResult | LiasseSimplifieResult): LiasseResult {

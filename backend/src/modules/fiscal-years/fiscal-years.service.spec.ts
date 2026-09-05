@@ -3,7 +3,7 @@ import { FiscalYearsService } from './fiscal-years.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 function makePrismaMock() {
   return {

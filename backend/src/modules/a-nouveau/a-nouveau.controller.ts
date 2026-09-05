@@ -7,8 +7,8 @@ import { ANouveauService } from './a-nouveau.service';
 @ApiTags('a-nouveau')
 @ApiHeader({
   name: 'x-company-id',
-  required: false,
-  description: 'Tenant id. Falls back to the single existing company if omitted.',
+  required: true,
+  description: 'Tenant id — must name a company the caller (see Authorization header) is a member of.',
 })
 @Controller('fiscal-years/:fiscalYearId/a-nouveau')
 export class ANouveauController {

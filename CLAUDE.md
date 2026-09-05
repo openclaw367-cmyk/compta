@@ -4709,6 +4709,254 @@ report BOTH formats rather than splitting PDF-for-some/Excel-for-others.
   an ordinary browser window is worth a quick confirmation in a future
   session.
 
+## Multi-user / roles & permissions
+
+`backend/src/modules/auth/`, `backend/src/modules/memberships/`,
+`backend/src/common/auth/` (2026-09-05) close the roadmap's last item —
+see `specs/roadmap.md` §8. Before this pass, the app had **zero
+authentication/user-identity model anywhere**: no `User` table, no
+password/session handling, no auth guard — anyone with API access could
+address any company by id. This ships self-hosted email+password auth
+and a coarse (Owner/Member/Read-only) per-company permission model, per
+the user's own explicit choices (both the recommended options, chosen
+via `AskUserQuestion` before any design work). The user's standing
+instruction for this whole effort — "as high-end and seamless as
+possible" — shaped the token/session design below specifically to avoid
+ever forcing a surprise re-login.
+
+- **Data model**: `User` (email always lowercased before every read/
+  write — the enforced case-insensitivity invariant, since Postgres has
+  no case-insensitive-unique primitive without the `citext` extension,
+  not added this pass), `Membership` (the `User`↔`Company` join,
+  `role: OWNER|MEMBER|READ_ONLY`, unique on `[userId, companyId]` — one
+  shape that covers BOTH named use cases at once: an accountant serving
+  several clients is just a user with several memberships, a team
+  within one company is just several users each with a membership in
+  that company), `RefreshToken` (rotation + reuse-detection, see
+  below), `PasswordResetToken`, `CompanyInvite` — all in one migration
+  (`20260905161811_add_multi_user_auth`), deliberately not staged
+  separately since they're mutually referential enough that splitting
+  would buy nothing.
+- **No `Role`/permission-table abstraction** — that's the fine-grained
+  per-module-permissions shape the user explicitly deferred this phase;
+  building the extensibility hook now would be dead weight, and worse,
+  an implicit promise not being kept yet.
+- **Token/session architecture**: a JWT access token (~15 min TTL,
+  HS256, signed/verified by `AccessTokenService`) kept **in memory
+  only** on the frontend (a module-level var in `api/authToken.ts`,
+  mirroring the pre-existing `currentCompanyId` pattern in `client.ts`
+  — never localStorage/sessionStorage, to shrink what an XSS bug could
+  steal). Paired with an opaque 32-byte refresh token, **SHA-256 hashed
+  at rest, never stored raw** (`RefreshToken.tokenHash`), delivered as
+  an `httpOnly; SameSite=Lax` cookie path-scoped to `/auth` — `Secure`
+  is gated on `NODE_ENV==='production'`, a real, documented dev-vs-prod
+  difference (Vite dev is plain HTTP; `Secure` cookies are silently
+  dropped there by every browser), not an oversight.
+- **Rotation with real reuse-detection, not just single-token
+  revocation**: every successful `POST /auth/refresh` issues a new
+  refresh token and marks the old row `revokedAt`, chained via
+  `replacedById`. A `familyId` groups one login's entire rotation
+  chain — presenting an ALREADY-revoked token (a replayed/stolen token)
+  revokes **every row sharing that `familyId`**, not just the one
+  presented. Verified live: rotating a token, then replaying the OLD
+  (now-revoked) one correctly 401s AND revokes the family — a
+  subsequent attempt with the otherwise-still-valid NEW token also
+  401s, confirmed against real DB rows.
+- **The "never randomly logged out" mechanism**: on app boot, the
+  frontend always calls `POST /auth/refresh` once (cookie-authenticated)
+  BEFORE rendering anything gated — this is what makes "close the tab,
+  reopen tomorrow, still logged in" work, verified live (a full page
+  reload correctly stayed on the dashboard with no `/login` bounce).
+  `api/client.ts`'s central `request()` (and its four sibling
+  functions — `requestFile`/`requestBlob`/`requestFileBlob`/
+  `requestFileBlobPost`) all route through a shared
+  `fetchWithAuthRetry()`: any `401` triggers exactly one, de-duplicated
+  silent refresh-and-retry (`api/authToken.ts`'s `refreshAccessToken()`
+  shares one in-flight promise across concurrent callers) before ever
+  surfacing the failure — never one refresh per failed request.
+- **Middleware/guard placement, extending the existing pattern rather
+  than replacing it**: a new `AuthMiddleware` (`common/auth/`) verifies
+  the `Authorization: Bearer` JWT and sets `req.user = {id, email}` —
+  no DB hit, JWT claims are self-contained. `CompanyContextMiddleware`
+  is **extended, not replaced**: the old "fall back to the single
+  company in the DB" branch is GONE entirely (not just simplified) —
+  that fallback was only ever safe when exactly one company could
+  possibly exist for anyone asking; once real users/companies coexist,
+  guessing "the" company would silently attach a zero-membership user
+  to some OTHER user's only company, a real access-control bug, not a
+  convenience. It now requires `x-company-id` (400 if absent), looks up
+  the caller's `Membership` (403 if none), and attaches
+  `req.companyContext = {companyId, role}`. Both middlewares are wired
+  via **two separate** `consumer.apply()` calls in `app.module.ts`
+  (not one combined chain) specifically because `POST`/`GET /companies`
+  need ASYMMETRIC treatment — `AuthMiddleware` yes (must know WHO is
+  creating/listing), `CompanyContextMiddleware` no (no company is
+  selected yet; `GET /companies` is exactly what lets the frontend
+  discover what to send as `x-company-id` in the first place). `/auth/*`
+  is in NEITHER middleware's `forRoutes()` allowlist.
+- **`ReadOnlyGuard`** (a real NestJS guard, not more middleware logic —
+  guards are the idiomatic layer for access DECISIONS, middleware for
+  establishing context) is registered ONCE, globally, via `APP_GUARD`:
+  any non-GET/HEAD request when `role === 'READ_ONLY'` → 403. This one
+  guard covers the **entire** existing controller surface with zero
+  per-controller changes — the actual payoff of choosing "coarse" over
+  fine-grained permissions. Verified live against a real, previously
+  untouched controller (`journals`): a READ_ONLY user's `GET` succeeded,
+  `POST` correctly 403'd with the exact guard message.
+- **`GET /companies` is now membership-scoped**
+  (`CompaniesService.findAllForUser()`), not global — each result
+  carries the caller's own resolved `role` inline (no second round-trip
+  needed for e.g. the frontend's OWNER-gated "Membres" card).
+  `CompaniesService.create()`'s existing one-transaction scaffold
+  (accounts + journals) is extended with an optional `ownerUserId` that
+  creates the `OWNER` `Membership` row in the SAME transaction — never
+  a company-with-no-owner half-state on failure.
+- **Signup is one form — email, password, company name — landing
+  straight into a working company with zero extra clicks**
+  (`POST /auth/signup`: user-create, then `CompaniesService.create()`
+  with `{ownerUserId}`, then tokens issued). The ACCEPTED, DOCUMENTED
+  gap: these are two calls, not one shared transaction spanning both —
+  a failure between them could leave a User with no company, extremely
+  unlikely (an infra failure, not a business-logic branch) and
+  recoverable by retrying or a manual `Membership` grant — same
+  "accepted risk matching existing precedent" class as
+  `disposeFixedAsset()`'s own two-step `cessionEcritureId` assignment
+  (see "Immobilisations / cession" above), not a new kind of gap.
+- **`MailerPort`/`ConsoleMailerAdapter`** (`modules/mailer/`) — mirrors
+  this codebase's established "one interface, swappable adapter"
+  precedent (`ChatModelPort`, `BankAggregatorPort`). Unlike the Bridge
+  aggregator adapter (a paper design, unverified against a real API),
+  `ConsoleMailerAdapter` is **fully verified and fully functional for
+  local dev** — it logs the email content + a clickable link via
+  Nest's `Logger` instead of sending anything, making the ENTIRE
+  signup→invite→accept and forgot-password→reset flow completable
+  end to end with zero external dependency. A real SMTP/API adapter is
+  an explicit, deferred future addition (`MAILER_PROVIDER=console` in
+  `.env.example`, matching the `LOCAL_MODEL_PROVIDER` pattern) — not
+  built half-verified with no real provider credentials to test
+  against.
+- **`MembershipsService`** (company-scoped for free via the existing
+  `CompanyContextMiddleware`) — invite-by-email-with-role, list
+  members + pending invites, change role, remove — each mutating
+  method has its own `assertOwner()` check (the generic `ReadOnlyGuard`
+  only blocks READ_ONLY, not MEMBER-vs-OWNER). **A company must always
+  keep at least one OWNER** — `assertNotLastOwner()` refuses to demote
+  or remove the last remaining one, verified by a dedicated unit test
+  for both `updateRole()` and `remove()`.
+- **Accepting an invite auto-logs-in, no separate "now go log in"
+  step** — `POST /auth/accept-invite` either creates a brand-new
+  `User`+`Membership` (the invited email has no account yet — a
+  password is required) or, if that email already has an account, just
+  adds the `Membership` to it (no re-proving their password —
+  possessing the exact one-time emailed token for their own address is
+  treated as sufficient proof for this first pass, a stated, narrower-
+  than-ideal tradeoff, not an oversight). Either way, tokens are issued
+  directly. The frontend can't know ahead of time which case applies
+  (no invite-lookup endpoint exists), so `AcceptInvitePage` always
+  shows an optional password field with copy explaining when it's
+  needed.
+- **A real, live-found dependency bug, fixed the same day**:
+  `@nestjs/jwt@12` ships `"type": "module"` (ESM-only) — the exact same
+  class of incompatibility already documented for
+  `@stafyniaksacha/facturx`/`libxml2-wasm` (see "Invoicing — Factur-X
+  rendering" above), breaking under this backend's CommonJS Jest
+  transform (`Cannot use import statement outside a module`). Unlike
+  that case, a mature, actively-maintained CJS alternative existed
+  (`jsonwebtoken`, the library `@nestjs/jwt` wraps anyway), so the fix
+  was simpler: `AccessTokenService` depends on `jsonwebtoken` directly
+  — the ONLY file in the codebase that imports it — rather than
+  reaching for an ESM-interop workaround.
+- **A second real bug, found live in the browser, not by
+  inspection**: adding the user-email + logout button to `TopBar.tsx`'s
+  already-packed control row caused genuine page-level horizontal
+  overflow at a narrow window width (confirmed via
+  `document.body.scrollWidth (1000) > window.innerWidth (949)`) —
+  violating this app's own standing "no page-level horizontal overflow"
+  rule (see "Dashboard" above). Fixed by hiding the email text below
+  the `lg` breakpoint (`hidden ... lg:inline`), keeping the compact
+  24×24px logout button always reachable at every width — re-verified
+  live afterward (`scrollWidth === innerWidth`).
+- **Bootstrapping existing dev data**: `prisma/seed.ts`/`seed-monaco.ts`
+  gained `ensureDevAdminMembership()` (new `prisma/seed-dev-admin.ts`,
+  shared, idempotent) — an obviously-fake dev-only admin account
+  (`admin@compta.local` / `admin1234`, printed to the console, never a
+  real secret) granted `OWNER` on whichever company each script seeds,
+  so the already-seeded demo companies stay reachable after auth
+  shipped instead of becoming orphaned. The hand-built "Société Test
+  Multi-Année" fixture (not created by any seed script) got the same
+  grant via a one-off temporary script, same discipline as every other
+  one-off verification script in this project.
+- **Swagger annotation sweep**: the `@ApiHeader({name:'x-company-id',
+  required:false, ...'Falls back to the single existing company'})`
+  block, repeated near-verbatim across every tenant-scoped controller,
+  is now `required:true` with copy naming the real requirement
+  (membership via the Authorization header) — so `/docs` doesn't
+  actively lie about the now-mandatory header/auth behavior.
+- **Frontend**: `AuthProvider`/`authContextStore.ts` (session state,
+  separate from `AppContext` which stays company/fiscal-year-scoped)
+  wraps the router ABOVE it; `RequireAuth` gates every existing route,
+  rendering nothing during the boot-time silent refresh and redirecting
+  to `/login` only on a genuinely failed one. `AppProvider` is nested
+  INSIDE `RequireAuth` in `App.tsx` (not alongside it) — this is what
+  makes "company/fiscal-year queries never fire before auth resolves"
+  true structurally, not by convention. Five new auth pages (`Login`,
+  `Signup`, `ForgotPassword`, `ResetPassword`, `AcceptInvite`) share a
+  new `AuthLayout` — a centered card outside `AppShell`'s sidebar/topbar
+  chrome, using the exact same design tokens (`bg-surface`,
+  `border-border`, `text-ink`, `bg-accent`, `shadow-card`) every
+  existing page already uses and respecting the existing light/dark/
+  system theme — polish here means restraint and consistency, not a
+  new visual language. `SignupPage` mirrors `CreateCompanyPage.tsx`'s
+  own only-required field (company name) rather than dragging the
+  fuller company-profile form into onboarding. A new "Membres" screen
+  (`/parametres/membres`) follows the established "lightweight admin
+  screen off Paramètres" convention (`RecurringTemplatesPage`/
+  `CompanyProfilePage`), UI-gated on the caller's own `role` (from
+  `useAppContext()`'s `currentCompany.role`, no extra round-trip) —
+  the backend independently enforces the same OWNER-only rule
+  regardless, this is a UX nicety, not the real access control.
+- **Out of scope this phase, stated explicitly**: fine-grained
+  per-module permissions and OAuth/SSO (the user's own choices, not
+  gaps); a real (non-console) mailer adapter; email-verification
+  enforcement (deliberately not blocking first login/use, to keep
+  onboarding frictionless); 2FA/MFA; billing/seat limits; a "remember
+  me" toggle (one flat 30-day refresh-token TTL, no UI for it);
+  retroactively attributing "who" to the existing document-attachment/
+  lettrage audit logs (a natural, flagged future follow-up now that
+  `req.user` exists everywhere, not required to ship this).
+- **Verified two ways.** New unit tests: `access-token.service.spec.ts`,
+  `auth.middleware.spec.ts`, `read-only.guard.spec.ts`,
+  `company-context.middleware.spec.ts` (400/403/success paths),
+  `auth.service.spec.ts` (23 tests — signup, login incl. the
+  unknown-email timing-safety path, refresh rotation, reuse-detection
+  revokes the whole family, logout, forgot/reset-password, accept-invite
+  both branches), `memberships.service.spec.ts` (10 tests — invite,
+  OWNER-only enforcement, last-owner protection on both `updateRole()`
+  and `remove()`, list) — plus mechanical updates to every existing spec
+  constructing a bare `CompanyContext` literal (now requires `role`) —
+  102 backend suites / 807 tests passing overall; `tsc`/`eslint` clean
+  both sides, frontend `vite build` clean. **Live, against the real dev
+  Postgres DB and a real browser, cleaned up afterward**: full signup
+  (new user + company + OWNER membership, confirmed via `GET
+  /companies` showing exactly that one company); login with the seeded
+  dev admin; refresh rotation confirmed by inspecting the DB (`old
+  row.revokedAt` set, chained via `replacedById`) and reuse-detection
+  confirmed by replaying the old token (401, family revoked, the
+  legitimately-rotated new token ALSO then 401s); the full invite→
+  accept→auto-login flow via a real HTTP round trip (a temporary
+  script only stood in for reading the console-logged invite link,
+  never for any app logic); the READ_ONLY guard confirmed against a
+  real, previously-unmodified controller (`journals`); in the browser:
+  unauthenticated `/` correctly redirects to `/login`, login redirects
+  to the dashboard with the full authenticated shell (sidebar, real
+  data, user email + logout in `TopBar`), a full page reload stays
+  logged in (the silent-refresh mechanism, live), the "Membres" screen
+  renders and lists the real member, and logout correctly clears the
+  session (a subsequent direct navigation to a protected route bounces
+  back to `/login`). All test users/companies/memberships/invites
+  removed afterward via temporary scripts, confirmed via a follow-up
+  `GET /companies` showing only the original three seeded companies.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't

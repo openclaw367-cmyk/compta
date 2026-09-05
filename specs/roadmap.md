@@ -59,7 +59,7 @@ reordered):
 6. **Anomaly surfacing** — benefits from bank-rec (lettrage/matching data) and drill-down (to explain *why* something's flagged) existing first, though not hard-blocked by either.
 7. **Recurring entries / templates** — SHIPPED 2026-09-05. Was genuinely independent, no dependency on anything above — picked as the lower-risk quick win over Anomaly surfacing.
 8. **Reporting/export flexibility** — SHIPPED 2026-09-05. No dependency on anything above; enhanced every report already shipped.
-9. **Multi-user / roles & permissions** — no hard dependency on 1–8, but see the cross-cutting note below: this is the one item that, if pulled forward, retroactively closes the "no who" gap already logged in the document-attachment audit trail (CLAUDE.md: *"this app has no authentication/user-identity model anywhere... the log honestly records only when and what, never a fabricated actor"*) and would apply to any future audit trail too. Not proposing a reorder — just flagging that its cost is more front-loaded the longer it waits, since more features will exist that a future auth layer needs to retrofit around.
+9. **Multi-user / roles & permissions** — SHIPPED 2026-09-05. Closes the "no who" gap this cross-cutting note originally flagged (CLAUDE.md: *"this app has no authentication/user-identity model anywhere... the log honestly records only when and what, never a fabricated actor"*) — retroactively attributing "who" to the existing document-attachment/lettrage audit logs is a natural follow-up now that `req.user` exists everywhere, not done as part of this pass.
 
 Noted but not planned: **Mobile** — see the closing section.
 
@@ -668,12 +668,32 @@ output.
 
 ---
 
-## 8. Multi-user / roles & permissions
+## 8. Multi-user / roles & permissions — SHIPPED (2026-09-05)
+
+Built and verified live: `backend/src/modules/auth/`,
+`backend/src/modules/memberships/`, `backend/src/common/auth/` —
+self-hosted email+password auth (JWT access token + rotating,
+reuse-detecting opaque refresh token in an httpOnly cookie) and a
+coarse Owner/Member/Read-only permission model per company, enforced
+once, globally, via a new `ReadOnlyGuard`. Both were the user's own
+explicit choices, made via `AskUserQuestion` before design. `User`/
+`Membership`/`RefreshToken`/`PasswordResetToken`/`CompanyInvite` are
+new Prisma models; `CompanyContextMiddleware`'s old "guess the single
+company" fallback is gone, replaced by a real membership lookup. See
+CLAUDE.md "Multi-user / roles & permissions" for the full design and
+verification record, including two real bugs found and fixed the same
+day: `@nestjs/jwt`'s ESM-only package broke this backend's CommonJS
+Jest transform (fixed by depending on `jsonwebtoken` directly instead),
+and adding the TopBar's user/logout element caused genuine page-level
+horizontal overflow at a narrow window width (fixed with a responsive
+breakpoint). This was the last item on this roadmap.
 
 **Classification: GATED — and its own substantial project**, not a
 UI feature. This is access control and data integrity, not
 presentation, and it's the one item on this roadmap that isn't an
 extension of an existing pattern — it's new foundational surface.
+
+### Original scope note, below
 
 - **What it is**: either an accountant serving multiple clients (one
   login, several companies, presumably different permission levels per
@@ -743,11 +763,18 @@ confirmed before any code is written, when we reach it. Update this
 file as items ship, as decisions get made, or as priorities shift, so
 it stays the accurate shared reference rather than a stale snapshot.
 
-**Next up**: every item on the main priority-ordered list (§1-§7) is now
-SHIPPED. **Multi-user / roles & permissions (§8)** is the only item
-left — it's flagged as its own multi-phase project, not a
-single design-then-build pass like everything shipped so far.
-Reporting/export flexibility (§7) is now fully shipped — see CLAUDE.md
+**Next up**: every item on this roadmap (§1-§8) is now SHIPPED.
+**Multi-user / roles & permissions (§8)**, the largest single item and
+the one item that wasn't an extension of an existing pattern, is now
+fully shipped — see CLAUDE.md "Multi-user / roles & permissions" for
+the full design and verification record, including two real bugs found
+and fixed the same day (an ESM-only dependency breaking the Jest
+transform, and a genuine page-level horizontal-overflow regression in
+`TopBar.tsx`, both fixed and re-verified live). Fine-grained per-module
+permissions and OAuth/SSO were the user's own explicitly deferred
+choices for a future phase, not gaps discovered late. Any further work
+here is a new, separately-scoped initiative, not a continuation of this
+one. Reporting/export flexibility (§7) is now fully shipped — see CLAUDE.md
 "Reporting/export flexibility" for the full record, including a real
 production bug (a corrupted Unicode replacement character in a real
 account label) found and fixed before shipping. Anomaly

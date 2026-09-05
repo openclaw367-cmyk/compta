@@ -36,6 +36,8 @@ export type Regime = 'REEL_NORMAL' | 'REEL_SIMPLIFIE';
  *  CLAUDE.md "Invoicing — cash-basis VAT". Goods revenue is unaffected. */
 export type RegimeTvaServices = 'ENCAISSEMENTS' | 'DEBITS';
 
+export type MembershipRole = 'OWNER' | 'MEMBER' | 'READ_ONLY';
+
 export interface Company {
   id: string;
   name: string;
@@ -53,6 +55,43 @@ export interface Company {
   bankName: string | null;
   iban: string | null;
   bic: string | null;
+  /**
+   * The CALLER's own role on this company — only present on results from
+   * GET /companies (membership-scoped), absent on GET /companies/current
+   * (which doesn't echo it back). See CLAUDE.md "Multi-user / roles &
+   * permissions".
+   */
+  role?: MembershipRole;
+}
+
+export interface Member {
+  id: string;
+  userId: string;
+  email: string;
+  role: MembershipRole;
+}
+
+export interface PendingInvite {
+  id: string;
+  email: string;
+  role: MembershipRole;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface MembershipsList {
+  members: Member[];
+  pendingInvites: PendingInvite[];
+}
+
+export interface AuthUser {
+  id: string;
+  email: string;
+}
+
+export interface AuthResponse {
+  accessToken: string;
+  user: AuthUser;
 }
 
 export interface VatRate {

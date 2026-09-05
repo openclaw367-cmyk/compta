@@ -39,6 +39,7 @@ import type {
   LiasseAnyResult,
   LineTraceResult,
   LocalModelAvailability,
+  MembershipsList,
   Regime,
   AnomaliesSummary,
   RecurringEntryApplicationPreview,
@@ -75,11 +76,13 @@ import type {
   CreateVatRateDto,
   DevisRequestDto,
   FinalizeInvoiceDto,
+  InviteMemberDto,
   PreviewRecurringEntryTemplateDto,
   SendChatMessageDto,
   SetCloudCredentialDto,
   UpdateAccountDto,
   UpdateCompanyDto,
+  UpdateMemberRoleDto,
 } from './dto';
 
 /**
@@ -416,6 +419,55 @@ export function useCreateCompany() {
     mutationFn: (dto: CreateCompanyDto) => api.post<Company>('/companies', dto),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['app-companies'] });
+    },
+  });
+}
+
+/** Members + pending invites for the current company — see MembersPage. */
+export function useMemberships() {
+  return useQuery({
+    queryKey: ['memberships'],
+    queryFn: () => api.get<MembershipsList>('/memberships'),
+  });
+}
+
+export function useInviteMember() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: InviteMemberDto) => api.post<void>('/memberships/invite', dto),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['memberships'] });
+    },
+  });
+}
+
+export function useRevokeInvite() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (inviteId: string) => api.delete<void>(`/memberships/invites/${inviteId}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['memberships'] });
+    },
+  });
+}
+
+export function useUpdateMemberRole() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ membershipId, role }: { membershipId: string; role: UpdateMemberRoleDto['role'] }) =>
+      api.patch<void>(`/memberships/${membershipId}`, { role }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['memberships'] });
+    },
+  });
+}
+
+export function useRemoveMember() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (membershipId: string) => api.delete<void>(`/memberships/${membershipId}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['memberships'] });
     },
   });
 }

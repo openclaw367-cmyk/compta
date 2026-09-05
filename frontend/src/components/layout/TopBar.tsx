@@ -1,8 +1,9 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAppContext } from '../../context/appContextStore';
+import { useAuth } from '../../context/authContextStore';
 import { usePreferences, type ThemePreference } from '../../context/preferencesStore';
 import { labelForPath } from '../../lib/navigation';
-import { IconMonitor, IconMoon, IconPlus, IconSun } from './icons';
+import { IconLogout, IconMonitor, IconMoon, IconPlus, IconSun } from './icons';
 
 const THEME_OPTIONS: { value: ThemePreference; label: string; Icon: typeof IconSun }[] = [
   { value: 'light', label: 'Thème clair', Icon: IconSun },
@@ -37,6 +38,7 @@ export function TopBar() {
     setFiscalYearId,
   } = useAppContext();
   const { theme, setTheme } = usePreferences();
+  const { user, logout } = useAuth();
   const location = useLocation();
   const pageTitle = labelForPath(location.pathname);
 
@@ -125,6 +127,33 @@ export function TopBar() {
           );
         })}
       </div>
+
+      {user && (
+        <div className="flex shrink-0 items-center gap-2 border-l border-border pl-4">
+          {/* Hidden below `lg` rather than truncated further — with the
+              fiscal-year/company selects, new-company link, and theme
+              toggle already sharing this one row, a long email is the
+              first thing to give way on a narrow window so the row
+              itself never causes page-level horizontal scroll (this
+              app's own standing rule — see CLAUDE.md "Dashboard"). The
+              logout action itself stays reachable at every width. */}
+          <span
+            className="hidden max-w-[160px] truncate text-[12.5px] text-ink-muted lg:inline"
+            title={user.email}
+          >
+            {user.email}
+          </span>
+          <button
+            type="button"
+            title={`Se déconnecter (${user.email})`}
+            onClick={() => void logout()}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border bg-bg text-ink-faint transition-colors hover:border-negative hover:text-negative"
+          >
+            <IconLogout width={13} height={13} />
+            <span className="sr-only">Se déconnecter</span>
+          </button>
+        </div>
+      )}
     </header>
   );
 }

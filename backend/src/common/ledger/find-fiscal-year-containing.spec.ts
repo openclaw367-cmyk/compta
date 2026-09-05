@@ -2,7 +2,7 @@ import { findFiscalYearContaining } from './find-fiscal-year-containing';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompanyContext } from '../tenant/company-context';
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 describe('findFiscalYearContaining', () => {
   it('queries by companyId and a date range covering the given date', async () => {

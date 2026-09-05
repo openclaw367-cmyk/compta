@@ -9,7 +9,7 @@ import * as registry from './bank-aggregator-registry';
 
 jest.mock('./bank-aggregator-registry');
 
-const company: CompanyContext = { companyId: 'company-1' };
+const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 
 function makePrismaMock() {
   return {
