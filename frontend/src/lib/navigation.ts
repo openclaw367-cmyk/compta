@@ -1,5 +1,6 @@
 import type { SVGProps } from 'react';
 import {
+  IconAlertTriangle,
   IconBox,
   IconCalendar,
   IconChat,
@@ -50,6 +51,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/factures/lot', label: 'Revue de factures', Icon: IconPaperclip },
       { to: '/grand-livre', label: 'Grand livre', Icon: IconLedger },
       { to: '/rapprochement-bancaire', label: 'Rapprochement bancaire', Icon: IconWallet },
+      { to: '/anomalies', label: 'Anomalies', Icon: IconAlertTriangle },
       { to: '/tiers', label: 'Tiers', Icon: IconUsers },
       { to: '/immobilisations', label: 'Immobilisations', Icon: IconBox },
       { to: '/exercices', label: 'Exercices', Icon: IconCalendar },

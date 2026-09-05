@@ -52,6 +52,8 @@ import { InvoicingModule } from './modules/invoicing/invoicing.module';
 import { InvoicingController } from './modules/invoicing/invoicing.controller';
 import { RecurringEntriesModule } from './modules/recurring-entries/recurring-entries.module';
 import { RecurringEntriesController } from './modules/recurring-entries/recurring-entries.controller';
+import { AnomaliesModule } from './modules/anomalies/anomalies.module';
+import { AnomaliesController } from './modules/anomalies/anomalies.controller';
 import { DevModule } from './modules/dev/dev.module';
 import { DevController } from './modules/dev/dev.controller';
 
@@ -90,6 +92,7 @@ const isProduction = process.env.NODE_ENV === 'production';
     BankAggregatorModule,
     InvoicingModule,
     RecurringEntriesModule,
+    AnomaliesModule,
     ...(isProduction ? [] : [DevModule]),
   ],
 })
@@ -137,6 +140,7 @@ export class AppModule implements NestModule {
         BankAggregatorController,
         InvoicingController,
         RecurringEntriesController,
+        AnomaliesController,
         ...(isProduction ? [] : [DevController]),
       );
   }

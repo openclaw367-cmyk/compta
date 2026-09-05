@@ -496,13 +496,30 @@ cash-basis VAT alike.**
 
 ---
 
-## 5. Anomaly surfacing
+## 5. Anomaly surfacing — SHIPPED (2026-09-05)
+
+Built and verified live: `src/modules/anomalies/` — two pure engines
+(`spending-anomaly-engine.ts`, `invoice-anomaly-engine.ts`, mirroring
+`matching-engine.ts`'s own zero-I/O split), a new `AnomaliesService`/
+`AnomaliesModule`/`AnomaliesController` (`GET /anomalies`), and a
+frontend dedicated screen (`/anomalies`) plus an independently-loading
+dashboard tile. Both decisions below resolved (user chose both anomaly
+shapes together, a trailing-average + fixed-multiplier threshold,
+charges/produits-only account scope, and both a dashboard tile AND a
+dedicated screen). See CLAUDE.md "Anomaly surfacing" for the full
+design and verification record — including a real false-positive bug
+(a bad interaction between `TRAILING_MONTHS`/`MIN_HISTORY_MONTHS`/
+`MULTIPLIER` that would have flagged any perfectly flat, non-deviating
+recurring expense) found and fixed before shipping, by hand-tracing a
+test case rather than by inspection.
 
 **Classification: GATED.** Computing and comparing figures (an expense
 vs. its category's historical norm, an unlettered payment that appears
 to match an open invoice, an unusual TVA rate shift) is exactly the
 kind of "wrong compliance-adjacent artifact" risk this app already
 gates everywhere else.
+
+### Original scope note, below
 
 - **What it is**: gentle, non-judgmental flags surfaced to the user —
   never auto-acted-on, never blocking, never silently correcting
@@ -696,14 +713,19 @@ confirmed before any code is written, when we reach it. Update this
 file as items ship, as decisions get made, or as priorities shift, so
 it stays the accurate shared reference rather than a stale snapshot.
 
-**Next up**: Anomaly surfacing (§5) is now the only unstarted item left
-on the main numbered list (Reporting/export flexibility (§7) and
-Multi-user (§8) remain open too, lower down the discussed priority
-order). Recurring entries / templates (§6) is now fully shipped — see
-CLAUDE.md "Recurring entries / templates" for the full record.
-Invoicing (§4) Phase A is now fully shipped (generation, gated
-posting, Factur-X rendering, and the frontend) on both required
-companies; Phase B (PA/e-transmission) stays blocked on an external,
-commercial PA-provider decision this project can't resolve alone, and
-Monaco's own transmission-regime question stays open — see
-`specs/invoicing-plan.md`.
+**Next up**: every item on the main priority-ordered list (§1-§6) is now
+SHIPPED. **Reporting/export flexibility (§7)** and **Multi-user / roles
+& permissions (§8)** are the only two items left, both explicitly
+lower-priority/independent of the numbered sequencing discussion — §8
+in particular is flagged as its own multi-phase project, not a
+single design-then-build pass like everything shipped so far. Anomaly
+surfacing (§5) is now fully shipped — see CLAUDE.md "Anomaly
+surfacing" for the full record, including a real false-positive bug
+found and fixed before shipping. Recurring entries / templates (§6) is
+also fully shipped — see CLAUDE.md "Recurring entries / templates" for
+the full record. Invoicing (§4) Phase A is now fully shipped
+(generation, gated posting, Factur-X rendering, and the frontend) on
+both required companies; Phase B (PA/e-transmission) stays blocked on
+an external, commercial PA-provider decision this project can't
+resolve alone, and Monaco's own transmission-regime question stays
+open — see `specs/invoicing-plan.md`.

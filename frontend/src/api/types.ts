@@ -1475,3 +1475,47 @@ export interface InvoiceMentions {
   escompteNotice: string;
   paymentInstructions: InvoicePaymentInstructions | null;
 }
+
+/**
+ * Anomaly surfacing — see CLAUDE.md "Anomaly surfacing". Gentle,
+ * non-blocking flags, computed fresh on every request, never persisted,
+ * never gating anything.
+ */
+export interface SpendingAnomaly {
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  /** YYYY-MM */
+  month: string;
+  currentAmount: string;
+  trailingAverage: string;
+  /** A dimensionless ratio, e.g. "2.43" — not a money string. */
+  multiplier: string;
+  monthsOfHistory: number;
+}
+
+export type PaymentMatchTier = 'HIGH' | 'AMBIGUOUS' | 'NONE';
+
+export interface PaymentMatchCandidate {
+  statementLineId: string;
+  amount: string;
+  bookingDate: string;
+  bankAccountLabel: string;
+  dateDistanceDays: number;
+}
+
+export interface PaymentAnomaly {
+  invoiceId: string;
+  invoiceNumber: string;
+  clientName: string;
+  totalTTC: string;
+  invoiceDate: string;
+  daysOverdue: number;
+  matchTier: PaymentMatchTier;
+  candidates: PaymentMatchCandidate[];
+}
+
+export interface AnomaliesSummary {
+  spending: SpendingAnomaly[];
+  payments: PaymentAnomaly[];
+}

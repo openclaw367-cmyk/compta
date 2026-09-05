@@ -4419,6 +4419,142 @@ always producing an editable draft** — never auto-posted on a schedule.
   Both test draft écritures and the test template deleted afterward,
   confirmed via a follow-up read that no residual state remained.
 
+## Anomaly surfacing
+
+`src/modules/anomalies/` (2026-09-05) is the roadmap's last unstarted
+main-list item (see `specs/roadmap.md` §5) — gentle, non-blocking flags
+for two shapes: spending/revenue figures that deviate sharply from an
+account's own recent history, and finalized sales invoices that look
+unreconciled for a while. Computed fresh on every request, never
+persisted, never gating anything — same discipline as every other
+report in this app.
+
+- **Two pure engines, mirroring `matching-engine.ts`'s own split**
+  (pure function, zero I/O; the service does the Prisma fetch):
+  `spending-anomaly-engine.ts`'s `computeSpendingAnomalies()` and
+  `invoice-anomaly-engine.ts`'s `computePaymentAnomalies()`. Both are
+  documented as provisional, first-thing-to-revisit-against-real-data
+  constants, same framing as bank-reconciliation's own
+  `DATE_WINDOW_DAYS`.
+- **Spending deviation**: trailing-average + fixed-multiplier, not a
+  statistical z-score — `TRAILING_MONTHS = 6`, `MULTIPLIER = 2`,
+  scoped to class-6 (charges) and class-7 (produits) accounts only.
+  **`MIN_HISTORY_MONTHS` must stay strictly greater than
+  `TRAILING_MONTHS / MULTIPLIER` — a real false-positive bug found and
+  fixed before shipping, by hand-tracing a test case, not by
+  inspection.** The first version used `MIN_HISTORY_MONTHS = 3` (an
+  arbitrary "feels reasonable" choice); with `TRAILING_MONTHS = 6` and
+  `MULTIPLIER = 2`, that meant `6/3 = 2` exactly — so a perfectly FLAT,
+  non-deviating recurring expense would be falsely flagged the very
+  first month it became eligible at all (at exactly 3 months of
+  history, its own ratio hits the multiplier threshold purely from
+  partial-window arithmetic, before the average has had time to fill
+  in). Fixed by raising `MIN_HISTORY_MONTHS` to 4 (`6/4 = 1.5 < 2`,
+  safe for any flat series regardless of how new it is) — verified by
+  a dedicated multi-account oracle test where a steady account
+  correctly produces zero flags across its own history.
+- **"Includes DRAFT écritures, not validated-only"** — a deliberate
+  choice, stated in both the engine and the service's own doc
+  comments: this feature never gates or exports anything, so there's
+  no compliance reason to exclude a draft's very real spend signal,
+  unlike FEC/CA3/liasse which require validated-only data for reasons
+  that don't apply here.
+- **Payment anomaly / "open invoice"**: confirmed there is **no
+  paid/unpaid status on `Invoice` anywhere** — the only real
+  reconciliation signal this app has is `EcritureLigne.lettrage`
+  (`null` = unmatched), the same one bank-reconciliation already
+  treats as authoritative. An "open" invoice is `FINALIZED` `SALE`
+  whose own posted écriture's ligne on `clientAccountId` is still
+  unlettered; TTC is read directly off that ligne's own debit amount
+  (confirmed in `invoice-posting.ts`: one clean ligne per invoice, no
+  need to recompute mentions). Eligible once `OVERDUE_GRACE_DAYS`
+  (30) have passed since `invoiceDate`. Matched against this
+  company's `UNMATCHED` `BankStatementLine`s (amount exact-match,
+  `bookingDate` within `-5..+60` days of `invoiceDate`) with the exact
+  same HIGH/AMBIGUOUS/NONE tiering `matchStatementLine()` already
+  uses — NONE is itself the base flag ("overdue, no bank movement
+  found"), not an absence of a flag. Works fully without any bank
+  data configured at all.
+- **A single invoice whose posted écriture or client ligne can't be
+  found is SKIPPED, not thrown** — a deliberate, narrow exception to
+  this app's usual "fail loud" default, documented in
+  `AnomaliesService.detectPaymentAnomalies()`'s own doc comment: this
+  is a best-effort scan across potentially many invoices, and one
+  inconsistent row must never take down every other invoice's flag,
+  unlike `previewApplication()`/`finalize()` (single, user-triggered
+  operations where failing loud is correct).
+- **A wholly new, independent module, not folded into
+  `DashboardService`** — re-confirmed by reading `dashboard.service.ts`'s
+  own "zero new business logic, reuse only" doc comment before
+  building: adding monthly aggregation or invoice/payment matching
+  there would have violated that discipline. `GET /anomalies` is its
+  own endpoint; `DashboardService`/`DashboardSummary` are completely
+  untouched.
+- **Frontend**: a new "Anomalies" nav item in the "Comptabilité" group
+  (`/anomalies`, `AnomaliesPage`) with the full lists for the selected
+  fiscal year, plus a dashboard tile (`AnomaliesSection` in
+  `DashboardPage.tsx`) showing the top 5 (HIGH-tier payment matches
+  first, then spending anomalies by multiplier descending, then
+  remaining payment anomalies by days-overdue descending). The tile
+  uses its own, **completely independent** `useAnomaliesSummary()`
+  query — never folded into `useDashboardSummary()` — same
+  "independent HTTP calls" reasoning as
+  `useGenerateLiasseSecondary()`; **verified live** that the tile
+  renders correctly even while the main dashboard summary itself is
+  degraded (a drafts-blocking-liasse-generation warning showing
+  directly below it), proving the independence is real, not just
+  designed. `SpendingAnomalyRow`/`PaymentAnomalyRow`
+  (`components/anomalies/AnomalyRows.tsx`) are shared verbatim between
+  the tile and the dedicated page, styled to match the existing
+  `RecentBankEntriesSection`/`ComptesCourantsSection` clickable-row-list
+  vocabulary — no new visual language.
+- **Drill-down deep links, extending existing patterns minimally**:
+  `GrandLivrePage.tsx` gained `periodStart`/`periodEnd` URL-param
+  reading (it already read `?compte=`, but had no period param at
+  all) — a spending-anomaly row links to
+  `/grand-livre?compte=X&periodStart=Y&periodEnd=Z` for the exact
+  flagged month. `InvoicingPage.tsx` gained its first-ever deep-link
+  support (`?invoice=<id>`, mirroring `JournalEntriesPage.tsx`'s own
+  `?journal=&ecriture=` pattern) — resolved against the FULL,
+  fiscal-year-unfiltered invoice list, since a flagged invoice may
+  belong to a different fiscal year than the one currently selected.
+- **Verified two ways.** 27 new unit tests across
+  `spending-anomaly-engine.spec.ts` (the false-positive fix's own
+  regression test, threshold boundary cases, multi-account
+  independence, month-arithmetic helpers),
+  `invoice-anomaly-engine.spec.ts` (HIGH/AMBIGUOUS/NONE tiering,
+  overdue-boundary cases, sort order), and `anomalies.service.spec.ts`
+  (Prisma-layer aggregation, class-6-debit vs. class-7-credit
+  reading, the skip-not-throw payment-anomaly cases) — 739 backend
+  tests passing overall; `tsc`/`eslint` clean both sides, `vite build`
+  clean. **Live, against the FR demo company, cleaned up afterward**:
+  confirmed a genuinely clean baseline first (`GET /anomalies`
+  returned empty before any test data existed); posted 6 months of
+  flat 100,00 € spend plus a September spike of 300,00 € on account
+  618000 as DRAFT écritures — confirmed exactly September was flagged
+  (current 300,00 €, average 100,00 €, multiplier 3.00, 6 months of
+  history), with zero false flags on the intervening months (the live
+  proof the `MIN_HISTORY_MONTHS = 4` fix holds on real data, not just
+  the oracle); finalized a real SALE invoice dated 2026-07-01 (67 days
+  overdue) with no lettrage — confirmed it flagged as `NONE`; inserted
+  a temporary `BankAccount`/`BankStatementImport`/`UNMATCHED`
+  `BankStatementLine` (1 200,00 €, booked 9 days after the invoice)
+  via a temporary script — confirmed the SAME invoice's flag upgraded
+  to `HIGH` with the exact matching candidate. Then, in a real
+  browser: confirmed the dashboard tile (HIGH payment match first,
+  then the two spending anomalies by multiplier), the dedicated
+  `/anomalies` page's two sections, the grand-livre deep link (correct
+  account highlighted, correct `01/09/2026` period filter applied),
+  and the invoice deep link (Facture n° 13 opened directly in its
+  detail view) — all live-verified end to end. All test data (7 draft
+  écritures, the finalized invoice reversed-and-validated back to a
+  net-zero contribution, the temporary bank rows) removed afterward;
+  confirmed via the liasse's own Actif=Passif check
+  (39 441,00 = 39 441,00) that the ledger returned to a fully balanced
+  state, and that the one remaining spending flag (a real, pre-existing
+  707000 revenue spike from earlier session activity, not test data)
+  was correctly left untouched.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't

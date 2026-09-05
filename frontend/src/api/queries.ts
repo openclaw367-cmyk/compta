@@ -40,6 +40,7 @@ import type {
   LineTraceResult,
   LocalModelAvailability,
   Regime,
+  AnomaliesSummary,
   RecurringEntryApplicationPreview,
   RecurringEntryTemplate,
   ResultatFiscalLineTraceResult,
@@ -1370,5 +1371,20 @@ export function useMarkTemplateApplied() {
     mutationFn: (id: string) =>
       api.post<RecurringEntryTemplate>(`/recurring-entries/templates/${id}/mark-applied`, {}),
     onSuccess: () => invalidateRecurringTemplates(queryClient),
+  });
+}
+
+/**
+ * Anomaly surfacing — see CLAUDE.md "Anomaly surfacing". Deliberately a
+ * SEPARATE query from useDashboardSummary(), never folded into it — a
+ * failure computing anomalies must never block the rest of the
+ * dashboard, same "independent HTTP calls" reasoning as
+ * useGenerateLiasseSecondary().
+ */
+export function useAnomaliesSummary(fiscalYearId: string | null) {
+  return useQuery({
+    queryKey: ['anomalies', fiscalYearId],
+    queryFn: () => api.get<AnomaliesSummary>(`/anomalies?fiscalYearId=${fiscalYearId}`),
+    enabled: Boolean(fiscalYearId),
   });
 }

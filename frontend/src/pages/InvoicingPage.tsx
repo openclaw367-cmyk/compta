@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { Invoice } from '../api/types';
 import { useAccounts, useDeleteInvoice, useInvoices, useVatRates } from '../api/queries';
 import { ApiError } from '../api/client';
@@ -33,6 +34,9 @@ export function InvoicingPage() {
 
   const [editor, setEditor] = useState<EditorState>({ mode: 'closed' });
   const [actionError, setActionError] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const deepLinkedInvoiceId = searchParams.get('invoice');
+  const hasOpenedDeepLink = useRef(false);
 
   const allInvoices = invoicesQuery.data ?? NO_INVOICES;
   const accounts = accountsQuery.data ?? NO_ACCOUNTS;
@@ -45,6 +49,18 @@ export function InvoicingPage() {
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [allInvoices, fiscalYearId],
   );
+
+  // Deep link (e.g. an anomaly-surfacing row) — searches the FULL,
+  // fiscal-year-unfiltered list, since a flagged invoice may belong to a
+  // different fiscal year than the one currently selected.
+  useEffect(() => {
+    if (!deepLinkedInvoiceId || hasOpenedDeepLink.current) return;
+    const target = allInvoices.find((i) => i.id === deepLinkedInvoiceId);
+    if (target) {
+      setEditor({ mode: 'edit', invoice: target });
+      hasOpenedDeepLink.current = true;
+    }
+  }, [deepLinkedInvoiceId, allInvoices]);
 
   const selectedId =
     editor.mode === 'edit' || editor.mode === 'credit-note' ? editor.invoice.id : null;

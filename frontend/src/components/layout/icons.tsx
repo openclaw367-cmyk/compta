@@ -258,3 +258,13 @@ export function IconRepeat(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/** A gentle warning triangle — anomaly surfacing. */
+export function IconAlertTriangle(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <path d="M10 3.5 17 15.5H3Z" />
+      <path d="M10 8v3.5M10 13.8v.01" />
+    </svg>
+  );
+}

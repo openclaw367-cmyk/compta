@@ -14,8 +14,10 @@ export function GrandLivrePage() {
   const [searchParams] = useSearchParams();
   const deepLinkedAccountId = searchParams.get('compte');
 
-  const [periodStart, setPeriodStart] = useState('');
-  const [periodEnd, setPeriodEnd] = useState('');
+  // Seeded from the URL once, same deep-link pattern as `compte` above —
+  // e.g. an anomaly-surfacing row linking straight to the flagged month.
+  const [periodStart, setPeriodStart] = useState(() => searchParams.get('periodStart') ?? '');
+  const [periodEnd, setPeriodEnd] = useState(() => searchParams.get('periodEnd') ?? '');
 
   const trialBalanceQuery = useTrialBalance({
     fiscalYearId,
