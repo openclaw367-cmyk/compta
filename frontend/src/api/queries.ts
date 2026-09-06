@@ -36,6 +36,7 @@ import type {
   FixedAsset,
   ImportBatch,
   ImportPreviewResponse,
+  EntrySearchResponse,
   PlanComptableImportPreviewResponse,
   PlanComptableImportResult,
   FinalizeInvoiceResult,
@@ -143,6 +144,26 @@ export function useAccounts() {
     queryKey: ['accounts'],
     queryFn: () => api.get<Account[]>('/accounts'),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * Powers the command palette's écriture search (libellé substring or
+ * exact amount, mode auto-detected server-side) — see CLAUDE.md "Search
+ * — écritures by libellé/amount". Unlike useAccounts(), this can't be a
+ * one-time cache warm (a company can have thousands of écritures), so
+ * the caller is expected to pass an already-debounced query and this
+ * hook stays disabled below 2 characters, matching the backend's own
+ * MIN_QUERY_LENGTH guard. `placeholderData` keeps the previous result
+ * list on screen while the next keystroke's query is in flight, instead
+ * of flashing empty between debounce ticks.
+ */
+export function useEntrySearch(query: string) {
+  return useQuery({
+    queryKey: ['entries-search', query],
+    queryFn: () => api.get<EntrySearchResponse>(`/entries/search?q=${encodeURIComponent(query)}`),
+    enabled: query.trim().length >= 2,
+    placeholderData: (previous) => previous,
   });
 }
 

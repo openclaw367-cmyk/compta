@@ -455,6 +455,28 @@ export interface PlanComptableImportResult {
   updatedCount: number;
 }
 
+/** One row for GET /entries/search?q=... — see CLAUDE.md "Search — écritures by libellé/amount". */
+export interface EntrySearchResult {
+  id: string;
+  journalId: string;
+  journalCode: string;
+  ecritureNum: string | null;
+  /** YYYY-MM-DD */
+  ecritureDate: string;
+  libelle: string;
+  validatedAt: string | null;
+  /** AMOUNT mode: the specific matching line's own amount. LIBELLE mode: the écriture's total debit. */
+  amount: string;
+}
+
+/** Response for GET /entries/search?q=... */
+export interface EntrySearchResponse {
+  mode: 'LIBELLE' | 'AMOUNT';
+  query: string;
+  results: EntrySearchResult[];
+  totalCount: number;
+}
+
 /** Response shape for GET /depreciation/fixed-assets(/:id) — see FixedAssetListItemDto on the backend. */
 export interface FixedAsset {
   id: string;

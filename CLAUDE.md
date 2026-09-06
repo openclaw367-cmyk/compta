@@ -6036,6 +6036,110 @@ touched.
   unremarkable pattern — the codebase folder doesn't have to be
   renamed every time the product it builds is renamed).
 
+## Search — écritures by libellé/amount
+
+`backend/src/modules/entries/entries.service.ts` (`search()`) and
+`frontend/src/components/command/CommandPalette.tsx` (2026-09-06) close
+a real gap: the command palette (Ctrl/Cmd+K) could jump to any page or
+account, but had no idea écritures existed — no way to find one by its
+libellé or by an amount. Per the user's own request, two design forks
+were resolved via `AskUserQuestion` before any code was written, both
+choices deliberately set explicitly rather than left as an implicit
+default: **exact-match** for amounts (not "contains"), and **search
+across every fiscal year** (not scoped to the currently-selected one).
+
+- **Why this couldn't just extend the existing client-side filter** —
+  accounts/pages search instantly because the whole (small) account
+  list is already warmed in the `['accounts']` query cache; a company's
+  écritures can number in the thousands, so this is a real, debounced
+  **backend** search (`GET /entries/search?q=...`), not a client-side
+  filter over an eagerly-fetched list.
+- **Mode is auto-detected from the query, never a caller-supplied
+  flag** — `AMOUNT_QUERY_PATTERN` (`^\d+([.,]\d{1,2})?$`) treats a bare
+  number (comma OR point decimal, since a user typing in a search box
+  may use either) as an AMOUNT search: an EXACT match against every
+  line's `debit` OR `credit` (a real `Prisma.Decimal` equality
+  comparison at the DB level, never a JS float). Anything else is a
+  LIBELLE search: a case-insensitive substring match on the écriture's
+  own `libelle`. Below `MIN_QUERY_LENGTH` (2 characters), neither mode
+  fires — enforced server-side too, not just by the frontend's own
+  debounce/gating, so a stray fast-typed request never falls through to
+  an unscoped scan.
+- **Capped server-side at `SEARCH_RESULT_LIMIT` (8), always reporting
+  the real `totalCount`** — so the caller can say "26 résultats —
+  affinez votre recherche" rather than silently truncating. This is the
+  actual answer to "how do we avoid cluttering the result list": a
+  small, bounded result set with an honest count, not an unbounded
+  scroll.
+- **An AMOUNT-mode result reports the specific MATCHED line's own
+  amount; a LIBELLE-mode result reports the écriture's TOTAL debit**
+  (summed via `Money`, never a raw `+` on a Decimal) — a deliberate,
+  per-mode choice: showing an écriture's grand total when you searched
+  for one specific line's amount (in a multi-line entry) would look
+  like a non-match at a glance. One row per écriture even when several
+  of its lines (or both its debit and credit sides) equal the searched
+  amount — first match wins, since they'd all report the same value.
+- **Route ordering is load-bearing** — `@Get('search')` is registered
+  on `EntriesController` BEFORE the existing `@Get(':id')`, or NestJS
+  would parse `/entries/search` as a request for the écriture with id
+  `"search"`. Flagged explicitly in the route's own `@ApiOperation`
+  description so a future edit doesn't reorder them back.
+- **Results render in the palette as their own clearly-labeled
+  "Écritures" group**, visually separated from the pre-existing
+  "Pages"/"Comptes" groups (the palette gained real group headers for
+  the first time this pass — previously a flat, ungrouped list) —
+  each row shows libellé, date · journal · montant, and a "· Brouillon"
+  suffix when unvalidated. Clicking reuses the EXACT existing
+  `/ecritures?journal=<journalId>&ecriture=<id>` deep-link mechanism
+  the dashboard's own recent-entries widget already established — no
+  new frontend deep-link code needed, and confirmed live (below) that
+  it correctly opens the entry even when it belongs to a DIFFERENT
+  fiscal year than the one currently selected in the topbar, since
+  `JournalEntriesPage`'s own `ecritures` cache is already unscoped by
+  fiscal year and the deep-link effect resolves the target directly by
+  id rather than through the fiscal-year-filtered list.
+- **Debounced 250ms client-side** (`SEARCH_DEBOUNCE_MS`) before firing
+  the backend query — pages/comptes stay instant either way, since
+  those are still filtered client-side with no network round trip.
+  `useEntrySearch()`'s `placeholderData: (previous) => previous` keeps
+  the prior result list on screen between debounce ticks instead of
+  flashing empty on every keystroke.
+- **A real, live-found tooling mistake, caught and fully reverted
+  before committing** — an `eslint --fix` invoked from the wrong
+  working directory (`backend/` instead of `frontend/`) accidentally
+  reformatted dozens of unrelated backend files repo-wide (pure
+  Prettier line-wrap/quote-style churn, confirmed via `git diff` to be
+  functionally identical everywhere it wasn't already just CRLF/LF
+  noise) — none of it was part of this feature. Every file outside the
+  actual diff (`entries.controller.ts`/`entries.service.ts`/
+  `entries.service.spec.ts`/the new `entry-search-response.dto.ts`,
+  plus the three frontend files) was reverted via `git checkout --`
+  before committing, confirmed by `tsc`/the full test suite/`vite
+  build` all staying green afterward. Recorded here as a caution, not
+  swept under the rug: always scope a repo-wide lint/format command to
+  the actual directory you mean to touch.
+- **Verified two ways.** 7 new backend unit tests in
+  `entries.service.spec.ts` (below-minimum-length returns empty
+  without querying the DB, exact amount match with a point decimal,
+  the comma-decimal case, deduplication when multiple lines of the
+  same écriture match, libellé substring case-insensitivity, summing
+  every debit line for the LIBELLE-mode total rather than just the
+  first, and the real-`totalCount`-even-when-capped case) — 898 backend
+  tests passing overall (up from 891); `tsc`/`eslint` clean both sides,
+  `vite build` clean. **Live, against the FR demo company, via curl AND
+  a real browser**: libellé search for "vente" returned 5 real
+  écritures ordered most-recent-first with correctly-summed totals;
+  amount search for "1200" and "1200,00" both correctly resolved to
+  AMOUNT mode, returning the same 12 real matches (8 shown, "+4
+  résultats" footer); a 1-character query correctly returned empty
+  without erroring. In the browser: opened the palette, typed "vente",
+  confirmed the "COMPTES"/"ÉCRITURES" group headers and every row's
+  formatted date/journal/montant rendered correctly after the debounce;
+  typed "1200" and confirmed the "+4 résultats" footer; clicked a
+  result and confirmed it navigated straight to
+  `/ecritures?journal=...&ecriture=...` and the correct écriture opened
+  in the editor.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
