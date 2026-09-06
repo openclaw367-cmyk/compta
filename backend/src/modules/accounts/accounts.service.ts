@@ -26,7 +26,7 @@ const PRISMA_UNIQUE_CONSTRAINT_ERROR = 'P2002';
  * change stay unattributed to any specific associé unless re-tagged by
  * hand; nothing here retroactively reclassifies existing data.
  */
-function isAuxiliaryBearingCollectif(number: string): boolean {
+export function isAuxiliaryBearingCollectif(number: string): boolean {
   return number.startsWith('401') || number.startsWith('411') || number.startsWith('455');
 }
 
@@ -137,21 +137,122 @@ export class AccountsService {
     });
   }
 
-  /** Label plus the optional tiers-identity fields — see UpdateAccountDto. */
+  /**
+   * Label plus the optional tiers-identity fields — see UpdateAccountDto.
+   * As of the Plan Comptable module (2026-09-06), `number` is also
+   * editable: when supplied and different from the account's current
+   * number, `pcgClass` is recomputed via `resolvePcgClass()` (never
+   * client-supplied directly, same discipline as `create()`) and
+   * uniqueness is enforced the same way. `isAuxiliary`/`parentId` stay
+   * immutable through this endpoint regardless — reparenting/converting
+   * an account's own kind is out of scope; only its number/class/label/
+   * identity fields can change. Renumbering a COLLECTIF that still has
+   * tiers underneath it is refused (naming the count) rather than
+   * silently leaving those children's numbers looking inconsistent with
+   * their new parent number — they'd keep working (the FK is by id, not
+   * number) but the numbering would no longer read as a coherent series.
+   */
   async rename(company: CompanyContext, id: string, dto: UpdateAccountDto): Promise<Account> {
     const account = await this.findOne(company, id);
-    return this.prisma.account.update({
-      where: { id: account.id },
-      data: {
-        label: dto.label,
-        addressLine: dto.addressLine,
-        postalCode: dto.postalCode,
-        city: dto.city,
-        countryCode: dto.countryCode,
-        sirenOrRci: dto.sirenOrRci,
-        vatNumber: dto.vatNumber,
-      },
-    });
+
+    const data: Prisma.AccountUpdateInput = {
+      label: dto.label,
+      addressLine: dto.addressLine,
+      postalCode: dto.postalCode,
+      city: dto.city,
+      countryCode: dto.countryCode,
+      sirenOrRci: dto.sirenOrRci,
+      vatNumber: dto.vatNumber,
+    };
+
+    if (dto.number !== undefined && dto.number !== account.number) {
+      const childCount = await this.prisma.account.count({ where: { parentId: account.id } });
+      if (childCount > 0) {
+        throw new ConflictException(
+          `Impossible de renuméroter le compte "${account.number}" — ${childCount} tiers ` +
+            "dépendent de ce compte collectif. Renumérotez-les d'abord si nécessaire.",
+        );
+      }
+      data.number = dto.number;
+      data.pcgClass = resolvePcgClass(dto.number);
+    }
+
+    try {
+      return await this.prisma.account.update({ where: { id: account.id }, data });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === PRISMA_UNIQUE_CONSTRAINT_ERROR
+      ) {
+        throw new ConflictException(`Account number "${dto.number}" already exists.`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Hard delete — only allowed when nothing references this account
+   * anywhere: no tiers underneath it, no écriture ligne (main or
+   * auxiliary), no fixed asset (as the asset/depreciation/expense
+   * account), no linked bank account, no invoice (as client or a
+   * revenue line), and no recurring-entry template line (those store
+   * the account NUMBER as a plain string, not an id FK — see
+   * RecurringEntryTemplateLine — so this check is separate from the
+   * FK-backed ones above). Closes the "no delete/deactivate on Account"
+   * gap documented in CLAUDE.md "Known scope boundaries" — deliberately
+   * conservative: every reference must be gone first, never a cascade.
+   */
+  async remove(company: CompanyContext, id: string): Promise<void> {
+    const account = await this.findOne(company, id);
+
+    const [
+      childCount,
+      lignesAsMain,
+      lignesAsAux,
+      fixedAssetCount,
+      bankAccountCount,
+      invoiceAsClientCount,
+      invoiceLineAsRevenueCount,
+      recurringLineCount,
+    ] = await Promise.all([
+      this.prisma.account.count({ where: { parentId: id } }),
+      this.prisma.ecritureLigne.count({ where: { compteId: id } }),
+      this.prisma.ecritureLigne.count({ where: { compteAuxId: id } }),
+      this.prisma.fixedAsset.count({
+        where: {
+          OR: [{ accountId: id }, { depreciationAccountId: id }, { expenseAccountId: id }],
+        },
+      }),
+      this.prisma.bankAccount.count({ where: { compteId: id } }),
+      this.prisma.invoice.count({ where: { clientAccountId: id } }),
+      this.prisma.invoiceLine.count({ where: { revenueAccountId: id } }),
+      this.prisma.recurringEntryTemplateLine.count({
+        where: {
+          template: { companyId: company.companyId },
+          OR: [{ accountNumber: account.number }, { auxAccountNumber: account.number }],
+        },
+      }),
+    ]);
+
+    const blockers: string[] = [];
+    if (childCount > 0) blockers.push(`${childCount} tiers sous ce compte`);
+    if (lignesAsMain > 0) blockers.push(`${lignesAsMain} ligne(s) d'écriture`);
+    if (lignesAsAux > 0) blockers.push(`${lignesAsAux} ligne(s) d'écriture (compte auxiliaire)`);
+    if (fixedAssetCount > 0) blockers.push(`${fixedAssetCount} immobilisation(s)`);
+    if (bankAccountCount > 0) blockers.push('un compte bancaire lié');
+    if (invoiceAsClientCount > 0) blockers.push(`${invoiceAsClientCount} facture(s) client`);
+    if (invoiceLineAsRevenueCount > 0)
+      blockers.push(`${invoiceLineAsRevenueCount} ligne(s) de facture`);
+    if (recurringLineCount > 0) blockers.push(`${recurringLineCount} ligne(s) de modèle récurrent`);
+
+    if (blockers.length > 0) {
+      throw new ConflictException(
+        `Impossible de supprimer le compte "${account.number}" — il est référencé par : ` +
+          `${blockers.join(', ')}.`,
+      );
+    }
+
+    await this.prisma.account.delete({ where: { id } });
   }
 
   private async requireCollectif(company: CompanyContext, parentId: string): Promise<Account> {

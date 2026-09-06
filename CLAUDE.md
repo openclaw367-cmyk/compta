@@ -4876,6 +4876,182 @@ every invoice.
   (`totalActifNet = totalPassif = 39 495,00`, unaffected throughout
   since nothing here ever posted to the ledger).
 
+## Plan Comptable — full CRUD and Excel bulk import
+
+`backend/src/modules/accounts/{accounts.service,plan-comptable-import.service}.ts`,
+`AccountsController`, and `frontend/src/{pages/AccountsJournalsPage,
+components/accounts/*,components/tiers/TiersFormModal}.tsx` (2026-09-06)
+let a user fully customize the chart of accounts instead of only ever
+appending to it, plus a bulk Excel import for bootstrapping/maintaining
+it from an external spreadsheet. Per the user's own request ("a plan
+comptable module where the user can customise the accounts to his will
+... the ability to import a plan comptable in excel format"), four
+design forks were resolved via `AskUserQuestion` before any code was
+written, three to the recommended option and one widened past it
+(tiers rows ARE supported in the bulk import, not just plain accounts).
+
+- **Number/class are now editable, not just the label** —
+  `UpdateAccountDto` gained an optional `number` field (same
+  `^[1-8][0-9A-Za-z]*$` validation as `CreateAccountDto`).
+  `AccountsService.rename()` (kept its name despite the wider scope,
+  same "rename in spirit only" precedent as the tiers-identity pass
+  above) recomputes `pcgClass` via `resolvePcgClass()` when a
+  different number is supplied — never client-supplied directly, same
+  discipline as `create()`. `isAuxiliary`/`parentId` stay immutable
+  through this endpoint regardless; reparenting/converting an
+  account's own kind is out of scope. **A real, deliberate guard**:
+  renumbering a COLLECTIF that still has tiers underneath it is
+  refused (naming the count) — the children would keep working (the
+  FK is by id, not number) but their numbers would no longer read as
+  a coherent series under the new parent number, so this fails loud
+  rather than silently producing a confusing result.
+- **Delete is now real, closing the "no delete/deactivate on Account"
+  gap** documented in "Known scope boundaries" — `DELETE /accounts/:id`
+  → `AccountsService.remove()`. Hard delete, only when NOTHING
+  references the account: no tiers underneath it, no `EcritureLigne`
+  (main or auxiliary), no `FixedAsset` (asset/depreciation/expense),
+  no linked `BankAccount`, no `Invoice` (client or a revenue line),
+  and no `RecurringEntryTemplateLine` — the last one is checked
+  separately from the rest since that model stores the account NUMBER
+  as a plain string, not an id FK, so it can't rely on the database's
+  own FK constraints the way every other check implicitly does. Every
+  blocker is named together in one message (e.g. "référencé par : 3
+  tiers sous ce compte, 6 ligne(s) d'écriture"), never a bare
+  first-constraint-hit error. `@HttpCode(HttpStatus.NO_CONTENT)` is
+  set explicitly on the controller route — the exact fix already
+  applied to `InvoicingController.remove()` for the same reason (see
+  "Invoicing — frontend" above): without it, `api/client.ts`'s shared
+  `request()` would try to parse an empty 200 body as JSON and throw,
+  even though the delete itself succeeded.
+- **The Excel import is purely additive/upsert, never destructive** —
+  the recommended, chosen answer to "how should it handle a number
+  that already exists": create what's missing, update the label (+
+  identity fields) of what already exists, and **never delete or
+  touch an account absent from the file**. Re-parenting/renumbering an
+  EXISTING account is deliberately NOT done via the bulk import even
+  though the general edit endpoint now supports it — a spreadsheet
+  edit silently reclassifying or reparenting an account would be a
+  surprising, hard-to-review side effect; that stays the individual
+  edit screen's job.
+- **Own template, not a regulatory format** (unlike FEC import) —
+  `CompteNum`/`CompteLib` match `Account.number`/`.label`'s own
+  "CompteNum/CompteLib in FEC terms" naming (see `Account`'s schema
+  doc comment) rather than inventing new column names. **The widened
+  decision**: `CompteParentNum` (this app's own invented column, no
+  FEC/PCG equivalent) marks a row as a tiers under that 401/411/455
+  collectif rather than a plain account — the user chose to support
+  this over the recommended "plain accounts only, tiers stay on the
+  Tiers screen" option. Six further optional columns (`Adresse`,
+  `CodePostal`, `Ville`, `PaysISO`, `SirenRci`, `NumeroTva`) mirror
+  `CreateTiersDto`'s own optional fields exactly, meaningful only for
+  a tiers row.
+- **A tiers row's own `CompteNum` is used literally, not
+  auto-derived** — a deliberate departure from `createTiers()`'s API
+  behavior (which always derives the suffix server-side, "never
+  client-supplied"). This is a bulk "bring your existing plan
+  comptable" import, closer in spirit to FEC import's own philosophy
+  (a real external file already has real account numbers) than to the
+  interactive "+ Nouveau tiers" quick-create flow. `pcgClass` for a
+  tiers row is always inherited from its resolved PARENT, never from
+  its own leading digit — the exact same rule "FEC file import"
+  above already established for `CompAuxNum` accounts, reused here for
+  consistency rather than re-derived.
+- **Two-pass upsert inside one transaction, resolving parents either
+  from the same file or the existing DB** — `plan()` validates and
+  classifies every row (CREATE/UPDATE, plain/tiers) BEFORE
+  `confirmImport()` ever touches the database: a duplicate `CompteNum`
+  within the file, an unresolvable parent, a parent that's itself a
+  tiers ("tiers imbriqués non autorisés"), a parent outside
+  401/411/455, or a row naming itself as its own parent are all
+  collected as named errors (never silently skipped) and block the
+  ENTIRE `confirmImport()` call — all-or-nothing, same discipline as
+  Excel/FEC import. `confirmImport()` then upserts every plain-account
+  row first (so a tiers row created in pass 2 can resolve a parent
+  created earlier in the SAME file), then every tiers row, using
+  Prisma's own `upsert()` (`companyId_number` compound key) rather
+  than a create-then-catch-P2002 loop, since matching-by-number is
+  exactly what upsert is for here.
+- **`isAuxiliaryBearingCollectif()` and `cellValueToString()` are
+  reused verbatim, not reimplemented** — the former exported from
+  `accounts.service.ts` for the first time (was module-private), the
+  latter already exported from `import-excel.service.ts` per its own
+  "no parallel reimplementation" precedent (already reused by invoice
+  extraction). Both are same-module/same-backend TypeScript imports,
+  not a NestJS DI cross-module dependency — no module-boundary risk.
+- **Frontend**: the existing "Comptes" tab on `AccountsJournalsPage`
+  (already internally titled "Plan comptable") gained the new
+  capabilities rather than a separate new screen/nav entry — an
+  "Importer depuis Excel" toggle button opens `PlanComptableImportSection`
+  (preview-then-confirm, an inline expandable panel, not a full page,
+  reusing the same visual idiom `FecImportPage` already established:
+  file picker, "Analyser", an error list, a compact preview table with
+  a CREATE/UPDATE badge per row, then "Confirmer l'import"). Each plain
+  account row gained "Modifier" (opens the new, deliberately minimal
+  `PlainAccountEditModal` — number + label only, no identity fields,
+  since those are meaningless for a plain account) and "Supprimer"
+  (a `window.confirm()`-then-mutate action, same irreversible-action
+  pattern as cession/dotation/à-nouveau/finalize, even though the
+  backend's own reference check is the real safety net). A tiers'
+  "Modifier" (the pre-existing `TiersFormModal`, on the Tiers page)
+  gained an editable "N° de compte" field too, shown only in edit
+  mode — create still always derives the number server-side,
+  unchanged. `UpdateAccountDto`/`CreateTiersDto` are shared via
+  `import type` from the backend as before, so the frontend's
+  `TiersFormValues`/mutation hooks picked up the new `number` field
+  with no separate frontend DTO edit needed.
+- **No schema migration** — every field this module uses on `Account`
+  already existed (the tiers-identity pass above, and `number`/`label`/
+  `pcgClass` since day one); this pass is entirely service/controller/
+  frontend logic.
+- **Verified two ways.** Backend: 14 new tests in
+  `plan-comptable-import.service.spec.ts` (missing-column refusal,
+  plain CREATE/UPDATE classification, PCG-class-range rejection,
+  duplicate-CompteNum-in-file detection, parent resolved from the same
+  file, parent resolved from the DB, unresolvable/nested/non-collectif/
+  self-referencing parent refusals, the unreadable-file and
+  invalid-plan-blocks-confirm cases, and the two-pass upsert ordering
+  itself) plus 10 new tests in `accounts.service.spec.ts` (renumber +
+  recompute pcgClass, no-op when the number is unchanged, refuse
+  renumbering a collectif with tiers, unique-constraint conflict on
+  the new number, and `remove()`'s five cases: clean delete, blocked
+  by écriture lignes, blocked by child tiers, blocked by a recurring
+  template line, and unknown-account) — 891 backend tests passing
+  overall (up from 868); `tsc`/`eslint` clean both sides, frontend
+  `vite build` clean. **Live, against the FR demo company, via curl AND
+  a real browser, cleaned up afterward**: previewed a real 3-row
+  `.xlsx` (a new plain account `618900`, the already-existing `411000`
+  collectif re-submitted unchanged, and a new tiers `411050` under
+  `411000` with a full identity) — confirmed the exact
+  CREATE/UPDATE/CREATE classification and the tiers' inherited
+  `pcgClass: 4`; confirmed the import for real via `GET /accounts`
+  (all three fields — label, `parentId`, `addressLine`/`sirenOrRci` —
+  persisted exactly as expected); renumbered `618900` → `618950` via
+  `PATCH` and confirmed `pcgClass` stayed correctly derived; attempted
+  to delete the `411000` collectif and confirmed the exact 409 message
+  naming both blockers ("3 tiers sous ce compte, 6 ligne(s)
+  d'écriture"); deleted both test accounts cleanly (`204`, no JSON-parse
+  error), confirmed gone via `GET /accounts`, and confirmed
+  `POST /liasse/generate` still balances at the company's own
+  unaffected baseline (`39 495,00 = 39 495,00`, since none of this
+  posted to the ledger). Separately, in a real browser: created a
+  throwaway plain account through the ordinary "+ Nouveau compte"
+  form, opened "Modifier" and confirmed the number/label pre-fill,
+  renumbered it, confirmed the new number rendered live with no
+  reload, clicked "Supprimer" (confirm-dialog stubbed to auto-accept
+  for the scripted click, the real code path unmodified) and confirmed
+  it disappeared with no error banner, and confirmed "Importer depuis
+  Excel" opens the panel with the correct column documentation text.
+  **The actual file-picker interaction inside the browser (selecting a
+  real file via the native OS dialog) was not exercised** — Chrome's
+  automation sandbox can't script a native file-chooser dialog; the
+  full preview→confirm flow was instead verified via curl against the
+  real, unmodified endpoints the UI calls, and the panel's own
+  rendering (copy, buttons, table) was confirmed via DOM inspection —
+  a human click-through with a real file is worth a quick check in a
+  future session, same class of accepted gap as this codebase's other
+  browser-tooling limitations (e.g. the PDF/Excel report download
+  buttons in "Reporting/export flexibility" above).
+
 ## Recurring entries / templates
 
 `src/modules/recurring-entries/` (2026-09-05) is the roadmap's next
@@ -5910,13 +6086,17 @@ assume they're covered either:
   régularisations, annexe 3310-A on the FR side; TMP, acomptes
   provisionnels, filing-frequency mechanics, and the cross-border
   memo-line question on the MC side).
-- **No delete/deactivate endpoint exists for `Journal`, `Account`,
-  `VatRate`, or `FiscalYear`.** Each has create + list (+ close, for
-  FiscalYear), nothing more — discovered directly while building their
-  admin screens, when cleaning up test data required a raw Prisma script
-  instead of the API. `Account` and `Journal` also have no update beyond
-  `Account.rename()`. If a future screen needs to remove or correct one
-  of these, that's new backend work, not existing-but-unwired UI.
+- **`Account` now has a real delete + a fuller update (see "Plan
+  Comptable" above, 2026-09-06) — `Journal`, `VatRate`, and
+  `FiscalYear` still don't.** Each of those three still has only
+  create + list (+ close, for FiscalYear) — discovered directly while
+  building their admin screens, when cleaning up test data required a
+  raw Prisma script instead of the API. `Journal` also has no update
+  at all. If a future screen needs to remove or correct one of these
+  three, that's new backend work, not existing-but-unwired UI —
+  `Account`'s own delete (gated on zero references anywhere) and
+  update (label + number/class + tiers-identity) are a template for
+  what that would look like, not a precedent that already covers them.
 - **`VatPage.tsx` only renders the CA3 shape — it doesn't handle Monaco
   yet.** The frontend declaration screen is typed and hardcoded to
   `Ca3Declaration` (`ligne16`/`ligne19`/`ligne20`/`ligne23`/`ligne25`/

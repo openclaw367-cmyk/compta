@@ -36,6 +36,8 @@ import type {
   FixedAsset,
   ImportBatch,
   ImportPreviewResponse,
+  PlanComptableImportPreviewResponse,
+  PlanComptableImportResult,
   FinalizeInvoiceResult,
   Invoice,
   InvoiceMentions,
@@ -928,11 +930,59 @@ export function useCreateTiers() {
   });
 }
 
+/** Also handles number/pcgClass now (Plan Comptable module) — see UpdateAccountDto. */
 export function useRenameAccount() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, dto }: { id: string; dto: UpdateAccountDto }) =>
       api.patch<Account>(`/accounts/${id}`, dto),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+  });
+}
+
+/** Only succeeds when the account has zero references anywhere — see AccountsService.remove(). */
+export function useDeleteAccount() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/accounts/${id}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+  });
+}
+
+function planComptableImportFormData(file: File): FormData {
+  const formData = new FormData();
+  formData.append('file', file);
+  return formData;
+}
+
+/**
+ * Plan Comptable bulk import (Excel, .xlsx) — CompteNum/CompteLib
+ * required, CompteParentNum (+ optional identity columns) for a tiers
+ * row. Preview never persists; confirm() upserts by CompteNum — see
+ * CLAUDE.md "Plan Comptable".
+ */
+export function usePreviewPlanComptableImport() {
+  return useMutation({
+    mutationFn: (file: File) =>
+      api.postForm<PlanComptableImportPreviewResponse>(
+        '/accounts/import/preview',
+        planComptableImportFormData(file),
+      ),
+  });
+}
+
+export function useConfirmPlanComptableImport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) =>
+      api.postForm<PlanComptableImportResult>(
+        '/accounts/import/confirm',
+        planComptableImportFormData(file),
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['accounts'] });
     },
