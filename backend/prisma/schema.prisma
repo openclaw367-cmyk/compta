@@ -275,6 +275,27 @@ model Account {
   /// sub-account referenced from an EcritureLigne as CompAuxNum/CompAuxLib).
   isAuxiliary Boolean @default(false)
 
+  /// Legal-identity fields for a tiers (compte auxiliaire) — captured
+  /// once at "+ Nouveau tiers" time so invoicing can pre-fill a client's
+  /// own FinalizeInvoiceDto/DevisRequestDto fields instead of asking the
+  /// user to retype them on every invoice. Meaningful only for an
+  /// isAuxiliary account in practice (a plain PCG account leaves these
+  /// null, unused) — not schema-enforced, since nothing downstream reads
+  /// them off a non-tiers account anyway. `countryCode`/`sirenOrRci`/
+  /// `vatNumber` are named to match InvoiceMentionsClientInput /
+  /// FinalizeInvoiceDto's own field names exactly, so the pre-fill
+  /// mapping is a direct copy, never a re-derivation. `sirenOrRci` is
+  /// one unified free-text field (not a siren/rci split like Company's
+  /// own) since a tiers could legally be a SIREN-bearing FR entity, an
+  /// RCI-bearing MC entity, or neither — the invoice model already made
+  /// this exact call for the same reason (see invoice-mentions.ts).
+  addressLine String?
+  postalCode  String?
+  city        String?
+  countryCode String?
+  sirenOrRci  String?
+  vatNumber   String?
+
   parentId String?
   parent   Account?  @relation("AccountHierarchy", fields: [parentId], references: [id])
   children Account[] @relation("AccountHierarchy")

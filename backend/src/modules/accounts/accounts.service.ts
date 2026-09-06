@@ -106,6 +106,12 @@ export class AccountsService {
             pcgClass: parent.pcgClass,
             isAuxiliary: true,
             parentId: parent.id,
+            addressLine: dto.addressLine,
+            postalCode: dto.postalCode,
+            city: dto.city,
+            countryCode: dto.countryCode,
+            sirenOrRci: dto.sirenOrRci,
+            vatNumber: dto.vatNumber,
           },
         });
       });
@@ -131,12 +137,20 @@ export class AccountsService {
     });
   }
 
-  /** Rename only — see UpdateAccountDto. */
+  /** Label plus the optional tiers-identity fields — see UpdateAccountDto. */
   async rename(company: CompanyContext, id: string, dto: UpdateAccountDto): Promise<Account> {
     const account = await this.findOne(company, id);
     return this.prisma.account.update({
       where: { id: account.id },
-      data: { label: dto.label },
+      data: {
+        label: dto.label,
+        addressLine: dto.addressLine,
+        postalCode: dto.postalCode,
+        city: dto.city,
+        countryCode: dto.countryCode,
+        sirenOrRci: dto.sirenOrRci,
+        vatNumber: dto.vatNumber,
+      },
     });
   }
 

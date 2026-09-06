@@ -11,7 +11,8 @@ import { UpdateAccountDto } from './dto/update-account.dto';
 @ApiHeader({
   name: 'x-company-id',
   required: true,
-  description: 'Tenant id — must name a company the caller (see Authorization header) is a member of.',
+  description:
+    'Tenant id — must name a company the caller (see Authorization header) is a member of.',
 })
 @Controller('accounts')
 export class AccountsController {

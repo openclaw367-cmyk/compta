@@ -4780,6 +4780,102 @@ option), a written plan reviewed and approved before implementation.
   discipline) and Monaco devis (same gate as Monaco invoicing
   generally).
 
+## Invoicing — client identity pre-fill (tiers address/SIREN/VAT)
+
+`backend/prisma/schema.prisma` (`Account`), `accounts/dto/{create-tiers,
+update-account}.dto.ts`, `accounts.service.ts`, and
+`frontend/src/components/{tiers/TiersFormModal,invoicing/InvoiceEditor}.tsx`
+(2026-09-06) close a gap `FinalizeInvoiceDto`'s own doc comment had
+flagged since Invoicing Phase A shipped: "Account... has no
+address/SIREN/RCI fields today, so these are caller-supplied here
+rather than read off the account... a natural follow-up... explicitly
+not attempted this pass." This pass attempts it — a tiers now carries
+its own legal-identity fields, captured once, so `InvoiceEditor`'s
+Devis/Finaliser sections pre-fill from them instead of asking again on
+every invoice.
+
+- **Six new optional `Account` columns** — `addressLine`/`postalCode`/
+  `city`/`countryCode`/`sirenOrRci`/`vatNumber` (migration
+  `20260906125230_add_account_tiers_identity_fields`). Named to match
+  `InvoiceMentionsClientInput`/`FinalizeInvoiceDto`'s own field names
+  exactly, so the pre-fill mapping is a direct copy, never a
+  re-derivation. **`sirenOrRci` is one unified free-text field, not a
+  siren/rci split the way `Company` has** — a tiers could legally be a
+  SIREN-bearing FR entity, an RCI-bearing MC entity, or neither, and
+  the invoice-mentions model already made this exact unification call
+  for the same reason (see "Invoicing — Phase A" above). Not
+  schema-enforced to `isAuxiliary` accounts only — nothing downstream
+  ever reads these off a non-tiers account, so a plain PCG account
+  simply leaves them null and unused, same "don't add a constraint
+  where nothing depends on it" restraint as elsewhere in this schema.
+- **`CreateTiersDto`/`UpdateAccountDto`** both gained the same six
+  optional fields (`@IsOptional() @IsString()`, `countryCode`
+  deliberately unvalidated for format here — "kept permissive at
+  capture time; `FinalizeInvoiceDto` is what actually enforces the
+  format," per the DTO's own doc comment). `AccountsService.createTiers()`
+  and `.rename()` (renamed in spirit only — it now updates label plus
+  these six identity fields, doc-commented accordingly) both pass them
+  straight into the Prisma `data:` object; an omitted field is
+  Prisma's own `undefined` ("don't touch"), confirmed the existing
+  label-only quick-rename call sites stay unaffected.
+- **Deliberately scoped to the DEDICATED Tiers page's "+ Nouveau
+  tiers"/"Modifier" flow only** (`TiersFormModal`, opened from
+  `CollectifTiersCard`) — the QUICK inline "+ nouveau tiers" creation
+  used elsewhere (e.g. the journal-entry grid's own CompAux picker via
+  `AccountCombobox`'s `onCreateNew`) is untouched, staying a fast,
+  name-only prompt. Forcing a 6-field form into "I'm just posting a
+  journal entry" would be the wrong tradeoff there; a bookkeeper
+  setting up a real client for invoicing is exactly the moment worth
+  asking for the fuller identity. `TiersFormModal`'s own doc comment
+  states this split explicitly, not left implicit. The country field
+  pre-fills from the current company's own `jurisdiction`
+  (`useAppContext().currentCompany?.jurisdiction ?? 'FR'`) on create,
+  auto-uppercases and truncates to 2 chars on input.
+- **`InvoiceEditor.tsx`'s pre-fill, the actual deliverable**:
+  `clientIdentityDraftFromAccount(account)` replaces the former
+  `emptyClientIdentityDraft()` as the initializer for both
+  `DevisSection`'s and `FinalizeSection`'s `draft` state — both now
+  take a `clientAccount: Account | null` prop (the invoice's own
+  resolved `clientAccountId`, looked up once in the parent) and seed
+  every client-identity field from it via a lazy `useState` initializer
+  (correct here specifically because both sections only ever mount
+  once the draft invoice already has a fixed `clientAccountId` — they
+  don't need to react to it changing after mount). **A convenience
+  default, never a hard requirement** — every field stays freely
+  editable afterward regardless of where its initial value came from,
+  same "pre-fill, don't lock" precedent as every other prefill in this
+  app (deterministic invoice extraction, recurring-template preview).
+  A tiers created before this feature (or via the quick inline flow)
+  simply pre-fills empty fields, exactly as before — no migration
+  backfill, no behavior change for existing data.
+- **Verified two ways.** Backend: 3 new tests in
+  `accounts.service.spec.ts` (`createTiers` carries the six fields
+  through when supplied and leaves them `undefined` when omitted;
+  `rename` sends the exact expected `prisma.account.update` call args
+  with all six fields) — 868 backend tests passing overall (up from
+  865); `tsc`/`eslint` clean, `vite build` clean on the frontend.
+  **Live, real browser, FR demo company, cleaned up afterward**:
+  created a tiers "Client Nouveau SARL" (411003) via "+ Nouveau tiers"
+  with a full identity (10 rue de la Republique, 69001, Lyon, FR,
+  SIREN 111222333, TVA FR11111222333) — confirmed via `GET /accounts`
+  every field persisted exactly as entered; created a new invoice,
+  selected that client, filled a line (100,00 € HT, 707000, 20 % TVA),
+  saved as a draft — confirmed BOTH the Devis section's and the
+  Finaliser section's seven client-identity inputs (nom/adresse/code
+  postal/ville/pays/SIREN/TVA) pre-filled with the exact tiers values,
+  live in the DOM, with no manual entry; opened "Modifier" on the same
+  tiers, confirmed the edit modal pre-filled from the stored record,
+  changed `city` to "Villeurbanne", saved, and confirmed via `GET
+  /accounts` the change persisted (`updatedAt` advanced, every other
+  field untouched). All test data removed afterward via a temporary
+  script (the draft invoice — never finalized, so no écriture ever
+  existed to reverse — and the test tiers account itself, confirmed
+  zero `EcritureLigne` rows referenced it first); confirmed via `GET
+  /accounts` the account no longer appears, and via `POST
+  /liasse/generate` that the ledger still balances
+  (`totalActifNet = totalPassif = 39 495,00`, unaffected throughout
+  since nothing here ever posted to the ledger).
+
 ## Recurring entries / templates
 
 `src/modules/recurring-entries/` (2026-09-05) is the roadmap's next

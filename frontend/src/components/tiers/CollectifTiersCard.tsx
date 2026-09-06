@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Account } from '../../api/types';
 import { useCreateTiers, useRenameAccount } from '../../api/queries';
-import { ApiError } from '../../api/client';
+import { useAppContext } from '../../context/appContextStore';
 import { formatMoneyFr, isZeroMoney } from '../../lib/money';
+import { TiersFormModal, type TiersFormValues } from './TiersFormModal';
+
+type ModalState = { mode: 'create' } | { mode: 'edit'; account: Account } | null;
 
 export function CollectifTiersCard({
   collectif,
@@ -19,42 +22,19 @@ export function CollectifTiersCard({
   balanceByAccountId: Map<string, string>;
 }) {
   const navigate = useNavigate();
+  const { currentCompany } = useAppContext();
   const createTiers = useCreateTiers();
   const renameAccount = useRenameAccount();
 
-  const [isCreating, setIsCreating] = useState(false);
-  const [newLabel, setNewLabel] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editLabel, setEditLabel] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [modal, setModal] = useState<ModalState>(null);
 
-  async function handleCreate() {
-    if (newLabel.trim() === '') return;
-    setError(null);
-    try {
-      await createTiers.mutateAsync({ parentId: collectif.id, dto: { label: newLabel.trim() } });
-      setNewLabel('');
-      setIsCreating(false);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'La création a échoué.');
+  async function handleSubmit(values: TiersFormValues) {
+    if (modal?.mode === 'edit') {
+      await renameAccount.mutateAsync({ id: modal.account.id, dto: values });
+    } else {
+      await createTiers.mutateAsync({ parentId: collectif.id, dto: values });
     }
-  }
-
-  async function handleRename(id: string) {
-    if (editLabel.trim() === '') return;
-    setError(null);
-    try {
-      await renameAccount.mutateAsync({ id, dto: { label: editLabel.trim() } });
-      setEditingId(null);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Le renommage a échoué.');
-    }
-  }
-
-  function startEditing(t: Account) {
-    setEditingId(t.id);
-    setEditLabel(t.label);
-    setError(null);
+    setModal(null);
   }
 
   const collectifBalance = balanceByAccountId.get(collectif.id);
@@ -79,23 +59,14 @@ export function CollectifTiersCard({
         </div>
         <button
           type="button"
-          onClick={() => {
-            setIsCreating(true);
-            setError(null);
-          }}
+          onClick={() => setModal({ mode: 'create' })}
           className="rounded-md px-2.5 py-1 text-[12.5px] font-medium text-accent hover:bg-accent-soft"
         >
           + Nouveau tiers
         </button>
       </div>
 
-      {error && (
-        <div className="border-b border-negative-soft bg-negative-soft px-5 py-2 text-[12.5px] text-negative">
-          {error}
-        </div>
-      )}
-
-      {tiers.length === 0 && !isCreating ? (
+      {tiers.length === 0 ? (
         <p className="px-5 py-6 text-center text-[13px] text-ink-faint">
           Aucun tiers sous ce compte collectif.
         </p>
@@ -112,125 +83,52 @@ export function CollectifTiersCard({
           <tbody>
             {tiers.map((t) => {
               const balance = balanceByAccountId.get(t.id);
-              const isEditing = editingId === t.id;
               return (
                 <tr
                   key={t.id}
-                  onClick={isEditing ? undefined : () => navigate(`/grand-livre?compte=${t.id}`)}
-                  className={[
-                    'border-b border-border last:border-b-0',
-                    isEditing ? '' : 'cursor-pointer hover:bg-bg',
-                  ].join(' ')}
+                  onClick={() => navigate(`/grand-livre?compte=${t.id}`)}
+                  className="cursor-pointer border-b border-border last:border-b-0 hover:bg-bg"
                 >
                   <td className="px-5 py-2 tabular-nums text-ink-muted">{t.number}</td>
                   <td className="px-5 py-2">
-                    {isEditing ? (
-                      <input
-                        autoFocus
-                        type="text"
-                        value={editLabel}
-                        onChange={(e) => setEditLabel(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') void handleRename(t.id);
-                          if (e.key === 'Escape') setEditingId(null);
-                        }}
-                        className="w-full rounded-md border border-border px-2 py-1 text-[13px] text-ink outline-none focus:border-accent"
-                      />
-                    ) : (
-                      <span className="text-ink">{t.label}</span>
+                    <span className="text-ink">{t.label}</span>
+                    {(t.addressLine || t.city) && (
+                      <span className="ml-2 text-[11.5px] text-ink-faint">
+                        {[t.addressLine, t.postalCode, t.city].filter(Boolean).join(' · ')}
+                      </span>
                     )}
                   </td>
                   <td className="px-5 py-2 text-right tabular-nums text-ink">
                     {balance ? formatMoneyFr(balance) : '—'}
                   </td>
                   <td className="px-5 py-2 text-right">
-                    {isEditing ? (
-                      <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          onClick={() => void handleRename(t.id)}
-                          className="rounded px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft"
-                        >
-                          Enregistrer
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingId(null)}
-                          className="rounded px-2 py-1 text-[12px] font-medium text-ink-muted hover:bg-bg"
-                        >
-                          Annuler
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          startEditing(t);
-                        }}
-                        className="rounded px-2 py-1 text-[12px] font-medium text-ink-muted hover:bg-bg hover:text-ink"
-                      >
-                        Renommer
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setModal({ mode: 'edit', account: t });
+                      }}
+                      className="rounded px-2 py-1 text-[12px] font-medium text-ink-muted hover:bg-bg hover:text-ink"
+                    >
+                      Modifier
+                    </button>
                   </td>
                 </tr>
               );
             })}
-            {isCreating && (
-              <tr className="border-b border-border last:border-b-0 bg-accent-soft/40">
-                <td className="px-5 py-2 tabular-nums text-ink-faint">—</td>
-                <td className="px-5 py-2">
-                  <input
-                    autoFocus
-                    type="text"
-                    value={newLabel}
-                    onChange={(e) => setNewLabel(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void handleCreate();
-                      if (e.key === 'Escape') {
-                        setIsCreating(false);
-                        setNewLabel('');
-                      }
-                    }}
-                    placeholder="Nom du tiers"
-                    className="w-full rounded-md border border-border px-2 py-1 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:border-accent"
-                  />
-                </td>
-                <td className="px-5 py-2 text-right tabular-nums text-ink-faint">—</td>
-                <td className="px-5 py-2 text-right">
-                  <div className="flex justify-end gap-1">
-                    <button
-                      type="button"
-                      onClick={() => void handleCreate()}
-                      disabled={newLabel.trim() === ''}
-                      className="rounded px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent-soft disabled:cursor-not-allowed disabled:text-ink-faint"
-                    >
-                      Créer
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsCreating(false);
-                        setNewLabel('');
-                      }}
-                      className="rounded px-2 py-1 text-[12px] font-medium text-ink-muted hover:bg-bg"
-                    >
-                      Annuler
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       )}
 
-      {tiers.length === 0 && isCreating && (
-        <p className="px-5 pb-4 text-[12px] text-ink-faint">
-          Le numéro sera attribué automatiquement ({collectif.number.slice(0, 3)}001).
-        </p>
+      {modal && (
+        <TiersFormModal
+          mode={modal.mode}
+          account={modal.mode === 'edit' ? modal.account : null}
+          collectifNumber={collectif.number}
+          defaultCountryCode={currentCompany?.jurisdiction ?? 'FR'}
+          onSubmit={handleSubmit}
+          onClose={() => setModal(null)}
+        />
       )}
     </section>
   );
