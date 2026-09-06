@@ -63,6 +63,14 @@ reordered):
 
 Noted but not planned: **Mobile** — see the closing section.
 
+**All of §1-§9 above are now SHIPPED** (see the closing note). The next
+planning horizon — connecting this now-deep accounting core to the
+business processes around it (procure-to-pay, quote-to-cash,
+comptabilité analytique, and an honest look at CRM/project-management/
+payroll-engine territory) — is mapped separately in **"Business-
+operations / ERP direction"** below, organized by coupling to the
+ledger rather than by this section's own priority order.
+
 ---
 
 ## 1. Bank reconciliation
@@ -741,6 +749,486 @@ extension of an existing pattern — it's new foundational surface.
 
 ---
 
+## Business-operations / ERP direction
+
+**Status: MAP ONLY, same as the rest of this document — nothing below
+is designed or built.** Items §1-§9 above are the "deepen the core
+accounting product" roadmap, and all of it has shipped. This section is
+the next planning horizon: connecting that (now genuinely deep,
+compliance-verified) accounting core more directly to the business
+processes that feed it — procurement, sales, inventory, cost
+accounting, payroll — organized deliberately around **coupling to the
+ledger**, not feature glamour, per the explicit brief for this section.
+Every item below still gets its own design-then-verify pass before any
+code is written, exactly like every feature already shipped.
+
+### Why "coupling to the ledger" is the organizing axis here
+
+The rest of this roadmap uses GATED/PRESENTATION as its only axis,
+which is the right question for a compliance feature (does it touch
+computation/écriture-mapping, yes or no). For business-operations work,
+that question alone under-describes the real risk profile: a feature
+can be GATED (it posts to the ledger) while still being *mostly* a
+workflow/state-machine problem (a purchase order's own lifecycle), or
+PRESENTATION while sitting *directly* on top of the ledger's own
+verified numbers (a budget-vs-actual report). The tiers below layer a
+second axis — how tightly the feature's own correctness depends on
+this app's existing hand-traceable, primary-source-verified ledger —
+because that's what determines whether the existing "verify against a
+primary source, hand-trace an oracle" discipline can even apply. The
+GATED/PRESENTATION tag from the legend above is still given for every
+item; read it alongside the tier, not instead of it.
+
+### Honest inventory — what already exists beyond core accounting
+
+Verified directly against `backend/prisma/schema.prisma` (every model
+name in the schema was enumerated and checked, not recalled from
+memory) before writing this, since an "honest inventory" is worthless
+if the negatives ("X doesn't exist") are guessed rather than confirmed.
+
+**Real, shipped, business-operational modules:**
+
+- **Invoicing / Ventes (Invoicing Phase A + Factur-X + frontend + cash-
+  basis VAT + client identity)** — backend AND frontend, verified live
+  repeatedly on real data (see CLAUDE.md's several "Invoicing —" 
+  sections). `Invoice`/`InvoiceLine`, `SALE`/`CREDIT_NOTE` only (no
+  `PURCHASE`/bill type — confirmed via the `InvoiceType` enum, two
+  values), gated posting through the ordinary `EntriesService`, a real
+  EN16931 Factur-X export, a devis PDF mode, per-tiers identity capture
+  feeding invoice pre-fill. **The most mature business-operational
+  module in this app** and the natural anchor for Tier 1 below.
+- **Bank reconciliation** — Layer 1a (CAMT.053 + CSV import, tiered
+  matching engine, `lettrage`) real and live-verified; Layer 1b (Bridge
+  aggregator) architecturally real but explicitly flagged as an
+  unverified paper design pending real sandbox access. The closest
+  thing this app has to a "payments" integration today — but it's
+  reconciliation (matching an existing ledger line to a bank movement),
+  never payment *initiation*.
+- **Recurring entries / templates** — real, a light "standing charge"
+  mechanism (rent, a subscription), on-demand apply only, no scheduler.
+- **AI chatbot (`propose_ecriture` + invoice extraction + cloud tier)**
+  — real, an automation/assistant layer over the SAME gated write path
+  everything else uses; not itself a business-process module, but
+  relevant below since some Tier-1 candidates (supplier bill capture)
+  could reuse its deterministic-extraction pipeline directly.
+- **Anomaly surfacing** — real; notably, its `computePaymentAnomalies()`
+  ALREADY derives an ad-hoc "is this invoice paid" signal from
+  `EcritureLigne.lettrage`, because (confirmed below) `Invoice` itself
+  has no such field. This is a real, working piece of logic in the
+  wrong place — see Tier 1's "invoice payment status" item.
+- **Dashboard, multi-user/roles, Plan Comptable module, command-palette
+  search** — real, but infra/presentation, not business-operational in
+  the ERP sense this section is about.
+
+**Confirmed as NOT existing, checked directly against the schema (no
+model, no field, anywhere) — not assumed absent:**
+
+- **Achats / Purchasing, as a module.** No `PurchaseOrder`, no
+  `Bill`/`SupplierInvoice`/`Facture fournisseur` entity — nothing
+  beyond a bare écriture. A purchase invoice today is either keyed by
+  hand into the AC journal, brought in via Excel/FEC import, or
+  extracted by the AI chatbot into a *proposed* écriture — in every
+  case it becomes a plain journal entry with no persisted document
+  lifecycle, no link back to an order, and no approval step.
+- **Quote/Devis as a lifecycle entity.** `computeDevisMentions()`
+  renders a NOT-YET-FINALIZED `Invoice` draft as a devis PDF — there is
+  no separate `Quote` model, no accepted/rejected/expired state, no
+  "convert to order" step. What this app calls a "devis" today is a
+  rendering mode of a draft invoice, not a quote with its own
+  lifecycle.
+- **Commande (Sales Order or Purchase Order) as a persisted entity.**
+  Confirmed absent. Quote → cash today is really just "draft invoice →
+  finalized invoice"; there is no intermediate order stage that could
+  differ from either (partial fulfillment, renegotiated quantities,
+  multiple invoices against one order).
+- **Bon de livraison / Réception marchandise (delivery / goods
+  receipt).** Confirmed absent — no persisted delivery event on either
+  side of the ledger.
+- **Stock / Inventory, entirely.** No `Product`/`Article` catalog, no
+  `Stock`/`StockMovement` model, no valuation logic. Confirmed even at
+  the invoice-line level: `InvoiceLine` has `quantity`/`unitPriceHT`
+  but no `productId` — quantities are free-typed per line, not resolved
+  against any catalog.
+- **Payroll — not even an interface.** No `Employee`/`Payslip`/payroll
+  model of any kind. Salaries today would have to be journaled by hand
+  like anything else, with none of this app's own domain vocabulary
+  (no "charges de personnel" template, no cotisations mapping).
+- **Comptabilité analytique (cost/project/cost-center accounting).** No
+  analytical dimension anywhere on `EcritureLigne` — confirmed by
+  re-reading its full field list (compteId, compteAuxId, debit, credit,
+  lettrage, dateLettrage, montantDevise, idDevise, vatRateId,
+  dateEcheance — no cost-center/project tag). The closest existing
+  precedent for "tag a line with an extra dimension and aggregate by
+  it" is `vatRateId`, which is exactly the pattern to reuse (see Tier
+  2), not something to invent fresh.
+- **Budgeting / forecasting.** No `Budget` model. "Analyse financière"
+  is real but entirely retrospective (SIG cascade, ratios, BFR/FR/
+  trésorerie nette) — it has no concept of a planned figure to compare
+  against, so "budget vs. actual" doesn't exist in any form today, not
+  even a crude one.
+- **CRM, beyond the Tiers/Account identity fields already built for
+  invoicing** (name, address, SIREN/RCI, VAT number). No contact
+  activity history, no pipeline/opportunity stage, no lead concept.
+- **Project management.** Nothing — no task, milestone, or timesheet
+  concept anywhere in the schema.
+- **Invoice payment status, as a first-class field.** `Invoice` has
+  `encaissementConfirmedAt`/`encaissementEcritureId`, but these are
+  narrowly VAT-exigibility metadata (cash-basis VAT for services,
+  whole-invoice only, explicitly not a payment tracker per its own
+  schema doc comment) — not a general paid/unpaid/overdue status. The
+  real signal (`EcritureLigne.lettrage`) exists and is even already
+  read by the anomaly engine, but nothing surfaces it as an invoice
+  property.
+
+This is a genuinely different starting point than "we have accounting
+and need to add ERP modules" — this app already has a real, deep sales/
+invoicing module and a real bank-matching module; what's missing is
+almost entirely on the **purchasing side**, the **connective tissue**
+between existing pieces (quote↔order↔delivery↔invoice↔payment as one
+traceable chain, not independent islands), and the **management-
+accounting layer** (analytical dimensions, budgets) that would let this
+app's own already-verified numbers answer more business questions.
+
+---
+
+### Tier 1 — tight coupling: the operational event IS an accounting event
+
+The unifying idea: extend the ALREADY-MATURE invoicing/ledger core with
+the connective entities and links that turn "create an invoice" and
+"post a purchase" into real, traceable, multi-stage business processes
+— reusing `EntriesService`/`EntryValidationService` verbatim for every
+actual ledger write, exactly like Invoicing, cession, and à-nouveau
+already do. No new posting primitive anywhere in this tier.
+
+#### 1a. Quote-to-cash — Quote and Order as real, persisted entities
+
+- **What**: a `Quote` model (draft/sent/accepted/rejected/expired) and
+  an `Order` model (commande client), sitting BEFORE `Invoice` in the
+  lifecycle instead of collapsing everything into "draft invoice."
+  `Invoice` gains an optional `sourceOrderId` (mirroring the existing
+  `correctsInvoiceId` pattern already on the model) so the full chain
+  is queryable end to end. A quote's acceptance pre-fills an order; an
+  order's (partial) invoicing creates one or more `Invoice` rows linked
+  back to it.
+- **Classification: PRESENTATION for the entities/state machine
+  themselves** (a quote or order never touches the ledger) — **the
+  connective LINKS are the actual deliverable**, and their value is
+  entirely in enabling the traceability drill-down this app already
+  built for the compliance side (line → account → écriture →
+  justificatif) to extend one hop further back (quote → order →
+  invoice → écriture → justificatif), the same discipline, new domain.
+- **Depends on**: the existing `Invoice`/`InvoiceLine`/Tiers-identity
+  work (reused, not touched) as the terminal stage.
+- **Verification**: NOT a hand-traced accounting oracle — there's no
+  compliance content in "can a quote be edited after being sent."
+  Verification here means unit tests on the STATE MACHINE (only valid
+  transitions allowed — e.g. an invoice can't be created from a
+  rejected quote; an order's own remaining-to-invoice quantity is
+  tracked correctly across partial invoices) plus live click-through of
+  the full chain. This is this section's first explicit example of
+  "good enough" verification meaning something different from the rest
+  of this app's own oracle discipline — stated plainly, not glossed
+  over.
+
+#### 1b. Invoice payment status — promote the anomaly engine's own logic
+
+- **What**: a first-class, COMPUTED (never stored) payment status per
+  `Invoice` — paid / partially paid / open / overdue — derived from
+  `EcritureLigne.lettrage` on the invoice's own posted client-account
+  line, extending exactly the logic `computePaymentAnomalies()` already
+  has, just promoted from "an anomaly-detection side effect" to "a
+  queryable invoice property" (`GET /invoicing/invoices/:id` gains the
+  field; the invoice list/detail screens surface it).
+- **Classification: PRESENTATION.** No new ledger write, no new
+  aggregation logic beyond what already exists and is already tested —
+  this is almost entirely "expose an existing computation from a second
+  call site."
+- **Depends on**: Invoicing (exists), bank reconciliation's `lettrage`
+  (exists), the anomaly engine's own payment-matching logic (exists,
+  gets extracted into a shared, reusable function rather than
+  duplicated).
+- **Verification**: the underlying logic is ALREADY hand-oracle-tested
+  (`invoice-anomaly-engine.spec.ts`) — the only new surface is exposing
+  it on a second endpoint, verified by a regression test asserting both
+  call sites agree, plus a live check that the invoice screen shows the
+  same status the anomalies screen already flags. Low risk, small,
+  arguably the cheapest genuinely-valuable item in this whole section —
+  a good first pick.
+
+#### 1c. Procure-to-pay — Purchase Order, Goods Receipt, Supplier Bill
+
+**The much bigger lift of the two Tier-1 chains** — almost nothing
+exists here today, unlike quote-to-cash's extension of an already-
+mature module. Three new entities, each mirroring an already-verified
+pattern in this app rather than inventing a new one:
+
+- **`PurchaseOrder` (bon de commande fournisseur)** — a commitment to a
+  supplier, PRESENTATION on its own (no ledger write) but with one real
+  compliance-adjacent wrinkle worth flagging honestly now, not
+  discovering it late: French GAAP has a genuine "engagements hors
+  bilan" (off-balance-sheet commitments) disclosure concept for
+  significant outstanding purchase commitments (Code de commerce /
+  PCG's own "engagements financiers" annexe note) — **exact scope and
+  threshold to be confirmed against the primary source
+  (`specs/Reglt 2014-03_Plan comptable general.pdf` and Code de
+  commerce) at design time**, not assumed from this summary. Whether
+  this app's own liasse annexe ever needs to surface open POs is a real
+  open question for that design pass, not a foregone conclusion.
+- **`GoodsReceipt` (réception marchandise)** — the purchase-side mirror
+  of a delivery note; the trigger point for a stock increase once Tier
+  2's stock module exists (see below — until then, this is a milestone
+  marker only, PRESENTATION, with GATED behavior arriving later as a
+  pure addition, not a redesign).
+- **`SupplierInvoice` / `Bill` (facture fournisseur) as a first-class
+  entity** — the real deliverable, mirroring `Invoice` structurally
+  (draft → [optional approval] → posted) but for purchases. **GATED**:
+  once approved, it posts through the SAME `EntriesService.create()`/
+  `.validate()` path Invoicing already uses — no privileged write path,
+  exactly the standing rule. This is also where the AI chatbot's
+  already-built `InvoiceExtractionService` (deterministic PDF/Excel
+  field extraction) becomes directly reusable as the bill's own
+  capture mechanism, not a new extraction pipeline.
+  - **A real, citable regulatory reason this matters beyond internal
+    tidiness**: France's e-invoicing reform requires businesses to be
+    able to RECEIVE structured e-invoices, not just issue them — a
+    first-class `SupplierInvoice` entity is the natural landing spot
+    for that structured data once it arrives. **The exact mandatory
+    date has shifted more than once already and must be re-checked
+    against the current official calendar (impots.gouv.fr / the PPF
+    portal) at design time** — do not carry forward any specific date
+    from this document without re-verifying it fresh; this is exactly
+    the kind of fact this app's own discipline says never to assume
+    stale-safe.
+- **3-way match (PO ↔ Goods Receipt ↔ Bill)** — **GATED**, a genuine
+  correctness control (quantities/amounts must reconcile within a
+  tolerance before a bill is eligible to post), matching the user's own
+  stated values for this whole roadmap ("correctness/compliance depth,
+  gated ledger posting"). Verification: a hand-computed oracle over the
+  matching/tolerance rules, same discipline as the bank-reconciliation
+  matching engine's own oracle tests — genuinely verifiable to this
+  app's normal standard, since matching arithmetic has no ambiguity.
+- **Règlement fournisseur (payment run)** — recording an outgoing
+  payment against one or more bills; mirrors 1b's payment-status work
+  on the sales side (derives/updates status from `lettrage`), and reuse
+  `EntriesService.setLettrage()` as-is rather than a new write path.
+- **Depends on**: nothing existing beyond `EntriesService`/
+  `EntryValidationService` (reused) and, for the extraction step,
+  `InvoiceExtractionService` (reused). Genuinely buildable independent
+  of Tier 1a/1b, but sequenced after them here since 1a/1b are much
+  cheaper wins on an already-mature module.
+
+#### 1d. Payroll interface — import + gated posting ONLY, explicitly never a payroll engine
+
+- **What**: import a payslip/DSN summary (gross salaries, cotisations
+  sociales, net à payer — figures COMPUTED EXTERNALLY, e.g. by
+  Silae/PayFit/ADP) and post the standard French payroll journal entry
+  template (charges de personnel 641/645, organismes sociaux
+  431/437/645, net à payer 421) through the ordinary `EntriesService`.
+  Same shape as Excel import: an external file becomes a
+  preview-then-confirm gated écriture.
+- **Classification: GATED** — it posts real money to the ledger — but
+  narrowly scoped: this app NEVER computes a cotisation, a net salary,
+  or anything payroll-specific; it only structures and posts numbers a
+  payroll provider already computed and certified. This distinction is
+  load-bearing, not a formality — see Tier 3 below for why an actual
+  payroll ENGINE is a completely different (and not recommended)
+  undertaking.
+- **Depends on**: nothing beyond `EntriesService` — no new posting
+  primitive, no new entity beyond an import-batch-shaped record.
+- **Verification**: the posting TEMPLATE (which PCG accounts, what
+  the standard entry shape looks like) is a real, textbook, citable
+  structure — hand-traceable exactly like cession/à-nouveau/dotation
+  posting already is. The INPUT numbers have no accounting-standard
+  correctness question to verify (they're taken as given from an
+  external, already-certified source, the same trust boundary this
+  app already accepts for a bank statement import).
+
+---
+
+### Tier 2 — feeds the accounting: the management-accounting layer
+
+These don't touch ledger POSTING directly, but their whole value is in
+being provably consistent with the already-verified ledger — the same
+"two independently-sourced numbers must tie out" discipline this app
+already applies everywhere (Actif=Passif, the 2054/2055 tie-out, the
+cash-flow reconciliation), reused for a genuinely new class of question.
+
+#### 2a. Stock valuation methods feeding the bilan
+
+- **What**: once Tier 1's goods-receipt/delivery events exist and
+  produce real stock movements, a valuation engine (FIFO / CUMP — coût
+  unitaire moyen pondéré) computes closing stock value, feeding the
+  bilan's own stock lines (already named in this codebase's own cash-
+  flow module: "the 5 stock lines") and the compte de résultat's
+  variation de stocks.
+- **Classification: GATED.** This is squarely this app's own strongest
+  wheelhouse — a real PCG-governed valuation method feeding a real
+  compliance figure. **Confirmed general rule to verify precisely at
+  design time, not assumed from memory**: French GAAP permits FIFO/CUMP
+  for stock valuation and does NOT permit LIFO — the exact article
+  citation should be pulled fresh from
+  `specs/Reglt 2014-03_Plan comptable general.pdf` before any code is
+  written, matching this app's own "never cite a compliance rule from
+  memory, always re-check the primary source" rule.
+- **Depends on**: Tier 1's stock-movement events (goods receipt/
+  delivery) existing first — this item has no data to value without
+  them. A real, hard sequencing dependency, not just a suggestion.
+- **Verification**: hand-traced oracle (a known sequence of receipts/
+  issues at known costs, the expected FIFO/CUMP closing value worked
+  out by hand) plus a live tie-out against the bilan's own stock lines
+  on a fixture company — the exact discipline every other GATED feature
+  in this app already went through.
+
+#### 2b. Comptabilité analytique (cost-center / project allocation)
+
+- **What**: an optional analytical-dimension tag on `EcritureLigne`
+  (a `CostCenter`/`AnalyticalAxis` model + `costCenterId` field),
+  captured at écriture-creation time — structurally identical to the
+  existing `vatRateId` per-line tagging, reused as the template rather
+  than invented fresh. Reporting: a P&L broken out by cost center/
+  project, alongside the existing company-wide compte de résultat.
+- **Classification: GATED for the tagging/validation step** (the same
+  `EntriesService` validates a tagged `costCenterId` belongs to the
+  company, exactly like `vatRateId` today) — **PRESENTATION for the
+  aggregation report itself** (a read-only re-grouping of already-
+  validated data, same shape as `financial-analysis.ts`).
+- **Depends on**: nothing beyond the existing per-line tagging pattern.
+  Genuinely independent of everything else in this section — could be
+  picked up any time, including before Tier 1.
+- **Verification**: fully hand-oracle-testable to this app's normal
+  standard — tag a known dataset with known cost centers, assert the
+  per-cost-center P&L sums correctly, the exact same discipline as
+  `ca3-declaration.ts`'s own by-rate aggregation. Unlike 1a's quote/
+  order state machine, this item's correctness IS fully checkable
+  against a hand-traced number, because the underlying math (sum lines
+  tagged X) has no ambiguity — "management accounting" doesn't
+  automatically mean "unverifiable," only budgeting (next) does.
+
+#### 2c. Budgeting / forecasting vs. actuals
+
+- **What**: a `Budget`/`BudgetLine` entity (a planned figure per
+  account or cost-center, per period) and a report comparing it to the
+  real trial balance for the same scope, reusing `trial-balance-
+  engine.ts` verbatim for the "actual" column — no new ledger
+  aggregation logic, only new input capture and variance arithmetic
+  (actual − budget, %).
+- **Classification: PRESENTATION.** A budget number never touches the
+  ledger.
+- **Depends on**: `trial-balance-engine.ts` (exists, reused read-only);
+  benefits from but doesn't strictly require 2b (cost-center
+  budgeting is a natural pairing, not a hard dependency).
+- **Verification — the first genuinely different case in this
+  document, stated plainly**: the VARIANCE ARITHMETIC is trivial to
+  verify (subtraction and a percentage), and the ACTUAL column is a
+  pure regression check against the already-verified trial-balance
+  engine (not a new oracle). But **the budget number itself has no
+  correctness standard to verify against** — it's a business input, not
+  a derived accounting fact, so "verified" here can only ever mean "the
+  tool computed the comparison correctly against whatever figures a
+  human entered," never "the budget is right." Worth saying this
+  explicitly in the eventual design pass too, the same way the résultat
+  fiscal module's own honesty banner states plainly what its own
+  arithmetic-tie-out does and doesn't prove.
+
+---
+
+### Tier 3 — genuinely operational, loose coupling: a different kind of work, said plainly
+
+Everything in this tier competes on UX/workflow completeness against
+dedicated, mature products (CRM suites, project-management tools,
+procurement platforms, payroll providers) — not on compliance depth,
+which is this app's actual comparative advantage. There is no primary
+source to verify a CRM pipeline against the way there's a PCG article
+for stock valuation; "correct" here means "matches what the business
+actually needs," a UX/workflow question, not a compliance one. Building
+native, from-scratch versions of these is a much larger, much less
+differentiated undertaking than anything above — flagged honestly, not
+downplayed.
+
+- **CRM** (contact history, pipeline/opportunity stages, lead
+  tracking) — beyond the Tiers/Account identity fields already built.
+  **Recommendation: integrate, don't build.** A webhook/API bridge
+  syncing a won opportunity from an existing CRM (HubSpot, Pipedrive,
+  a French-market tool) into a Tiers record + Tier-1's own Quote entity
+  is a far smaller, far more defensible investment than competing with
+  dedicated CRM UX. **"Good enough" verification**: does the sync
+  correctly create/update the right Tiers record and hand off to the
+  right Quote — a plain integration test, not an oracle.
+- **Project management** (tasks, milestones, timesheets). Same
+  reasoning as CRM — competing against Asana/Monday/Linear on workflow
+  UX is not a fight worth having. **Recommendation: integrate**, with
+  the one genuinely accounting-relevant hook being a timesheet import
+  feeding Tier 2's comptabilité analytique (labor cost by
+  project/cost-center) if that's ever built. **"Good enough"
+  verification**: the import correctly maps timesheet entries to the
+  right cost-center tags — again an integration/mapping test, not an
+  oracle.
+- **Procurement workflow / e-sourcing** (RFQ management, supplier
+  scoring, contract lifecycle) — beyond Tier 1's basic Purchase Order.
+  A genuinely different, supplier-relationship-management problem, not
+  core to "connect accounting to the business" the way procure-to-pay
+  is. Lowest priority in this section; **recommendation: don't build**
+  unless a specific, concrete business need for it surfaces — there is
+  no compliance or traceability angle here at all, only competing with
+  dedicated procurement suites on their own turf.
+- **A full payroll ENGINE** (gross-to-net cotisation calculation, DSN
+  filing) — explicitly contrasted with 1d's narrow payroll INTERFACE
+  above, and explicitly **not recommended**. This is arguably a bigger
+  undertaking than this entire accounting application's own scope to
+  date: French payroll cotisation rules are extensive, change
+  frequently (URSSAF/DSN specifications are revised on their own
+  regulatory calendar, independent of anything in the PCG/Code de
+  commerce this app already tracks), and are already extremely well
+  served by mature, specialized providers (PayFit, Silae, ADP) whose
+  entire business is keeping up with exactly that churn. Building a
+  competing engine here would mean taking on a second, independent,
+  perpetual compliance-tracking burden with no compounding benefit to
+  this app's own actual strength (ledger/liasse/VAT correctness) — the
+  clearest "don't build" call in this whole document. **"Good enough"
+  verification, if this were ever revisited**: there isn't one short of
+  matching a real payroll provider's own certified output line for
+  line, which is precisely the argument for not building it.
+
+---
+
+### Sequencing thoughts, not a decision
+
+Not re-litigating the GATED/PRESENTATION-driven priority order that got
+§1-§9 built — this is a genuinely new planning horizon, to be sequenced
+when picked up, not assumed to slot in ahead of anything. A few honest
+observations to inform that future conversation:
+
+- **1a (Quote/Order) and 1b (invoice payment status) are the cheapest
+  real wins here** — both extend an already-mature module
+  (Invoicing) rather than building new ledger-adjacent machinery from
+  scratch, and 1b in particular is close to "expose an existing
+  computation from a second endpoint."
+- **1c (procure-to-pay) is the single largest item in this section** —
+  three new entities, a real matching engine, and a genuine regulatory
+  question (e-invoicing receipt) to research fresh — closer in scope to
+  the original Invoicing Phase A project than to a single feature pass.
+- **2b (comptabilité analytique) is fully independent** of everything
+  else here and fully verifiable to this app's normal standard — a
+  reasonable candidate to pull forward ahead of Tier 1 if cost-center
+  reporting turns out to matter more, near-term, than the connective
+  workflow entities.
+- **2a (stock valuation) is hard-blocked** on Tier 1 producing real
+  stock-movement data first — sequencing here isn't a choice.
+- **Every Tier-3 item's own recommendation is "integrate, not build"
+  except procurement workflow ("don't build at all") and a full payroll
+  engine (the clearest "don't build" call in the document)** — this
+  section exists to make sure that recommendation is on the record
+  before anyone re-derives it from scratch under time pressure later.
+- **FR-first, Monaco explicitly deferred, same standing discipline as
+  everywhere else in this app** — anything here with real compliance
+  content (stock valuation, the payroll posting template, engagements
+  hors bilan) should be built and verified against French sources
+  first, with Monaco's own equivalent rules confirmed separately before
+  enabling for an MC-jurisdiction company, exactly like Invoicing
+  Phase A's own Monaco gate.
+
+---
+
 ## Noted, not planned
 
 ### Mobile
@@ -788,3 +1276,16 @@ both required companies; Phase B (PA/e-transmission) stays blocked on
 an external, commercial PA-provider decision this project can't
 resolve alone, and Monaco's own transmission-regime question stays
 open — see `specs/invoicing-plan.md`.
+
+**"Business-operations / ERP direction"** (added 2026-09-06) is the
+next planning horizon above, per the user's own explicit request for an
+honest inventory of what already exists beyond core accounting, plus a
+roadmap organized by coupling to the ledger rather than this document's
+own priority-order convention. Nothing in it is designed or built —
+same MAP-ONLY status as everything else in this file — but it does
+already establish two concrete recommendations worth carrying forward
+even before any of it is picked up: (1) the cheapest real win is
+promoting the anomaly engine's own existing payment-status logic into a
+first-class `Invoice` property (§1b there), and (2) a full payroll
+engine is explicitly NOT recommended, ever, in favor of best-of-breed
+providers — the clearest "don't build" call this project has made.
