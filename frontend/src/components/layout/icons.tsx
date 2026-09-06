@@ -346,3 +346,34 @@ export function IconBell(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/** A panel with a left rail — toggles the sidebar (same glyph both directions, see TopBar.tsx). */
+export function IconSidebar(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...base(props)}>
+      <rect x="3" y="4" width="14" height="12" rx="1.5" />
+      <path d="M8 4v12" />
+    </svg>
+  );
+}
+
+/**
+ * The app's brand glyph — a small crenellated citadel/keep, standing in
+ * for the ledger's own guarded integrity (immutable once validated,
+ * gapless numbering, an audited trail for anything that bends the
+ * rules) rather than a bare initial. Filled, not stroked (unlike the
+ * nav glyphs above) — a solid silhouette reads better at the small
+ * badge size this renders at. See BrandMark.tsx for the colored-badge
+ * wrapper both the sidebar and the auth screens render this inside of,
+ * and public/favicon.svg for the same shape baked into the browser-tab
+ * icon.
+ */
+export function IconCitadel(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg width={20} height={20} viewBox="0 0 20 20" fill="currentColor" {...props}>
+      <path d="M2 3h4v4H2zM8 3h4v4H8zM14 3h4v4h-4z" />
+      <path d="M2 7h16l1 10H1z" />
+      <rect x="8.5" y="12" width="3" height="5" rx="0.4" opacity="0.35" />
+    </svg>
+  );
+}

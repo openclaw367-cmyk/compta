@@ -64,6 +64,7 @@ export function InvoiceEditor({
   const [clientAccountId, setClientAccountId] = useState<string | null>(
     existing?.clientAccountId ?? creditNoteFor?.clientAccountId ?? null,
   );
+  const clientAccount = accounts.find((a) => a.id === clientAccountId) ?? null;
   const [lines, setLines] = useState<DraftInvoiceLine[]>(
     existing ? linesFromExisting(existing) : [emptyInvoiceLine()],
   );
@@ -157,11 +158,11 @@ export function InvoiceEditor({
       )}
 
       {existing && existing.status === 'DRAFT' && !creditNoteFor && (
-        <DevisSection invoice={existing} />
+        <DevisSection invoice={existing} clientAccount={clientAccount} />
       )}
 
       {existing && existing.status === 'DRAFT' && !creditNoteFor && (
-        <FinalizeSection invoice={existing} onFinalized={onSaved} />
+        <FinalizeSection invoice={existing} clientAccount={clientAccount} onFinalized={onSaved} />
       )}
     </div>
   );
@@ -186,16 +187,28 @@ interface ClientIdentityDraft {
   clientVatNumber: string;
 }
 
-function emptyClientIdentityDraft(): ClientIdentityDraft {
+/**
+ * Pre-fills from the selected client's own tiers-identity fields (see
+ * CLAUDE.md "Invoicing" — Account.addressLine/postalCode/city/
+ * countryCode/sirenOrRci/vatNumber, captured once at "+ Nouveau tiers"
+ * time) when present, falling back to blank/today's-date/"FR" exactly
+ * as before for a tiers that has none on file (a quick, name-only
+ * inline creation elsewhere never captured them) — a convenience
+ * default, never a hard requirement: every field stays freely editable
+ * here regardless, since this invoice's own client details might
+ * legitimately differ from the tiers' latest saved ones (a client
+ * moved, a one-off different billing address, ...).
+ */
+function clientIdentityDraftFromAccount(account: Account | null): ClientIdentityDraft {
   return {
     invoiceDate: new Date().toISOString().slice(0, 10),
-    clientName: '',
-    clientAddressLine: '',
-    clientPostalCode: '',
-    clientCity: '',
-    clientCountryCode: 'FR',
-    clientSirenOrRci: '',
-    clientVatNumber: '',
+    clientName: account?.label ?? '',
+    clientAddressLine: account?.addressLine ?? '',
+    clientPostalCode: account?.postalCode ?? '',
+    clientCity: account?.city ?? '',
+    clientCountryCode: account?.countryCode ?? 'FR',
+    clientSirenOrRci: account?.sirenOrRci ?? '',
+    clientVatNumber: account?.vatNumber ?? '',
   };
 }
 
@@ -303,9 +316,17 @@ function ClientIdentityFields({
  * snapshotted onto the Invoice row — closing this section and reopening
  * it starts from a blank client-identity form again, every time.
  */
-function DevisSection({ invoice }: { invoice: Invoice }) {
+function DevisSection({
+  invoice,
+  clientAccount,
+}: {
+  invoice: Invoice;
+  clientAccount: Account | null;
+}) {
   const downloadDevis = useDownloadDevis();
-  const [draft, setDraft] = useState<ClientIdentityDraft>(emptyClientIdentityDraft());
+  const [draft, setDraft] = useState<ClientIdentityDraft>(() =>
+    clientIdentityDraftFromAccount(clientAccount),
+  );
   const [error, setError] = useState<string | null>(null);
 
   async function handleDownload() {
@@ -359,14 +380,18 @@ function DevisSection({ invoice }: { invoice: Invoice }) {
  */
 function FinalizeSection({
   invoice,
+  clientAccount,
   onFinalized,
 }: {
   invoice: Invoice;
+  clientAccount: Account | null;
   onFinalized: (invoice: Invoice) => void;
 }) {
   const finalizeInvoice = useFinalizeInvoice();
   const toast = useToast();
-  const [draft, setDraft] = useState<ClientIdentityDraft>(emptyClientIdentityDraft());
+  const [draft, setDraft] = useState<ClientIdentityDraft>(() =>
+    clientIdentityDraftFromAccount(clientAccount),
+  );
   const [error, setError] = useState<string | null>(null);
 
   async function handleFinalize() {

@@ -17,6 +17,8 @@ interface Draft {
   postalCode: string;
   city: string;
   country: string;
+  phone: string;
+  email: string;
   regimeTvaServices: RegimeTvaServices;
   bankName: string;
   iban: string;
@@ -34,6 +36,8 @@ function toDraft(company: Company): Draft {
     postalCode: company.postalCode ?? '',
     city: company.city ?? '',
     country: company.country,
+    phone: company.phone ?? '',
+    email: company.email ?? '',
     regimeTvaServices: company.regimeTvaServices,
     bankName: company.bankName ?? '',
     iban: company.iban ?? '',
@@ -97,6 +101,8 @@ export function CompanyProfilePage() {
       postalCode: optional(draft.postalCode),
       city: optional(draft.city),
       country: optional(draft.country),
+      phone: optional(draft.phone),
+      email: optional(draft.email),
       regimeTvaServices: draft.regimeTvaServices,
       bankName: optional(draft.bankName),
       iban: optional(draft.iban),
@@ -270,6 +276,41 @@ export function CompanyProfilePage() {
           </div>
         </section>
 
+        <section className="flex flex-col gap-3 border-t border-border pt-4">
+          <h2 className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+            Contact
+          </h2>
+          <p className="text-[11.5px] text-ink-faint">
+            Affichés dans l&apos;en-tête des devis et factures lorsqu&apos;ils sont renseignés.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <Row label="Téléphone">
+              {editing ? (
+                <TextInput
+                  type="tel"
+                  value={draft.phone}
+                  onChange={(v) => setDraft({ ...draft, phone: v })}
+                  placeholder="+33 1 23 45 67 89"
+                />
+              ) : (
+                <Value>{companyQuery.data?.phone}</Value>
+              )}
+            </Row>
+            <Row label="E-mail">
+              {editing ? (
+                <TextInput
+                  type="email"
+                  value={draft.email}
+                  onChange={(v) => setDraft({ ...draft, email: v })}
+                  placeholder="contact@exemple.fr"
+                />
+              ) : (
+                <Value>{companyQuery.data?.email}</Value>
+              )}
+            </Row>
+          </div>
+        </section>
+
         {(companyQuery.data?.jurisdiction === 'FR' || draft.jurisdiction === 'FR') && (
           <section className="flex flex-col gap-3 border-t border-border pt-4">
             <h2 className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
@@ -405,15 +446,17 @@ function TextInput({
   onChange,
   placeholder,
   autoFocus,
+  type = 'text',
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
+  type?: 'text' | 'email' | 'tel';
 }) {
   return (
     <input
-      type="text"
+      type={type}
       autoFocus={autoFocus}
       value={value}
       onChange={(e) => onChange(e.target.value)}

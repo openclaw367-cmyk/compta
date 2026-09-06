@@ -38,6 +38,8 @@ describe('buildCrossIndustryInvoice — guards (Jest-safe subset)', () => {
     siren: '123456789',
     rci: null,
     vatNumber: 'FR12123456789',
+    phone: null,
+    email: null,
     paymentInstructions: null,
   };
   const CLIENT = {

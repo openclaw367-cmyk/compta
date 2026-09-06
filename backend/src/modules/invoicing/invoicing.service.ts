@@ -631,6 +631,8 @@ export class InvoicingService {
       siren: companyRecord.siren,
       rci: companyRecord.rci,
       vatNumber: companyRecord.vatNumber,
+      phone: companyRecord.phone,
+      email: companyRecord.email,
       paymentInstructions:
         companyRecord.bankName && companyRecord.iban && companyRecord.bic
           ? { bankName: companyRecord.bankName, iban: companyRecord.iban, bic: companyRecord.bic }

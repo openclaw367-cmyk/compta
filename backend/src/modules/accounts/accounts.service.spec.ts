@@ -30,6 +30,12 @@ const collectif401: Account = {
   label: 'Fournisseurs',
   pcgClass: 4,
   isAuxiliary: false,
+  addressLine: null,
+  postalCode: null,
+  city: null,
+  countryCode: null,
+  sirenOrRci: null,
+  vatNumber: null,
   parentId: null,
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -127,6 +133,34 @@ describe('AccountsService', () => {
       expect(tiers).toMatchObject({ number: '455001', isAuxiliary: true, parentId: 'acc-455' });
     });
 
+    it('carries the optional tiers-identity fields through to the created account', async () => {
+      prisma.account.findFirst.mockResolvedValueOnce(collectif401);
+      const tiers = await service.createTiers(company, 'acc-401', {
+        label: 'Fournisseur Dupont',
+        addressLine: '12 rue de la Paix',
+        postalCode: '75002',
+        city: 'Paris',
+        countryCode: 'FR',
+        sirenOrRci: '123456789',
+        vatNumber: 'FR12123456789',
+      });
+      expect(tiers).toMatchObject({
+        addressLine: '12 rue de la Paix',
+        postalCode: '75002',
+        city: 'Paris',
+        countryCode: 'FR',
+        sirenOrRci: '123456789',
+        vatNumber: 'FR12123456789',
+      });
+    });
+
+    it('leaves the identity fields unset when the caller omits them (quick inline creation)', async () => {
+      prisma.account.findFirst.mockResolvedValueOnce(collectif401);
+      const tiers = await service.createTiers(company, 'acc-401', { label: 'Fournisseur Martin' });
+      expect(tiers.addressLine).toBeUndefined();
+      expect(tiers.vatNumber).toBeUndefined();
+    });
+
     it('translates a unique-constraint race into a clear ConflictException', async () => {
       prisma.account.findFirst.mockResolvedValueOnce(collectif401);
       prisma.$transaction.mockRejectedValueOnce(
@@ -182,6 +216,32 @@ describe('AccountsService', () => {
       await expect(service.rename(company, 'nope', { label: 'X' })).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('also updates the tiers-identity fields when the caller supplies them', async () => {
+      prisma.account.findFirst.mockResolvedValueOnce(collectif401);
+      const updated = await service.rename(company, 'acc-401', {
+        label: 'Fournisseur Dupont SARL',
+        addressLine: '12 rue de la Paix',
+        postalCode: '75002',
+        city: 'Paris',
+        countryCode: 'FR',
+        sirenOrRci: '123456789',
+        vatNumber: 'FR12123456789',
+      });
+      expect(prisma.account.update).toHaveBeenCalledWith({
+        where: { id: 'acc-401' },
+        data: {
+          label: 'Fournisseur Dupont SARL',
+          addressLine: '12 rue de la Paix',
+          postalCode: '75002',
+          city: 'Paris',
+          countryCode: 'FR',
+          sirenOrRci: '123456789',
+          vatNumber: 'FR12123456789',
+        },
+      });
+      expect(updated).toMatchObject({ addressLine: '12 rue de la Paix' });
     });
   });
 });

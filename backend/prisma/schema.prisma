@@ -162,6 +162,18 @@ model Company {
   city        String?
   country     String  @default("France")
 
+  /// Shown in the invoice PDF's own header contact block (top-right,
+  /// alongside the seller identity — see factur-x-pdf.ts) when set.
+  /// Optional, like every other identity field here that isn't
+  /// mechanically required (SIREN/VAT are needed for FEC/CA3; phone/
+  /// email are not needed for anything but display) — "flag, don't
+  /// fake": the block is simply omitted when neither is configured,
+  /// never filled with a placeholder. Not yet threaded into the
+  /// Factur-X CII XML (invoice-to-cii.ts) — a stated, deliberate scope
+  /// boundary for this pass, see CLAUDE.md "Invoicing".
+  phone String?
+  email String?
+
   /// See RegimeTvaServices doc comment (CGI art. 269). Defaults to the
   /// legal default (ENCAISSEMENTS) so an existing company isn't silently
   /// switched to DEBITS by this migration.
@@ -262,6 +274,27 @@ model Account {
   /// True for a compte auxiliaire (e.g. a specific client/supplier
   /// sub-account referenced from an EcritureLigne as CompAuxNum/CompAuxLib).
   isAuxiliary Boolean @default(false)
+
+  /// Legal-identity fields for a tiers (compte auxiliaire) — captured
+  /// once at "+ Nouveau tiers" time so invoicing can pre-fill a client's
+  /// own FinalizeInvoiceDto/DevisRequestDto fields instead of asking the
+  /// user to retype them on every invoice. Meaningful only for an
+  /// isAuxiliary account in practice (a plain PCG account leaves these
+  /// null, unused) — not schema-enforced, since nothing downstream reads
+  /// them off a non-tiers account anyway. `countryCode`/`sirenOrRci`/
+  /// `vatNumber` are named to match InvoiceMentionsClientInput /
+  /// FinalizeInvoiceDto's own field names exactly, so the pre-fill
+  /// mapping is a direct copy, never a re-derivation. `sirenOrRci` is
+  /// one unified free-text field (not a siren/rci split like Company's
+  /// own) since a tiers could legally be a SIREN-bearing FR entity, an
+  /// RCI-bearing MC entity, or neither — the invoice model already made
+  /// this exact call for the same reason (see invoice-mentions.ts).
+  addressLine String?
+  postalCode  String?
+  city        String?
+  countryCode String?
+  sirenOrRci  String?
+  vatNumber   String?
 
   parentId String?
   parent   Account?  @relation("AccountHierarchy", fields: [parentId], references: [id])

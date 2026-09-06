@@ -27,6 +27,15 @@ export interface Account {
   pcgClass: number;
   isAuxiliary: boolean;
   parentId: string | null;
+  /** Tiers-identity fields, captured once at "+ Nouveau tiers" time — see
+   *  CollectifTiersCard / TiersFormModal. Meaningful only when isAuxiliary
+   *  is true; pre-fills InvoiceEditor's own client-identity fields. */
+  addressLine: string | null;
+  postalCode: string | null;
+  city: string | null;
+  countryCode: string | null;
+  sirenOrRci: string | null;
+  vatNumber: string | null;
 }
 
 /** Shared alias — used wherever a regime needs to be named explicitly, e.g. the line-trace query params. */
@@ -51,6 +60,9 @@ export interface Company {
   postalCode: string | null;
   city: string | null;
   country: string;
+  /** Shown in the invoice PDF's own header contact block, when set — see CompanyProfilePage. */
+  phone: string | null;
+  email: string | null;
   regimeTvaServices: RegimeTvaServices;
   bankName: string | null;
   iban: string | null;

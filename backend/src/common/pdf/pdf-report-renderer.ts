@@ -249,7 +249,8 @@ const WINANSI_REPLACEMENTS: [RegExp, string][] = [
   [/�/g, '?'],
 ];
 
-function sanitizeForWinAnsi(text: string): string {
+/** Exported so other pdf-lib-based renderers (e.g. factur-x-pdf.ts) share the same fix rather than re-discovering it. */
+export function sanitizeForWinAnsi(text: string): string {
   return WINANSI_REPLACEMENTS.reduce(
     (acc, [pattern, replacement]) => acc.replace(pattern, replacement),
     text,

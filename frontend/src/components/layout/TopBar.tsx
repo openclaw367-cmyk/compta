@@ -4,7 +4,7 @@ import { useAuth } from '../../context/authContextStore';
 import { usePreferences, type ThemePreference } from '../../context/preferencesStore';
 import { labelForPath } from '../../lib/navigation';
 import { CommandPalette } from '../command/CommandPalette';
-import { IconLogout, IconMonitor, IconMoon, IconPlus, IconSun } from './icons';
+import { IconLogout, IconMonitor, IconMoon, IconPlus, IconSidebar, IconSun } from './icons';
 
 const THEME_OPTIONS: { value: ThemePreference; label: string; Icon: typeof IconSun }[] = [
   { value: 'light', label: 'Thème clair', Icon: IconSun },
@@ -38,13 +38,23 @@ export function TopBar() {
     fiscalYearId,
     setFiscalYearId,
   } = useAppContext();
-  const { theme, setTheme } = usePreferences();
+  const { theme, setTheme, sidebarCollapsed, toggleSidebarCollapsed } = usePreferences();
   const { user, logout } = useAuth();
   const location = useLocation();
   const pageTitle = labelForPath(location.pathname);
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-surface px-6">
+      <button
+        type="button"
+        title={sidebarCollapsed ? 'Afficher le menu' : 'Masquer le menu'}
+        onClick={toggleSidebarCollapsed}
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-faint transition-colors hover:bg-bg hover:text-ink"
+      >
+        <IconSidebar width={17} height={17} />
+        <span className="sr-only">{sidebarCollapsed ? 'Afficher le menu' : 'Masquer le menu'}</span>
+      </button>
+
       {/* Chrome-level wayfinding, not the page's own heading (each page
           renders its own <h1>) — stays visible once that heading has
           scrolled out of view. */}
