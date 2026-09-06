@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccounts, useEntrySearch } from '../../api/queries';
+import { useAppContext } from '../../context/appContextStore';
 import { formatMoneyFr } from '../../lib/money';
 import { ASSISTANT_ITEM, HOME_ITEM, NAV_GROUPS, SETTINGS_ITEM, type NavItem } from '../../lib/navigation';
-import { IconSearch } from '../layout/icons';
+import { IconSearch, IconX } from '../layout/icons';
 
 interface ExtraDestination {
   to: string;
@@ -22,10 +23,37 @@ const EXTRA_DESTINATIONS: ExtraDestination[] = [
  *  comptes stay instant either way, since those are filtered client-side from an already-warm cache. */
 const SEARCH_DEBOUNCE_MS = 250;
 
-type ResultGroup = 'Pages' | 'Comptes' | 'Écritures';
+/** Per-viewer, per-company convenience persisted to localStorage — same "not the place for
+ *  anything that must persist reliably or be shared between viewers" discipline as the theme/
+ *  density preferences and the onboarding checklist's own dismissal flag. Company-scoped since a
+ *  past écriture/account search from one dossier is meaningless (and potentially confusing) in
+ *  another. */
+const HISTORY_KEY_PREFIX = 'compta:searchHistory:';
+const SEARCH_HISTORY_LIMIT = 6;
+/** Below this length a query is a stray keystroke, not something worth remembering. */
+const MIN_HISTORY_TERM_LENGTH = 2;
+
+function loadHistory(companyId: string | null | undefined): string[] {
+  if (!companyId) return [];
+  const raw = localStorage.getItem(HISTORY_KEY_PREFIX + companyId);
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(companyId: string | null | undefined, terms: string[]): void {
+  if (!companyId) return;
+  localStorage.setItem(HISTORY_KEY_PREFIX + companyId, JSON.stringify(terms));
+}
+
+type ResultGroup = 'Récent' | 'Pages' | 'Comptes' | 'Écritures';
 
 type PaletteResult = {
-  kind: 'page' | 'account' | 'ecriture';
+  kind: 'history' | 'page' | 'account' | 'ecriture';
   group: ResultGroup;
   key: string;
   label: string;
@@ -56,13 +84,20 @@ function formatDateFr(iso: string): string {
  * company can have thousands, so that's a real, debounced backend
  * search (see CLAUDE.md "Search — écritures by libellé/amount"), kept
  * in its own clearly-labeled group so it can never be confused with
- * (or crowd out) the instant page/compte results above it.
+ * (or crowd out) the instant page/compte results above it. Opening the
+ * palette with an empty query shows a "Récent" group of past search
+ * terms (see CLAUDE.md's same section) ahead of the default page list —
+ * clicking one re-populates the query rather than navigating, since a
+ * remembered term is a starting point to search again, not a fixed
+ * destination.
  */
 export function CommandPalette() {
+  const { companyId } = useAppContext();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [highlighted, setHighlighted] = useState(0);
+  const [history, setHistory] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const accountsQuery = useAccounts();
@@ -92,10 +127,37 @@ export function CommandPalette() {
       setQuery('');
       setDebouncedQuery('');
       setHighlighted(0);
+      setHistory(loadHistory(companyId));
       // Wait one frame — the input isn't mounted yet on the same tick this effect fires.
       requestAnimationFrame(() => inputRef.current?.focus());
     }
-  }, [open]);
+  }, [open, companyId]);
+
+  function recordHistory(term: string) {
+    const trimmed = term.trim();
+    if (trimmed.length < MIN_HISTORY_TERM_LENGTH) return;
+    setHistory((prev) => {
+      const next = [
+        trimmed,
+        ...prev.filter((h) => normalize(h) !== normalize(trimmed)),
+      ].slice(0, SEARCH_HISTORY_LIMIT);
+      saveHistory(companyId, next);
+      return next;
+    });
+  }
+
+  function removeHistoryEntry(term: string) {
+    setHistory((prev) => {
+      const next = prev.filter((h) => h !== term);
+      saveHistory(companyId, next);
+      return next;
+    });
+  }
+
+  function clearHistory() {
+    setHistory([]);
+    saveHistory(companyId, []);
+  }
 
   const pageResults = useMemo((): PaletteResult[] => {
     const allPages: { item: NavItem; hint: string }[] = [
@@ -144,6 +206,17 @@ export function CommandPalette() {
   const q = normalize(query.trim());
   const matches = (r: PaletteResult) => normalize(r.label).includes(q) || normalize(r.hint).includes(q);
 
+  const historyMatches: PaletteResult[] =
+    q === ''
+      ? history.map((term) => ({
+          kind: 'history',
+          group: 'Récent',
+          key: `history-${term}`,
+          label: term,
+          hint: '',
+          to: '',
+        }))
+      : [];
   const pageMatches = q === '' ? pageResults.slice(0, 8) : pageResults.filter(matches).slice(0, 8);
   const accountMatches = q === '' ? [] : accountResults.filter(matches).slice(0, 8);
 
@@ -166,18 +239,32 @@ export function CommandPalette() {
     );
   }, [q, entrySearch]);
 
-  const remainingEcritureCount = entrySearch ? entrySearch.totalCount - ecritureMatches.length : 0;
+  // Gated on q !== '' too, not just entrySearch being truthy — useEntrySearch's own
+  // placeholderData keeps the PREVIOUS (non-empty-query) result cached even once the query is
+  // cleared and the query is disabled, so entrySearch can be stale/truthy here for a beat after
+  // clearing the input. Without this guard the "+N résultats" footer would linger.
+  const remainingEcritureCount =
+    q !== '' && entrySearch ? entrySearch.totalCount - ecritureMatches.length : 0;
 
-  // Small, bounded arrays (max ~24 items total) — a plain concat every
+  // Small, bounded arrays (max ~30 items total) — a plain concat every
   // render is simpler and cheaper than fighting useMemo's referential-
-  // equality requirements for three independently-computed slices.
-  const results = [...pageMatches, ...accountMatches, ...ecritureMatches];
+  // equality requirements for four independently-computed slices.
+  const results = [...historyMatches, ...pageMatches, ...accountMatches, ...ecritureMatches];
 
   useEffect(() => {
     setHighlighted(0);
   }, [query]);
 
   function activate(result: PaletteResult) {
+    if (result.kind === 'history') {
+      // Re-populate and search again immediately — skip the debounce,
+      // since this is already a deliberate, explicit choice, not a
+      // mid-typing keystroke.
+      setQuery(result.label);
+      setDebouncedQuery(result.label);
+      return;
+    }
+    recordHistory(query);
     navigate(result.to);
     setOpen(false);
   }
@@ -253,9 +340,23 @@ export function CommandPalette() {
                   return (
                     <div key={`${result.kind}-${result.key}`}>
                       {showHeader && (
-                        <p className="px-4 pb-1 pt-2.5 text-[10.5px] font-semibold uppercase tracking-wide text-ink-faint first:pt-1.5">
-                          {result.group}
-                        </p>
+                        <div className="flex items-center justify-between px-4 pb-1 pt-2.5 first:pt-1.5">
+                          <p className="text-[10.5px] font-semibold uppercase tracking-wide text-ink-faint">
+                            {result.group}
+                          </p>
+                          {result.kind === 'history' && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                clearHistory();
+                              }}
+                              className="text-[11px] text-ink-faint hover:text-accent"
+                            >
+                              Tout effacer
+                            </button>
+                          )}
+                        </div>
                       )}
                       <button
                         type="button"
@@ -267,7 +368,22 @@ export function CommandPalette() {
                         ].join(' ')}
                       >
                         <span className="truncate">{result.label}</span>
-                        <span className="shrink-0 text-[11.5px] text-ink-faint">{result.hint}</span>
+                        {result.kind === 'history' ? (
+                          <span
+                            role="button"
+                            tabIndex={-1}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeHistoryEntry(result.label);
+                            }}
+                            className="shrink-0 rounded p-0.5 text-ink-faint hover:text-negative"
+                            title="Supprimer cette recherche"
+                          >
+                            <IconX width={12} height={12} />
+                          </span>
+                        ) : (
+                          <span className="shrink-0 text-[11.5px] text-ink-faint">{result.hint}</span>
+                        )}
                       </button>
                     </div>
                   );
