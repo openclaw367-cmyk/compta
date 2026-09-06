@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { EntriesService } from './entries.service';
 import { EntryValidationService } from './entry-validation.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -33,7 +34,8 @@ function makePrismaMock() {
         ...(args.data as object),
       })),
       findFirst: jest.fn(),
-      findMany: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
       update: jest.fn((args: { where: { id: string }; data: unknown }) => ({
         id: args.where.id,
         ...(args.data as object),
@@ -43,6 +45,7 @@ function makePrismaMock() {
     ecritureLigne: {
       deleteMany: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn((args: { where: { id: string }; data: unknown }) => ({
         id: args.where.id,
         ...(args.data as object),
@@ -494,6 +497,133 @@ describe('EntriesService', () => {
       });
       const ecriture = await service.update(company, 'ecriture-1', dto);
       expect(ecriture.warnings).toHaveLength(1);
+    });
+  });
+
+  describe('search', () => {
+    const journalAC = { id: 'journal-1', code: 'AC' };
+
+    function ecriture(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: 'ecriture-1',
+        journalId: 'journal-1',
+        journal: journalAC,
+        ecritureNum: '12',
+        ecritureDate: new Date('2026-03-10'),
+        libelle: 'Achat fournitures de bureau',
+        validatedAt: null,
+        lignes: [],
+        ...overrides,
+      };
+    }
+
+    it('returns nothing for a query shorter than 2 characters, without querying the DB', async () => {
+      const result = await service.search(company, 'a');
+      expect(result).toEqual({ mode: 'LIBELLE', query: 'a', results: [], totalCount: 0 });
+      expect(prisma.ecriture.findMany).not.toHaveBeenCalled();
+      expect(prisma.ecritureLigne.findMany).not.toHaveBeenCalled();
+    });
+
+    it('treats a bare number as an AMOUNT search, matching debit OR credit exactly', async () => {
+      prisma.ecritureLigne.findMany.mockResolvedValueOnce([
+        {
+          ecritureId: 'ecriture-1',
+          debit: new Prisma.Decimal('150.00'),
+          credit: new Prisma.Decimal('0.00'),
+          ecriture: ecriture(),
+        },
+      ]);
+      const result = await service.search(company, '150');
+      expect(result.mode).toBe('AMOUNT');
+      expect(result.results).toEqual([
+        expect.objectContaining({ id: 'ecriture-1', amount: '150.00' }),
+      ]);
+      const callArgs = prisma.ecritureLigne.findMany.mock.calls[0][0] as {
+        where: { OR: [{ debit: Prisma.Decimal }, { credit: Prisma.Decimal }] };
+      };
+      expect(callArgs.where.OR[0].debit.toString()).toBe('150');
+      expect(callArgs.where.OR[1].credit.toString()).toBe('150');
+    });
+
+    it('accepts a comma decimal separator for an amount search', async () => {
+      prisma.ecritureLigne.findMany.mockResolvedValueOnce([
+        {
+          ecritureId: 'ecriture-1',
+          debit: new Prisma.Decimal('0.00'),
+          credit: new Prisma.Decimal('1234.56'),
+          ecriture: ecriture(),
+        },
+      ]);
+      const result = await service.search(company, '1234,56');
+      expect(result.mode).toBe('AMOUNT');
+      expect(result.results[0]).toMatchObject({ amount: '1234.56' });
+    });
+
+    it('deduplicates an écriture that has multiple lines matching the searched amount', async () => {
+      prisma.ecritureLigne.findMany.mockResolvedValueOnce([
+        {
+          ecritureId: 'ecriture-1',
+          debit: new Prisma.Decimal('100.00'),
+          credit: new Prisma.Decimal('0.00'),
+          ecriture: ecriture(),
+        },
+        {
+          ecritureId: 'ecriture-1',
+          debit: new Prisma.Decimal('0.00'),
+          credit: new Prisma.Decimal('100.00'),
+          ecriture: ecriture(),
+        },
+      ]);
+      const result = await service.search(company, '100');
+      expect(result.results).toHaveLength(1);
+    });
+
+    it('treats non-numeric text as a LIBELLE substring search, case-insensitive', async () => {
+      prisma.ecriture.findMany.mockResolvedValueOnce([
+        ecriture({
+          lignes: [{ debit: new Prisma.Decimal('60.00'), credit: new Prisma.Decimal('0.00') }],
+        }),
+      ]);
+      prisma.ecriture.count.mockResolvedValueOnce(1);
+      const result = await service.search(company, 'fournitures');
+      expect(result.mode).toBe('LIBELLE');
+      expect(prisma.ecriture.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            companyId: 'company-1',
+            libelle: { contains: 'fournitures', mode: 'insensitive' },
+          },
+        }),
+      );
+      expect(result.results).toEqual([
+        expect.objectContaining({
+          id: 'ecriture-1',
+          libelle: 'Achat fournitures de bureau',
+          amount: '60.00',
+        }),
+      ]);
+    });
+
+    it('sums every debit line for the LIBELLE mode total, not just the first', async () => {
+      prisma.ecriture.findMany.mockResolvedValueOnce([
+        ecriture({
+          lignes: [
+            { debit: new Prisma.Decimal('60.00'), credit: new Prisma.Decimal('0.00') },
+            { debit: new Prisma.Decimal('40.00'), credit: new Prisma.Decimal('0.00') },
+          ],
+        }),
+      ]);
+      prisma.ecriture.count.mockResolvedValueOnce(1);
+      const result = await service.search(company, 'fournitures');
+      expect(result.results[0]).toMatchObject({ amount: '100.00' });
+    });
+
+    it('reports the real total count even when results are capped', async () => {
+      prisma.ecriture.findMany.mockResolvedValueOnce([ecriture()]);
+      prisma.ecriture.count.mockResolvedValueOnce(34);
+      const result = await service.search(company, 'loyer');
+      expect(result.totalCount).toBe(34);
+      expect(result.results).toHaveLength(1);
     });
   });
 });

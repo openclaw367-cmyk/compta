@@ -8,8 +8,9 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
-import { ApiHeader, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
+import { ApiHeader, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { CurrentCompany } from '../../common/tenant/current-company.decorator';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { EntriesService } from './entries.service';
@@ -20,7 +21,8 @@ import { SetLettrageDto } from './dto/set-lettrage.dto';
 @ApiHeader({
   name: 'x-company-id',
   required: true,
-  description: 'Tenant id — must name a company the caller (see Authorization header) is a member of.',
+  description:
+    'Tenant id — must name a company the caller (see Authorization header) is a member of.',
 })
 @Controller('entries')
 export class EntriesController {
@@ -38,6 +40,19 @@ export class EntriesController {
   @Get()
   findAll(@CurrentCompany() company: CompanyContext) {
     return this.entriesService.findAll(company);
+  }
+
+  @ApiOperation({
+    summary: 'Search écritures by libellé substring or exact amount — powers the command palette.',
+    description:
+      'A bare number (comma or point decimal) is treated as an exact debit/credit amount ' +
+      'lookup; anything else is a case-insensitive libellé substring match. Must come before ' +
+      'the :id route below or "search" would be parsed as an id.',
+  })
+  @ApiQuery({ name: 'q', required: true })
+  @Get('search')
+  search(@CurrentCompany() company: CompanyContext, @Query('q') q?: string) {
+    return this.entriesService.search(company, q ?? '');
   }
 
   @ApiOperation({ summary: 'Get one écriture by id.' })

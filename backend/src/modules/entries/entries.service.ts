@@ -4,12 +4,26 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Ecriture, EcritureLigne, LettrageAuditAction } from '@prisma/client';
+import { Ecriture, EcritureLigne, Journal, LettrageAuditAction } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { assertFiscalYearOpen } from '../../common/ledger/assert-fiscal-year-open';
+import { Money } from '../../common/decimal';
 import { CreateEcritureDto } from './dto/create-ecriture.dto';
+import { EntrySearchResponseDto, EntrySearchResultDto } from './dto/entry-search-response.dto';
 import { EntryValidationService } from './entry-validation.service';
+
+/** A bare digit string, with an optional 1-2 digit decimal part after a comma OR a point — a
+ * user typing an amount in a search box may use either separator naturally. Anything else
+ * (letters, multiple separators, a leading sign) is treated as a libellé search instead. */
+const AMOUNT_QUERY_PATTERN = /^\d+([.,]\d{1,2})?$/;
+
+/** Below this length, neither search mode fires — keeps the command palette from issuing a
+ * wasteful full-table scan on a single keystroke. Enforced here too, not just by the frontend's
+ * own debounce/gating, so a stray request never falls through to an unscoped query. */
+const MIN_QUERY_LENGTH = 2;
+
+const SEARCH_RESULT_LIMIT = 8;
 
 /**
  * Response shape for create()/update() — the écriture plus its own
@@ -35,6 +49,22 @@ function withDocumentCount<T extends { _count: { documents: number } }>(
 ): Omit<T, '_count'> & { documentCount: number } {
   const { _count, ...rest } = ecriture;
   return { ...rest, documentCount: _count.documents };
+}
+
+function toSearchResult(
+  ecriture: Ecriture & { journal: Journal },
+  amount: string,
+): EntrySearchResultDto {
+  return {
+    id: ecriture.id,
+    journalId: ecriture.journalId,
+    journalCode: ecriture.journal.code,
+    ecritureNum: ecriture.ecritureNum,
+    ecritureDate: ecriture.ecritureDate.toISOString().slice(0, 10),
+    libelle: ecriture.libelle,
+    validatedAt: ecriture.validatedAt ? ecriture.validatedAt.toISOString() : null,
+    amount,
+  };
 }
 
 /**
@@ -96,6 +126,89 @@ export class EntriesService {
       throw new NotFoundException(`Écriture ${id} not found`);
     }
     return withDocumentCount(ecriture);
+  }
+
+  /**
+   * Powers the command palette's écriture search (see CLAUDE.md "Search —
+   * écritures by libellé/amount"). Mode is auto-detected from the query,
+   * never a caller-supplied flag: a bare number (optionally with a comma
+   * OR point decimal) means an EXACT-amount lookup against every line's
+   * debit/credit; anything else is a case-insensitive substring match on
+   * the écriture's own libellé. Both modes search across every fiscal
+   * year (a deliberate choice — see that CLAUDE.md section) and are
+   * capped server-side at SEARCH_RESULT_LIMIT, reporting the real total
+   * so the caller can say "N résultats" rather than silently truncating.
+   */
+  async search(company: CompanyContext, rawQuery: string): Promise<EntrySearchResponseDto> {
+    const query = rawQuery.trim();
+    if (query.length < MIN_QUERY_LENGTH) {
+      return { mode: 'LIBELLE', query, results: [], totalCount: 0 };
+    }
+
+    if (AMOUNT_QUERY_PATTERN.test(query)) {
+      return this.searchByAmount(company, query);
+    }
+    return this.searchByLibelle(company, query);
+  }
+
+  private async searchByAmount(
+    company: CompanyContext,
+    rawQuery: string,
+  ): Promise<EntrySearchResponseDto> {
+    const amount = Money.fromString(rawQuery.replace(',', '.')).toDecimal();
+
+    const lignes = await this.prisma.ecritureLigne.findMany({
+      where: {
+        companyId: company.companyId,
+        OR: [{ debit: amount }, { credit: amount }],
+      },
+      include: { ecriture: { include: { journal: true } } },
+      orderBy: { ecriture: { ecritureDate: 'desc' } },
+    });
+
+    // One row per écriture even if several of its lines (or both its
+    // debit and credit sides) equal the searched amount — first match
+    // wins, since they all report the same searched value anyway.
+    const seenEcritureIds = new Set<string>();
+    const results: EntrySearchResultDto[] = [];
+    for (const ligne of lignes) {
+      if (seenEcritureIds.has(ligne.ecritureId)) continue;
+      seenEcritureIds.add(ligne.ecritureId);
+      const matched = ligne.debit.equals(amount) ? ligne.debit : ligne.credit;
+      results.push(toSearchResult(ligne.ecriture, Money.fromDecimal(matched).toApiString()));
+    }
+
+    return {
+      mode: 'AMOUNT',
+      query: rawQuery,
+      results: results.slice(0, SEARCH_RESULT_LIMIT),
+      totalCount: results.length,
+    };
+  }
+
+  private async searchByLibelle(
+    company: CompanyContext,
+    query: string,
+  ): Promise<EntrySearchResponseDto> {
+    const ecritures = await this.prisma.ecriture.findMany({
+      where: { companyId: company.companyId, libelle: { contains: query, mode: 'insensitive' } },
+      include: { journal: true, lignes: true },
+      orderBy: { ecritureDate: 'desc' },
+      take: SEARCH_RESULT_LIMIT,
+    });
+    const totalCount = await this.prisma.ecriture.count({
+      where: { companyId: company.companyId, libelle: { contains: query, mode: 'insensitive' } },
+    });
+
+    const results = ecritures.map((ecriture) => {
+      const totalDebit = ecriture.lignes.reduce(
+        (sum, ligne) => sum.plus(Money.fromDecimal(ligne.debit)),
+        Money.zero(),
+      );
+      return toSearchResult(ecriture, totalDebit.toApiString());
+    });
+
+    return { mode: 'LIBELLE', query, results, totalCount };
   }
 
   /** Full replace of a draft écriture's header and lines. Rejects validated entries. */
