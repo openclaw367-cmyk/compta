@@ -6174,6 +6174,72 @@ across every fiscal year** (not scoped to the currently-selected one).
   exactly 0,03 — confirmed live in the palette, "· Pièce SAMPLE-AC-0001"
   and "· Pièce SAMPLE-VE-0003"/"· Pièce SAMPLE-AC-0003" rendering
   correctly in each row's hint.
+- **A "Récent" search-history group was added the same day, a later
+  pass, per the user's own follow-up request.** Frontend-only, entirely
+  in `CommandPalette.tsx` — no backend change. Persisted to
+  `localStorage` under `compta:searchHistory:<companyId>` (up to 6
+  terms, most-recent-first, deduplicated case/accent-insensitively via
+  the palette's own `normalize()`), matching this app's own established
+  "per-viewer convenience, not something that must persist reliably or
+  be shared" discipline (same precedent as the theme/density/sidebar-
+  collapse preferences and the onboarding checklist's own dismissal
+  flag) — plain `localStorage.getItem`/`.setItem`, no defensive
+  try/catch, matching how every other localStorage read/write in this
+  app is already written. Company-scoped since a past écriture/account
+  search from one dossier is meaningless (and potentially confusing) in
+  another.
+  - **What gets recorded, and when**: only the query text at the moment
+    ANY non-history result is activated (`recordHistory(query)` inside
+    `activate()`) — not every keystroke while typing. A query under 2
+    characters is never recorded (same `MIN_HISTORY_TERM_LENGTH`
+    threshold reasoning as the backend's own `MIN_QUERY_LENGTH`).
+    Recording isn't restricted to écriture-kind results — picking a
+    plain page or account result with a real search term also counts,
+    since the point is remembering "things I searched for," not just
+    the écriture search specifically.
+  - **Only shown when the query is empty**, ahead of the default Pages
+    list — the moment you start typing, the history group disappears
+    and the normal live-filtered results take over. Modeled as a
+    fourth `PaletteResult` kind (`'history'`) rather than a separate
+    rendering path, so it's fully keyboard-navigable (arrow keys +
+    Enter) exactly like every other result, not a mouse-only add-on.
+  - **Clicking a history entry re-populates the query and re-searches
+    immediately — it does NOT navigate anywhere.** A remembered term is
+    a starting point to search again, not a fixed destination (unlike
+    every other result kind, whose `to` field IS a real destination).
+    `activate()` special-cases this: it sets both `query` AND
+    `debouncedQuery` at once, deliberately skipping the normal 250ms
+    debounce, since clicking a history row is already a deliberate,
+    single, explicit choice — not a mid-typing keystroke that should
+    still be throttled.
+  - Each history row gets a small "×" (not the usual hint text) to
+    remove just that one entry; the group's own header carries a "Tout
+    effacer" action. Both mutate the same in-memory `history` state and
+    persist immediately — no separate save step.
+  - **A real, unrelated bug found live while testing this, fixed the
+    same pass**: the "+N résultats — affinez votre recherche" footer
+    (see above) was gated on `entrySearch` being truthy but NOT on
+    `q !== ''` — `useEntrySearch()`'s own `placeholderData: (previous)
+    => previous` keeps the PREVIOUS non-empty query's result cached
+    even once the query is cleared and the (now-disabled) query for the
+    empty string is the active one, so the footer briefly showed the
+    stale count from whatever was last searched, even on an EMPTY
+    query. Confirmed live before the fix (searching "vente" then
+    clearing the input left a "RÉCENT" group at the top but the
+    ÉCRITURES group's own leftover count also lingered) and confirmed
+    gone after adding the `q !== ''` guard.
+  - **Verified live only** (no unit tests — this is pure client-side
+    UI state with no backend surface to unit-test against): searched
+    "vente", selected a result, reopened the palette and confirmed
+    "vente" appeared under "RÉCENT"; searched "1200", selected a
+    result, confirmed both "1200" and "vente" now listed, most-recent
+    first; clicked the "vente" row and confirmed the query field
+    repopulated and results appeared with no debounce delay; removed
+    "vente" via its own "×" and confirmed only "1200" remained; clicked
+    "Tout effacer" and confirmed the group disappeared entirely;
+    confirmed via a direct `localStorage` read that the key
+    `compta:searchHistory:<companyId>` held exactly `[]` afterward.
+    `tsc`/`eslint`/`vite build` clean.
 
 ## Known scope boundaries
 
