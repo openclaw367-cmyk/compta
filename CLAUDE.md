@@ -6139,6 +6139,41 @@ across every fiscal year** (not scoped to the currently-selected one).
   result and confirmed it navigated straight to
   `/ecritures?journal=...&ecriture=...` and the correct écriture opened
   in the editor.
+- **PieceRef search added the same day, a later pass, per the user's
+  own follow-up request** ("can you also let me search by pièce/
+  reference number"). Folded into the SAME two modes rather than a
+  third one: a LIBELLE-mode query now matches libellé OR `pieceRef` by
+  substring (both Ecriture-level text fields, one combined `OR`); an
+  AMOUNT-mode query now ALSO matches `pieceRef` by substring — not
+  amount-only despite the mode's name — since a piece reference is very
+  often itself a bare number (an invoice number, e.g. "0042"). This
+  required restructuring `searchByAmount()` from EcritureLigne-rooted
+  to Ecriture-rooted (`lignes: { some: { OR: [...] } }` inside the
+  `where`), which also *simplified* the old per-ligne dedup logic away
+  entirely — `ecriture.findMany()` already returns one row per écriture
+  by construction. Per-result display amount stays a deliberate choice:
+  a line that matches the exact searched amount shows THAT line's own
+  amount; an écriture that matched only via `pieceRef` (no line equals
+  the searched number) falls back to the same total-debit convention
+  LIBELLE mode already uses (`totalDebitOf()`, extracted as a shared
+  helper). The palette's row hint now shows `· Pièce <ref>` whenever a
+  real reference is set (never for the FEC "NA" placeholder convention,
+  which would otherwise show `· Pièce NA` on almost every entry with no
+  real reference and add noise rather than context). Verified two ways:
+  the amount-mode tests were rewritten for the new Ecriture-rooted query
+  shape rather than just extended, plus 2 new tests (a numeric query
+  matching PieceRef and falling back to the total, and a non-numeric
+  query matching a PieceRef substring) — 900 backend tests passing
+  overall (up from 898); `tsc`/`eslint`/`vite build` clean. Live against
+  the FR demo company, curl and a real browser: searching the full
+  reference "SAMPLE-AC-0001" and the substring "AC-000" both correctly
+  hit LIBELLE mode and found the right entries; searching "0003"
+  (numeric, AMOUNT mode) correctly matched BOTH `SAMPLE-VE-0003` and
+  `SAMPLE-AC-0003` by PieceRef substring, each falling back to its own
+  total debit (1 200,00 €/540,00 €) since neither has a line worth
+  exactly 0,03 — confirmed live in the palette, "· Pièce SAMPLE-AC-0001"
+  and "· Pièce SAMPLE-VE-0003"/"· Pièce SAMPLE-AC-0003" rendering
+  correctly in each row's hint.
 
 ## Known scope boundaries
 

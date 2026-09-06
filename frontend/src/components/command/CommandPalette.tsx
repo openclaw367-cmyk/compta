@@ -157,7 +157,9 @@ export function CommandPalette() {
         key: r.id,
         label: r.libelle,
         hint:
-          `${formatDateFr(r.ecritureDate)} · ${r.journalCode} · ${formatMoneyFr(r.amount)}` +
+          `${formatDateFr(r.ecritureDate)} · ${r.journalCode}` +
+          (r.pieceRef && r.pieceRef.toUpperCase() !== 'NA' ? ` · Pièce ${r.pieceRef}` : '') +
+          ` · ${formatMoneyFr(r.amount)}` +
           (r.validatedAt ? '' : ' · Brouillon'),
         to: `/ecritures?journal=${r.journalId}&ecriture=${r.id}`,
       }),
@@ -229,7 +231,7 @@ export function CommandPalette() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Page, compte, écriture (libellé ou montant)…"
+                placeholder="Page, compte, écriture (libellé, pièce ou montant)…"
                 className="w-full bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-faint"
               />
               <kbd className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[11px] text-ink-faint">

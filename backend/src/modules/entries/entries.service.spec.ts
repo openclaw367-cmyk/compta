@@ -45,7 +45,6 @@ function makePrismaMock() {
     ecritureLigne: {
       deleteMany: jest.fn(),
       findFirst: jest.fn(),
-      findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn((args: { where: { id: string }; data: unknown }) => ({
         id: args.where.id,
         ...(args.data as object),
@@ -511,6 +510,7 @@ describe('EntriesService', () => {
         ecritureNum: '12',
         ecritureDate: new Date('2026-03-10'),
         libelle: 'Achat fournitures de bureau',
+        pieceRef: 'NA',
         validatedAt: null,
         lignes: [],
         ...overrides,
@@ -521,61 +521,70 @@ describe('EntriesService', () => {
       const result = await service.search(company, 'a');
       expect(result).toEqual({ mode: 'LIBELLE', query: 'a', results: [], totalCount: 0 });
       expect(prisma.ecriture.findMany).not.toHaveBeenCalled();
-      expect(prisma.ecritureLigne.findMany).not.toHaveBeenCalled();
     });
 
     it('treats a bare number as an AMOUNT search, matching debit OR credit exactly', async () => {
-      prisma.ecritureLigne.findMany.mockResolvedValueOnce([
-        {
-          ecritureId: 'ecriture-1',
-          debit: new Prisma.Decimal('150.00'),
-          credit: new Prisma.Decimal('0.00'),
-          ecriture: ecriture(),
-        },
+      prisma.ecriture.findMany.mockResolvedValueOnce([
+        ecriture({
+          lignes: [{ debit: new Prisma.Decimal('150.00'), credit: new Prisma.Decimal('0.00') }],
+        }),
       ]);
+      prisma.ecriture.count.mockResolvedValueOnce(1);
       const result = await service.search(company, '150');
       expect(result.mode).toBe('AMOUNT');
       expect(result.results).toEqual([
         expect.objectContaining({ id: 'ecriture-1', amount: '150.00' }),
       ]);
-      const callArgs = prisma.ecritureLigne.findMany.mock.calls[0][0] as {
-        where: { OR: [{ debit: Prisma.Decimal }, { credit: Prisma.Decimal }] };
+      const callArgs = prisma.ecriture.findMany.mock.calls[0][0] as {
+        where: { OR: [{ pieceRef: unknown }, { lignes: { some: { OR: unknown[] } } }] };
       };
-      expect(callArgs.where.OR[0].debit.toString()).toBe('150');
-      expect(callArgs.where.OR[1].credit.toString()).toBe('150');
+      const [debitClause, creditClause] = callArgs.where.OR[1].lignes.some.OR as [
+        { debit: Prisma.Decimal },
+        { credit: Prisma.Decimal },
+      ];
+      expect(debitClause.debit.toString()).toBe('150');
+      expect(creditClause.credit.toString()).toBe('150');
     });
 
     it('accepts a comma decimal separator for an amount search', async () => {
-      prisma.ecritureLigne.findMany.mockResolvedValueOnce([
-        {
-          ecritureId: 'ecriture-1',
-          debit: new Prisma.Decimal('0.00'),
-          credit: new Prisma.Decimal('1234.56'),
-          ecriture: ecriture(),
-        },
+      prisma.ecriture.findMany.mockResolvedValueOnce([
+        ecriture({
+          lignes: [{ debit: new Prisma.Decimal('0.00'), credit: new Prisma.Decimal('1234.56') }],
+        }),
       ]);
+      prisma.ecriture.count.mockResolvedValueOnce(1);
       const result = await service.search(company, '1234,56');
       expect(result.mode).toBe('AMOUNT');
       expect(result.results[0]).toMatchObject({ amount: '1234.56' });
     });
 
-    it('deduplicates an écriture that has multiple lines matching the searched amount', async () => {
-      prisma.ecritureLigne.findMany.mockResolvedValueOnce([
-        {
-          ecritureId: 'ecriture-1',
-          debit: new Prisma.Decimal('100.00'),
-          credit: new Prisma.Decimal('0.00'),
-          ecriture: ecriture(),
-        },
-        {
-          ecritureId: 'ecriture-1',
-          debit: new Prisma.Decimal('0.00'),
-          credit: new Prisma.Decimal('100.00'),
-          ecriture: ecriture(),
-        },
+    it('reports one row per écriture even when both its debit and credit lines equal the searched amount', async () => {
+      prisma.ecriture.findMany.mockResolvedValueOnce([
+        ecriture({
+          lignes: [
+            { debit: new Prisma.Decimal('100.00'), credit: new Prisma.Decimal('0.00') },
+            { debit: new Prisma.Decimal('0.00'), credit: new Prisma.Decimal('100.00') },
+          ],
+        }),
       ]);
+      prisma.ecriture.count.mockResolvedValueOnce(1);
       const result = await service.search(company, '100');
       expect(result.results).toHaveLength(1);
+    });
+
+    it('a numeric query also matches PieceRef by substring, falling back to the écriture total for the shown amount', async () => {
+      prisma.ecriture.findMany.mockResolvedValueOnce([
+        ecriture({
+          pieceRef: 'FA-2026-0042',
+          lignes: [{ debit: new Prisma.Decimal('75.00'), credit: new Prisma.Decimal('0.00') }],
+        }),
+      ]);
+      prisma.ecriture.count.mockResolvedValueOnce(1);
+      // "0042" never equals any real line amount, so this can only have
+      // matched via the PieceRef substring — confirms the fallback.
+      const result = await service.search(company, '0042');
+      expect(result.mode).toBe('AMOUNT');
+      expect(result.results[0]).toMatchObject({ pieceRef: 'FA-2026-0042', amount: '75.00' });
     });
 
     it('treats non-numeric text as a LIBELLE substring search, case-insensitive', async () => {
@@ -591,7 +600,10 @@ describe('EntriesService', () => {
         expect.objectContaining({
           where: {
             companyId: 'company-1',
-            libelle: { contains: 'fournitures', mode: 'insensitive' },
+            OR: [
+              { libelle: { contains: 'fournitures', mode: 'insensitive' } },
+              { pieceRef: { contains: 'fournitures', mode: 'insensitive' } },
+            ],
           },
         }),
       );
@@ -602,6 +614,20 @@ describe('EntriesService', () => {
           amount: '60.00',
         }),
       ]);
+    });
+
+    it('matches a piece/reference number by substring even when the query is not numeric-looking', async () => {
+      prisma.ecriture.findMany.mockResolvedValueOnce([
+        ecriture({
+          libelle: 'Achat divers',
+          pieceRef: 'FA-2026-ABC',
+          lignes: [{ debit: new Prisma.Decimal('50.00'), credit: new Prisma.Decimal('0.00') }],
+        }),
+      ]);
+      prisma.ecriture.count.mockResolvedValueOnce(1);
+      const result = await service.search(company, 'FA-2026-ABC');
+      expect(result.mode).toBe('LIBELLE');
+      expect(result.results[0]).toMatchObject({ pieceRef: 'FA-2026-ABC' });
     });
 
     it('sums every debit line for the LIBELLE mode total, not just the first', async () => {

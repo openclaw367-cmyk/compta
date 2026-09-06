@@ -464,8 +464,10 @@ export interface EntrySearchResult {
   /** YYYY-MM-DD */
   ecritureDate: string;
   libelle: string;
+  pieceRef: string | null;
   validatedAt: string | null;
-  /** AMOUNT mode: the specific matching line's own amount. LIBELLE mode: the écriture's total debit. */
+  /** AMOUNT mode: the specific matching line's own amount, or the écriture's total debit if it
+   *  matched only via pieceRef. LIBELLE mode: always the écriture's total debit. */
   amount: string;
 }
 

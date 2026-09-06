@@ -51,6 +51,10 @@ function withDocumentCount<T extends { _count: { documents: number } }>(
   return { ...rest, documentCount: _count.documents };
 }
 
+function totalDebitOf(lignes: EcritureLigne[]): Money {
+  return lignes.reduce((sum, ligne) => sum.plus(Money.fromDecimal(ligne.debit)), Money.zero());
+}
+
 function toSearchResult(
   ecriture: Ecriture & { journal: Journal },
   amount: string,
@@ -62,6 +66,7 @@ function toSearchResult(
     ecritureNum: ecriture.ecritureNum,
     ecritureDate: ecriture.ecritureDate.toISOString().slice(0, 10),
     libelle: ecriture.libelle,
+    pieceRef: ecriture.pieceRef,
     validatedAt: ecriture.validatedAt ? ecriture.validatedAt.toISOString() : null,
     amount,
   };
@@ -133,11 +138,13 @@ export class EntriesService {
    * écritures by libellé/amount"). Mode is auto-detected from the query,
    * never a caller-supplied flag: a bare number (optionally with a comma
    * OR point decimal) means an EXACT-amount lookup against every line's
-   * debit/credit; anything else is a case-insensitive substring match on
-   * the écriture's own libellé. Both modes search across every fiscal
-   * year (a deliberate choice — see that CLAUDE.md section) and are
-   * capped server-side at SEARCH_RESULT_LIMIT, reporting the real total
-   * so the caller can say "N résultats" rather than silently truncating.
+   * debit/credit, OR a PieceRef substring match (a piece reference is
+   * often itself a bare number); anything else is a case-insensitive
+   * substring match on the écriture's own libellé OR PieceRef. Both
+   * modes search across every fiscal year (a deliberate choice — see
+   * that CLAUDE.md section) and are capped server-side at
+   * SEARCH_RESULT_LIMIT, reporting the real total so the caller can say
+   * "N résultats" rather than silently truncating.
    */
   async search(company: CompanyContext, rawQuery: string): Promise<EntrySearchResponseDto> {
     const query = rawQuery.trim();
@@ -151,62 +158,79 @@ export class EntriesService {
     return this.searchByLibelle(company, query);
   }
 
+  /**
+   * A numeric-looking query also matches PieceRef by substring (a piece
+   * reference is very often itself a bare number, e.g. an invoice
+   * number) — not amount-only despite the mode name. Ecriture-rooted
+   * (not EcritureLigne-rooted, unlike an earlier version of this
+   * method) precisely so a PieceRef-only match and an amount match can
+   * share one query and naturally return one row per écriture with no
+   * separate dedup pass needed.
+   */
   private async searchByAmount(
     company: CompanyContext,
     rawQuery: string,
   ): Promise<EntrySearchResponseDto> {
     const amount = Money.fromString(rawQuery.replace(',', '.')).toDecimal();
-
-    const lignes = await this.prisma.ecritureLigne.findMany({
-      where: {
-        companyId: company.companyId,
-        OR: [{ debit: amount }, { credit: amount }],
-      },
-      include: { ecriture: { include: { journal: true } } },
-      orderBy: { ecriture: { ecritureDate: 'desc' } },
-    });
-
-    // One row per écriture even if several of its lines (or both its
-    // debit and credit sides) equal the searched amount — first match
-    // wins, since they all report the same searched value anyway.
-    const seenEcritureIds = new Set<string>();
-    const results: EntrySearchResultDto[] = [];
-    for (const ligne of lignes) {
-      if (seenEcritureIds.has(ligne.ecritureId)) continue;
-      seenEcritureIds.add(ligne.ecritureId);
-      const matched = ligne.debit.equals(amount) ? ligne.debit : ligne.credit;
-      results.push(toSearchResult(ligne.ecriture, Money.fromDecimal(matched).toApiString()));
-    }
-
-    return {
-      mode: 'AMOUNT',
-      query: rawQuery,
-      results: results.slice(0, SEARCH_RESULT_LIMIT),
-      totalCount: results.length,
+    const where = {
+      companyId: company.companyId,
+      OR: [
+        { pieceRef: { contains: rawQuery, mode: 'insensitive' as const } },
+        { lignes: { some: { OR: [{ debit: amount }, { credit: amount }] } } },
+      ],
     };
-  }
 
-  private async searchByLibelle(
-    company: CompanyContext,
-    query: string,
-  ): Promise<EntrySearchResponseDto> {
     const ecritures = await this.prisma.ecriture.findMany({
-      where: { companyId: company.companyId, libelle: { contains: query, mode: 'insensitive' } },
+      where,
       include: { journal: true, lignes: true },
       orderBy: { ecritureDate: 'desc' },
       take: SEARCH_RESULT_LIMIT,
     });
-    const totalCount = await this.prisma.ecriture.count({
-      where: { companyId: company.companyId, libelle: { contains: query, mode: 'insensitive' } },
-    });
+    const totalCount = await this.prisma.ecriture.count({ where });
 
     const results = ecritures.map((ecriture) => {
-      const totalDebit = ecriture.lignes.reduce(
-        (sum, ligne) => sum.plus(Money.fromDecimal(ligne.debit)),
-        Money.zero(),
+      // A line matching the exact amount is the more specific reason to
+      // have surfaced this row — show ITS amount. An écriture that only
+      // matched via PieceRef (no line equals the searched amount) falls
+      // back to the same total-debit convention searchByLibelle uses.
+      const matchedLigne = ecriture.lignes.find(
+        (ligne) => ligne.debit.equals(amount) || ligne.credit.equals(amount),
       );
-      return toSearchResult(ecriture, totalDebit.toApiString());
+      const displayAmount = matchedLigne
+        ? Money.fromDecimal(
+            matchedLigne.debit.equals(amount) ? matchedLigne.debit : matchedLigne.credit,
+          )
+        : totalDebitOf(ecriture.lignes);
+      return toSearchResult(ecriture, displayAmount.toApiString());
     });
+
+    return { mode: 'AMOUNT', query: rawQuery, results, totalCount };
+  }
+
+  /** A non-numeric query matches libellé OR PieceRef, both by case-insensitive substring. */
+  private async searchByLibelle(
+    company: CompanyContext,
+    query: string,
+  ): Promise<EntrySearchResponseDto> {
+    const where = {
+      companyId: company.companyId,
+      OR: [
+        { libelle: { contains: query, mode: 'insensitive' as const } },
+        { pieceRef: { contains: query, mode: 'insensitive' as const } },
+      ],
+    };
+
+    const ecritures = await this.prisma.ecriture.findMany({
+      where,
+      include: { journal: true, lignes: true },
+      orderBy: { ecritureDate: 'desc' },
+      take: SEARCH_RESULT_LIMIT,
+    });
+    const totalCount = await this.prisma.ecriture.count({ where });
+
+    const results = ecritures.map((ecriture) =>
+      toSearchResult(ecriture, totalDebitOf(ecriture.lignes).toApiString()),
+    );
 
     return { mode: 'LIBELLE', query, results, totalCount };
   }

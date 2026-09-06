@@ -43,11 +43,14 @@ export class EntriesController {
   }
 
   @ApiOperation({
-    summary: 'Search écritures by libellé substring or exact amount — powers the command palette.',
+    summary:
+      'Search écritures by libellé/PieceRef substring or exact amount/PieceRef — powers the ' +
+      'command palette.',
     description:
-      'A bare number (comma or point decimal) is treated as an exact debit/credit amount ' +
-      'lookup; anything else is a case-insensitive libellé substring match. Must come before ' +
-      'the :id route below or "search" would be parsed as an id.',
+      'A bare number (comma or point decimal) is treated as an exact debit/credit amount OR a ' +
+      'PieceRef substring match (a piece reference is often itself a bare number); anything ' +
+      'else is a case-insensitive libellé OR PieceRef substring match. Must come before the ' +
+      ':id route below or "search" would be parsed as an id.',
   })
   @ApiQuery({ name: 'q', required: true })
   @Get('search')
