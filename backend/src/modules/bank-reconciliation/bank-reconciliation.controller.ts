@@ -17,6 +17,7 @@ import { BankReconciliationService } from './bank-reconciliation.service';
 import { ImportStatementDto } from './dto/import-statement.dto';
 import { ConfirmMatchDto } from './dto/confirm-match.dto';
 import { IgnoreStatementLineDto } from './dto/ignore-statement-line.dto';
+import { CsvColumnMappingDto } from './dto/csv-column-mapping.dto';
 import { CreateEcritureDto } from '../entries/dto/create-ecriture.dto';
 
 const UPLOAD_BODY_SCHEMA = {
@@ -30,6 +31,57 @@ const UPLOAD_BODY_SCHEMA = {
   },
 };
 
+const CSV_FILE_ONLY_SCHEMA = {
+  schema: {
+    type: 'object',
+    properties: { file: { type: 'string', format: 'binary' } },
+    required: ['file'],
+  },
+};
+
+const CSV_UPLOAD_BODY_SCHEMA = {
+  schema: {
+    type: 'object',
+    properties: {
+      file: { type: 'string', format: 'binary' },
+      bankAccountId: { type: 'string' },
+      dateColumn: { type: 'string' },
+      labelColumn: { type: 'string' },
+      amountColumn: { type: 'string' },
+      debitColumn: { type: 'string' },
+      creditColumn: { type: 'string' },
+      referenceColumn: { type: 'string' },
+      dateFormat: { type: 'string', enum: ['DMY', 'MDY', 'YMD'] },
+      decimalSeparator: { type: 'string', enum: [',', '.'] },
+      delimiter: { type: 'string' },
+      invertSign: { type: 'string', enum: ['true', 'false'] },
+    },
+    required: [
+      'file',
+      'bankAccountId',
+      'dateColumn',
+      'labelColumn',
+      'dateFormat',
+      'decimalSeparator',
+    ],
+  },
+};
+
+function toCsvMapping(dto: CsvColumnMappingDto) {
+  return {
+    dateColumn: dto.dateColumn,
+    labelColumn: dto.labelColumn,
+    amountColumn: dto.amountColumn,
+    debitColumn: dto.debitColumn,
+    creditColumn: dto.creditColumn,
+    referenceColumn: dto.referenceColumn,
+    dateFormat: dto.dateFormat,
+    decimalSeparator: dto.decimalSeparator,
+    delimiter: dto.delimiter,
+    invertSign: dto.invertSign === 'true',
+  };
+}
+
 /**
  * Statement import (preview-then-confirm, CAMT.053 only in v1) +
  * reconciliation review (propose/confirm/clear/ignore/create-écriture)
@@ -42,7 +94,8 @@ const UPLOAD_BODY_SCHEMA = {
 @ApiHeader({
   name: 'x-company-id',
   required: true,
-  description: 'Tenant id — must name a company the caller (see Authorization header) is a member of.',
+  description:
+    'Tenant id — must name a company the caller (see Authorization header) is a member of.',
 })
 @Controller('bank-reconciliation')
 export class BankReconciliationController {
@@ -81,6 +134,60 @@ export class BankReconciliationController {
       dto.bankAccountId,
       file.originalname,
       file.buffer.toString('utf-8'),
+    );
+  }
+
+  @ApiOperation({
+    summary: "Sniff a CSV file's delimiter/header row, for the column-mapping UI.",
+    description: 'No persistence, no company/bank-account context needed — a pure header sniff.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(CSV_FILE_ONLY_SCHEMA)
+  @Post('statements/csv/columns')
+  @UseInterceptors(FileInterceptor('file'))
+  detectCsvColumns(@UploadedFile() file?: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Aucun fichier reçu.');
+    return this.importService.detectCsvColumns(file.buffer.toString('utf-8'));
+  }
+
+  @ApiOperation({
+    summary: 'Parse a CSV statement against a caller-supplied column mapping — no persistence.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(CSV_UPLOAD_BODY_SCHEMA)
+  @Post('statements/csv/preview')
+  @UseInterceptors(FileInterceptor('file'))
+  async previewCsv(
+    @CurrentCompany() company: CompanyContext,
+    @Body() dto: CsvColumnMappingDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Aucun fichier reçu.');
+    return this.importService.previewCsv(
+      company,
+      dto.bankAccountId,
+      file.buffer.toString('utf-8'),
+      toCsvMapping(dto),
+    );
+  }
+
+  @ApiOperation({ summary: 'Re-parse and persist a CSV statement (all-or-nothing).' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(CSV_UPLOAD_BODY_SCHEMA)
+  @Post('statements/csv')
+  @UseInterceptors(FileInterceptor('file'))
+  async confirmCsvImport(
+    @CurrentCompany() company: CompanyContext,
+    @Body() dto: CsvColumnMappingDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Aucun fichier reçu.');
+    return this.importService.confirmImportCsv(
+      company,
+      dto.bankAccountId,
+      file.originalname,
+      file.buffer.toString('utf-8'),
+      toCsvMapping(dto),
     );
   }
 

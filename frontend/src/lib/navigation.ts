@@ -56,6 +56,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/immobilisations', label: 'Immobilisations', Icon: IconBox },
       { to: '/exercices', label: 'Exercices', Icon: IconCalendar },
       { to: '/import', label: 'Import Excel', Icon: IconUpload },
+      { to: '/import-fec', label: 'Import FEC', Icon: IconUpload },
       { to: '/fec', label: 'Export FEC', Icon: IconDownload },
     ],
   },

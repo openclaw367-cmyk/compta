@@ -825,8 +825,14 @@ model BankStatementImport {
   fileName       String
   periodStart    DateTime
   periodEnd      DateTime
-  openingBalance Decimal  @db.Decimal(15, 2)
-  closingBalance Decimal  @db.Decimal(15, 2)
+  /// Null for a CSV import (see CsvStatementParserService) — a bank CSV
+  /// export commonly carries no opening/closing balance fields at all,
+  /// unlike CAMT.053's own OPBD/CLBD, so there is nothing honest to
+  /// reconcile against. Always non-null for a CAMT.053 or Bridge-synced
+  /// import, both of which DO carry a real balance oracle
+  /// (assertBalancesReconcile()) — see CLAUDE.md "Bank reconciliation".
+  openingBalance Decimal? @db.Decimal(15, 2)
+  closingBalance Decimal? @db.Decimal(15, 2)
   importedAt     DateTime @default(now())
 
   lines BankStatementLine[]

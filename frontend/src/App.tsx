@@ -24,6 +24,7 @@ import { AccountsJournalsPage } from './pages/AccountsJournalsPage';
 import { TiersPage } from './pages/TiersPage';
 import { GrandLivrePage } from './pages/GrandLivrePage';
 import { ImportExcelPage } from './pages/ImportExcelPage';
+import { FecImportPage } from './pages/FecImportPage';
 import { BankReconciliationPage } from './pages/BankReconciliationPage';
 import { FecExportPage } from './pages/FecExportPage';
 import { VatPage } from './pages/VatPage';
@@ -87,6 +88,7 @@ export default function App() {
                         <Route path="/societe" element={<CompanyProfilePage />} />
                         <Route path="/grand-livre" element={<GrandLivrePage />} />
                         <Route path="/import" element={<ImportExcelPage />} />
+                        <Route path="/import-fec" element={<FecImportPage />} />
                         <Route path="/rapprochement-bancaire" element={<BankReconciliationPage />} />
                         <Route path="/fec" element={<FecExportPage />} />
                         <Route path="/immobilisations" element={<ImmobilisationsPage />} />

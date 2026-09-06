@@ -18,8 +18,12 @@ export class StatementPreviewResponseDto {
   @ApiProperty({ nullable: true }) iban!: string | null;
   @ApiProperty() periodStart!: string;
   @ApiProperty() periodEnd!: string;
-  @ApiProperty() openingBalance!: string;
-  @ApiProperty() closingBalance!: string;
+  @ApiProperty({
+    nullable: true,
+    description: 'Null for a CSV import — no balance oracle exists for that format.',
+  })
+  openingBalance!: string | null;
+  @ApiProperty({ nullable: true }) closingBalance!: string | null;
   @ApiProperty({ type: [StatementPreviewLineDto] })
   lines!: StatementPreviewLineDto[];
 }

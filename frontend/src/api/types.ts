@@ -353,6 +353,69 @@ export interface ImportPreviewResponse {
   rejected: ImportPreviewRejected[];
 }
 
+// --- FEC file import (.txt/.csv/.xlsx) — see CLAUDE.md "FEC import" ---
+
+export interface FecImportPlannedJournal {
+  code: string;
+  label: string;
+  inferredType: string;
+  typeConfident: boolean;
+}
+
+export interface FecImportPlannedAccount {
+  number: string;
+  label: string;
+  pcgClass: number;
+  isAuxiliary: boolean;
+  parentNumber: string | null;
+}
+
+export interface FecImportFiscalYearPlan {
+  action: 'REUSE_EXISTING' | 'CREATE_NEW';
+  fiscalYearId?: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+}
+
+export interface FecImportPreviewLigne {
+  compteNum: string;
+  compteLib: string;
+  compAuxNum: string | null;
+  debit: string;
+  credit: string;
+}
+
+export interface FecImportPreviewEcriture {
+  journalCode: string;
+  sourceEcritureNum: string;
+  ecritureDate: string;
+  libelle: string;
+  pieceRef: string | null;
+  total: string;
+  lignes: FecImportPreviewLigne[];
+  isDuplicate: boolean;
+  duplicateOf?: string;
+}
+
+export interface FecImportRejectedGroup {
+  journalCode: string;
+  sourceEcritureNum: string;
+  errors: string[];
+}
+
+/** Response for POST /fec-import/preview — writes nothing, purely informational. */
+export interface FecImportPreviewResponse {
+  fileErrors: string[];
+  fiscalYearPlan: FecImportFiscalYearPlan | null;
+  journalsToCreate: FecImportPlannedJournal[];
+  accountsToCreate: FecImportPlannedAccount[];
+  toImport: FecImportPreviewEcriture[];
+  totalEcrituresCount: number;
+  truncated: boolean;
+  rejected: FecImportRejectedGroup[];
+}
+
 /** Response shape for GET /depreciation/fixed-assets(/:id) — see FixedAssetListItemDto on the backend. */
 export interface FixedAsset {
   id: string;
@@ -1199,8 +1262,9 @@ export interface StatementPreviewResponse {
   iban: string | null;
   periodStart: string;
   periodEnd: string;
-  openingBalance: string;
-  closingBalance: string;
+  /** Null for a CSV import — no balance oracle exists for that format. */
+  openingBalance: string | null;
+  closingBalance: string | null;
   lines: StatementPreviewLine[];
 }
 
@@ -1211,9 +1275,31 @@ export interface BankStatementImport {
   fileName: string;
   periodStart: string;
   periodEnd: string;
-  openingBalance: string;
-  closingBalance: string;
+  openingBalance: string | null;
+  closingBalance: string | null;
   importedAt: string;
+}
+
+export interface CsvColumnsPreview {
+  delimiter: string;
+  headers: string[];
+  sampleRows: string[][];
+}
+
+export type CsvDateFormat = 'DMY' | 'MDY' | 'YMD';
+export type CsvDecimalSeparator = ',' | '.';
+
+export interface CsvColumnMapping {
+  dateColumn: string;
+  labelColumn: string;
+  amountColumn?: string;
+  debitColumn?: string;
+  creditColumn?: string;
+  referenceColumn?: string;
+  dateFormat: CsvDateFormat;
+  decimalSeparator: CsvDecimalSeparator;
+  delimiter?: string;
+  invertSign?: boolean;
 }
 
 export type MatchConfidence = 'HIGH' | 'AMBIGUOUS' | 'NO_CANDIDATE';

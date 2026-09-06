@@ -3,6 +3,10 @@ import type {
   Account,
   BankAccount,
   BankStatementLine,
+  CsvColumnMapping,
+  CsvColumnsPreview,
+  CsvDateFormat,
+  CsvDecimalSeparator,
   MatchCandidate,
   StatementLineMatchProposal,
   StatementPreviewResponse,
@@ -13,15 +17,18 @@ import {
   useBankAccounts,
   useBankAggregatorLinks,
   useClearMatch,
+  useConfirmCsvStatementImport,
   useConfirmMatch,
   useConfirmStatementImport,
   useCreateBankAccount,
   useCreateConnectSession,
   useCreateEcritureFromStatementLine,
   useCreateTiers,
+  useDetectCsvColumns,
   useFiscalYears,
   useIgnoreStatementLine,
   useJournals,
+  usePreviewCsvStatement,
   usePreviewStatement,
   useReconciliationProposals,
   useRevokeLink,
@@ -454,6 +461,37 @@ function AggregatorConsentDialog({
 }
 
 function StatementImportSection({ bankAccount }: { bankAccount: BankAccount }) {
+  const [format, setFormat] = useState<'camt053' | 'csv'>('camt053');
+
+  return (
+    <div className="rounded-lg border border-border bg-surface p-4 shadow-card">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-[14px] font-semibold text-ink">Importer un relevé</h2>
+        <div className="inline-flex rounded-md border border-border p-0.5 text-[12px]">
+          {(['camt053', 'csv'] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFormat(f)}
+              className={`rounded px-2.5 py-1 font-medium ${
+                format === f ? 'bg-accent text-white' : 'text-ink-muted hover:text-ink'
+              }`}
+            >
+              {f === 'camt053' ? 'CAMT.053 (XML)' : 'CSV'}
+            </button>
+          ))}
+        </div>
+      </div>
+      {format === 'camt053' ? (
+        <Camt053ImportSection bankAccount={bankAccount} />
+      ) : (
+        <CsvImportSection bankAccount={bankAccount} />
+      )}
+    </div>
+  );
+}
+
+function Camt053ImportSection({ bankAccount }: { bankAccount: BankAccount }) {
   const preview = usePreviewStatement();
   const confirmImport = useConfirmStatementImport();
   const [file, setFile] = useState<File | null>(null);
@@ -486,12 +524,9 @@ function StatementImportSection({ bankAccount }: { bankAccount: BankAccount }) {
     }
   }
 
-  const duplicateCount = previewData?.lines.filter((l) => l.isDuplicate).length ?? 0;
-
   return (
-    <div className="rounded-lg border border-border bg-surface p-4 shadow-card">
-      <h2 className="text-[14px] font-semibold text-ink">Importer un relevé (CAMT.053)</h2>
-      <div className="mt-3 flex flex-wrap items-center gap-2.5">
+    <div className="mt-3">
+      <div className="flex flex-wrap items-center gap-2.5">
         <input
           type="file"
           accept=".xml"
@@ -525,28 +560,362 @@ function StatementImportSection({ bankAccount }: { bankAccount: BankAccount }) {
       {error && <p className="mt-2 text-[12.5px] text-negative">{error}</p>}
       {success && <p className="mt-2 text-[12.5px] text-positive">{success}</p>}
 
-      {previewData && (
-        <div className="mt-3 rounded-md border border-border bg-bg p-3 text-[12.5px]">
-          <div className="flex flex-wrap gap-x-5 gap-y-1 text-ink-muted">
-            <span>
-              Période : {formatDate(previewData.periodStart)} → {formatDate(previewData.periodEnd)}
-            </span>
-            <span>
-              Solde initial : <span className="tabular-nums text-ink">{formatMoneyFr(previewData.openingBalance)}</span>
-            </span>
-            <span>
-              Solde final : <span className="tabular-nums text-ink">{formatMoneyFr(previewData.closingBalance)}</span>
-            </span>
-            <span>{previewData.lines.length} ligne(s)</span>
-            {duplicateCount > 0 && (
-              <span className="font-medium text-warning">
-                {duplicateCount} ligne(s) déjà importée(s) — la confirmation sera refusée
-              </span>
+      {previewData && <StatementPreviewSummary preview={previewData} />}
+    </div>
+  );
+}
+
+/** Shared preview summary — the CSV importer reuses this verbatim, minus balances (always null there). */
+function StatementPreviewSummary({ preview }: { preview: StatementPreviewResponse }) {
+  const duplicateCount = preview.lines.filter((l) => l.isDuplicate).length;
+  return (
+    <div className="mt-3 rounded-md border border-border bg-bg p-3 text-[12.5px]">
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-ink-muted">
+        <span>
+          Période : {formatDate(preview.periodStart)} → {formatDate(preview.periodEnd)}
+        </span>
+        {preview.openingBalance !== null && (
+          <span>
+            Solde initial :{' '}
+            <span className="tabular-nums text-ink">{formatMoneyFr(preview.openingBalance)}</span>
+          </span>
+        )}
+        {preview.closingBalance !== null && (
+          <span>
+            Solde final :{' '}
+            <span className="tabular-nums text-ink">{formatMoneyFr(preview.closingBalance)}</span>
+          </span>
+        )}
+        <span>{preview.lines.length} ligne(s)</span>
+        {duplicateCount > 0 && (
+          <span className="font-medium text-warning">
+            {duplicateCount} ligne(s) déjà importée(s) — la confirmation sera refusée
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const NONE_OPTION = '';
+
+/**
+ * CSV bank-statement import — the second supported format alongside
+ * CAMT.053 (see CLAUDE.md "Bank reconciliation"). Flexible column
+ * mapping: a bank CSV export has no standardized layout, so the file's
+ * own header row is sniffed first, then a human picks which column is
+ * which before any data row is parsed against it. Deliberately shows no
+ * opening/closing balance in the preview (see StatementPreviewSummary) —
+ * a CSV export commonly has none.
+ */
+function CsvImportSection({ bankAccount }: { bankAccount: BankAccount }) {
+  const detectColumns = useDetectCsvColumns();
+  const preview = usePreviewCsvStatement();
+  const confirmImport = useConfirmCsvStatementImport();
+
+  const [file, setFile] = useState<File | null>(null);
+  const [columns, setColumns] = useState<CsvColumnsPreview | null>(null);
+  const [previewData, setPreviewData] = useState<StatementPreviewResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const [amountMode, setAmountMode] = useState<'single' | 'pair'>('single');
+  const [dateColumn, setDateColumn] = useState('');
+  const [labelColumn, setLabelColumn] = useState('');
+  const [amountColumn, setAmountColumn] = useState('');
+  const [debitColumn, setDebitColumn] = useState('');
+  const [creditColumn, setCreditColumn] = useState('');
+  const [referenceColumn, setReferenceColumn] = useState('');
+  const [dateFormat, setDateFormat] = useState<CsvDateFormat>('DMY');
+  const [decimalSeparator, setDecimalSeparator] = useState<CsvDecimalSeparator>(',');
+  const [invertSign, setInvertSign] = useState(false);
+
+  function resetMapping() {
+    setColumns(null);
+    setPreviewData(null);
+    setSuccess(null);
+    setDateColumn('');
+    setLabelColumn('');
+    setAmountColumn('');
+    setDebitColumn('');
+    setCreditColumn('');
+    setReferenceColumn('');
+  }
+
+  async function handleDetect() {
+    if (!file) return;
+    setError(null);
+    resetMapping();
+    try {
+      const result = await detectColumns.mutateAsync(file);
+      setColumns(result);
+      // Sensible defaults — a human still reviews/corrects these before parsing anything.
+      setDateColumn(result.headers.find((h) => /date/i.test(h)) ?? result.headers[0] ?? '');
+      setLabelColumn(
+        result.headers.find((h) => /libell|label|descri/i.test(h)) ?? result.headers[1] ?? '',
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.details.join(' ') : "L'analyse des colonnes a échoué.");
+    }
+  }
+
+  function buildMapping(): CsvColumnMapping {
+    return {
+      dateColumn,
+      labelColumn,
+      amountColumn: amountMode === 'single' ? amountColumn : undefined,
+      debitColumn: amountMode === 'pair' ? debitColumn : undefined,
+      creditColumn: amountMode === 'pair' ? creditColumn : undefined,
+      referenceColumn: referenceColumn || undefined,
+      dateFormat,
+      decimalSeparator,
+      delimiter: columns?.delimiter,
+      invertSign: amountMode === 'single' ? invertSign : undefined,
+    };
+  }
+
+  const mappingComplete =
+    Boolean(dateColumn) &&
+    Boolean(labelColumn) &&
+    (amountMode === 'single' ? Boolean(amountColumn) : Boolean(debitColumn) && Boolean(creditColumn));
+
+  async function handlePreview() {
+    if (!file || !mappingComplete) return;
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await preview.mutateAsync({
+        bankAccountId: bankAccount.id,
+        file,
+        mapping: buildMapping(),
+      });
+      setPreviewData(result);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.details.join(' ') : "L'aperçu a échoué.");
+    }
+  }
+
+  async function handleConfirm() {
+    if (!file || !mappingComplete) return;
+    setError(null);
+    try {
+      await confirmImport.mutateAsync({
+        bankAccountId: bankAccount.id,
+        file,
+        mapping: buildMapping(),
+      });
+      setSuccess('Relevé importé.');
+      setPreviewData(null);
+      setFile(null);
+      resetMapping();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.details.join(' ') : "L'import a échoué.");
+    }
+  }
+
+  return (
+    <div className="mt-3">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <input
+          type="file"
+          accept=".csv,.txt"
+          onChange={(e) => {
+            setFile(e.target.files?.[0] ?? null);
+            resetMapping();
+          }}
+          className="text-[13px] text-ink-muted"
+        />
+        <button
+          type="button"
+          disabled={!file || detectColumns.isPending}
+          onClick={() => void handleDetect()}
+          className="rounded-md border border-border px-3 py-1.5 text-[12.5px] font-medium text-ink-muted hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {detectColumns.isPending ? 'Analyse…' : 'Analyser les colonnes'}
+        </button>
+      </div>
+
+      {error && <p className="mt-2 text-[12.5px] text-negative">{error}</p>}
+      {success && <p className="mt-2 text-[12.5px] text-positive">{success}</p>}
+
+      {columns && (
+        <div className="mt-3 flex flex-col gap-3 rounded-md border border-border bg-bg p-3">
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-[11.5px]">
+              <thead>
+                <tr>
+                  {columns.headers.map((h) => (
+                    <th key={h} className="whitespace-nowrap px-2 py-1 text-left font-medium text-ink-muted">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {columns.sampleRows.map((row, i) => (
+                  <tr key={i} className="border-t border-border">
+                    {row.map((cell, j) => (
+                      <td key={j} className="whitespace-nowrap px-2 py-1 text-ink-faint">
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3 border-t border-border pt-3 text-[12px]">
+            <ColumnSelect label="Colonne date" headers={columns.headers} value={dateColumn} onChange={setDateColumn} />
+            <label className="flex flex-col gap-1 text-ink-faint">
+              Format de date
+              <select
+                value={dateFormat}
+                onChange={(e) => setDateFormat(e.target.value as CsvDateFormat)}
+                className="rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] text-ink outline-none focus:border-accent"
+              >
+                <option value="DMY">JJ/MM/AAAA</option>
+                <option value="MDY">MM/JJ/AAAA</option>
+                <option value="YMD">AAAA-MM-JJ</option>
+              </select>
+            </label>
+            <ColumnSelect
+              label="Colonne libellé"
+              headers={columns.headers}
+              value={labelColumn}
+              onChange={setLabelColumn}
+            />
+            <ColumnSelect
+              label="Colonne référence (facultatif)"
+              headers={columns.headers}
+              value={referenceColumn}
+              onChange={setReferenceColumn}
+              allowNone
+            />
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3 border-t border-border pt-3 text-[12px]">
+            <div className="flex flex-col gap-1 text-ink-faint">
+              Montant
+              <div className="inline-flex rounded-md border border-border p-0.5">
+                {(['single', 'pair'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setAmountMode(mode)}
+                    className={`rounded px-2.5 py-1 text-[12px] font-medium ${
+                      amountMode === mode ? 'bg-accent text-white' : 'text-ink-muted hover:text-ink'
+                    }`}
+                  >
+                    {mode === 'single' ? 'Colonne signée unique' : 'Colonnes débit/crédit'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {amountMode === 'single' ? (
+              <>
+                <ColumnSelect
+                  label="Colonne montant"
+                  headers={columns.headers}
+                  value={amountColumn}
+                  onChange={setAmountColumn}
+                />
+                <label className="flex items-center gap-1.5 pb-1.5 text-ink-faint">
+                  <input
+                    type="checkbox"
+                    checked={invertSign}
+                    onChange={(e) => setInvertSign(e.target.checked)}
+                  />
+                  Inverser le signe
+                </label>
+              </>
+            ) : (
+              <>
+                <ColumnSelect
+                  label="Colonne débit"
+                  headers={columns.headers}
+                  value={debitColumn}
+                  onChange={setDebitColumn}
+                />
+                <ColumnSelect
+                  label="Colonne crédit"
+                  headers={columns.headers}
+                  value={creditColumn}
+                  onChange={setCreditColumn}
+                />
+              </>
+            )}
+            <label className="flex flex-col gap-1 text-ink-faint">
+              Séparateur décimal
+              <select
+                value={decimalSeparator}
+                onChange={(e) => setDecimalSeparator(e.target.value as CsvDecimalSeparator)}
+                className="rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] text-ink outline-none focus:border-accent"
+              >
+                <option value=",">Virgule (1234,56)</option>
+                <option value=".">Point (1234.56)</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 border-t border-border pt-3">
+            <button
+              type="button"
+              disabled={!mappingComplete || preview.isPending}
+              onClick={() => void handlePreview()}
+              className="rounded-md border border-border px-3 py-1.5 text-[12.5px] font-medium text-ink-muted hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {preview.isPending ? 'Analyse…' : 'Aperçu'}
+            </button>
+            {previewData && (
+              <button
+                type="button"
+                disabled={confirmImport.isPending}
+                onClick={() => void handleConfirm()}
+                className="rounded-md bg-accent px-3.5 py-1.5 text-[13px] font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+              >
+                {confirmImport.isPending ? 'Import…' : "Confirmer l'import"}
+              </button>
             )}
           </div>
+
+          {previewData && <StatementPreviewSummary preview={previewData} />}
         </div>
       )}
     </div>
+  );
+}
+
+function ColumnSelect({
+  label,
+  headers,
+  value,
+  onChange,
+  allowNone,
+}: {
+  label: string;
+  headers: string[];
+  value: string;
+  onChange: (value: string) => void;
+  allowNone?: boolean;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-[12px] text-ink-faint">
+      {label}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-44 rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] text-ink outline-none focus:border-accent"
+      >
+        {allowNone && <option value={NONE_OPTION}>— Aucune —</option>}
+        {!allowNone && !value && <option value="">Choisir…</option>}
+        {headers.map((h) => (
+          <option key={h} value={h}>
+            {h}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
