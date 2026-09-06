@@ -92,7 +92,7 @@ export function SettingsPage() {
         <div className="rounded-lg border border-border bg-surface p-5 shadow-card">
           <PreferenceRow
             label="Écran de démarrage"
-            description="Ce que « compta » affiche à l'ouverture."
+            description="Ce que « Citaledge » affiche à l'ouverture."
           >
             <select
               value={defaultLandingRoute}

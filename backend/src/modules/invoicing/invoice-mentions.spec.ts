@@ -14,6 +14,8 @@ const COMPANY = {
   siren: '123456789',
   rci: null,
   vatNumber: 'FR12123456789',
+  phone: null,
+  email: null,
   paymentInstructions: null,
 };
 
@@ -108,6 +110,25 @@ describe('computeInvoiceMentions — FR', () => {
       iban: 'FR76...',
       bic: 'BPXXFRPP',
     });
+  });
+
+  it('seller phone/email are null when the company has not configured either', () => {
+    const mentions = computeInvoiceMentions('FR', COMPANY, CLIENT, INVOICE);
+    expect(mentions.seller.phone).toBeNull();
+    expect(mentions.seller.email).toBeNull();
+  });
+
+  it('seller phone/email carry through when configured, buyer never has either', () => {
+    const mentions = computeInvoiceMentions(
+      'FR',
+      { ...COMPANY, phone: '+33 1 23 45 67 89', email: 'contact@demo-sarl.fr' },
+      CLIENT,
+      INVOICE,
+    );
+    expect(mentions.seller.phone).toBe('+33 1 23 45 67 89');
+    expect(mentions.seller.email).toBe('contact@demo-sarl.fr');
+    expect(mentions.buyer.phone).toBeNull();
+    expect(mentions.buyer.email).toBeNull();
   });
 });
 

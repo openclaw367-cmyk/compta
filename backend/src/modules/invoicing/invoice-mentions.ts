@@ -51,6 +51,14 @@ export interface InvoiceMentionsPartyIdentity {
   formattedAddress: string;
   vatNumber: string | null;
   sirenOrRci: string | null;
+  /** Shown in the invoice PDF's own header contact block — seller only in
+   *  practice today (Account/tiers, the buyer's own identity source, has
+   *  no phone/email field), but kept on the shared party shape rather
+   *  than a seller-only field so a future business-client contact
+   *  capability needs no shape change. Null, never a placeholder, when
+   *  the underlying record has none configured. */
+  phone: string | null;
+  email: string | null;
 }
 
 export interface InvoiceMentionsLine {
@@ -120,6 +128,8 @@ export interface InvoiceMentionsCompanyInput {
   vatNumber: string | null;
   /** Null when bankName/iban/bic aren't all configured — see InvoicePaymentInstructions. */
   paymentInstructions: InvoicePaymentInstructions | null;
+  phone: string | null;
+  email: string | null;
 }
 
 export interface InvoiceMentionsClientInput {
@@ -255,6 +265,8 @@ function buildParty(
         rci?: string | null;
         sirenOrRci?: string | null;
         vatNumber: string | null;
+        phone?: string | null;
+        email?: string | null;
       },
 ): InvoiceMentionsPartyIdentity {
   const address = {
@@ -269,6 +281,11 @@ function buildParty(
     formattedAddress: formatAddress(address),
     vatNumber: input.vatNumber,
     sirenOrRci: 'sirenOrRci' in input ? (input.sirenOrRci ?? null) : (input.siren ?? null),
+    // Only InvoiceMentionsCompanyInput carries these today — see
+    // InvoiceMentionsPartyIdentity's own doc comment for why the shape
+    // stays shared regardless.
+    phone: 'phone' in input ? (input.phone ?? null) : null,
+    email: 'email' in input ? (input.email ?? null) : null,
   };
 }
 

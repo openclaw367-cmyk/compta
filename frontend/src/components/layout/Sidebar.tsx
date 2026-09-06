@@ -1,5 +1,6 @@
 import { Link, NavLink } from 'react-router-dom';
 import { ASSISTANT_ITEM, HOME_ITEM, NAV_GROUPS, SETTINGS_ITEM, type NavItem } from '../../lib/navigation';
+import { BrandMark } from './BrandMark';
 
 function navLinkClassName({ isActive }: { isActive: boolean }): string {
   return [
@@ -32,10 +33,8 @@ export function Sidebar() {
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface">
       <Link to="/tableau-de-bord" className="flex h-16 items-center gap-2 px-6">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-[13px] font-semibold text-white shadow-card">
-          C
-        </div>
-        <span className="text-[15px] font-semibold tracking-tight text-ink">compta</span>
+        <BrandMark size={28} />
+        <span className="text-[15px] font-semibold tracking-tight text-ink">Citaledge</span>
       </Link>
 
       <nav className="flex flex-1 flex-col gap-3 overflow-y-auto px-3 py-2">

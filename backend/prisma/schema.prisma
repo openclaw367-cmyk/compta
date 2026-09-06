@@ -162,6 +162,18 @@ model Company {
   city        String?
   country     String  @default("France")
 
+  /// Shown in the invoice PDF's own header contact block (top-right,
+  /// alongside the seller identity — see factur-x-pdf.ts) when set.
+  /// Optional, like every other identity field here that isn't
+  /// mechanically required (SIREN/VAT are needed for FEC/CA3; phone/
+  /// email are not needed for anything but display) — "flag, don't
+  /// fake": the block is simply omitted when neither is configured,
+  /// never filled with a placeholder. Not yet threaded into the
+  /// Factur-X CII XML (invoice-to-cii.ts) — a stated, deliberate scope
+  /// boundary for this pass, see CLAUDE.md "Invoicing".
+  phone String?
+  email String?
+
   /// See RegimeTvaServices doc comment (CGI art. 269). Defaults to the
   /// legal default (ENCAISSEMENTS) so an existing company isn't silently
   /// switched to DEBITS by this migration.

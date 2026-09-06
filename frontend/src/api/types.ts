@@ -51,6 +51,9 @@ export interface Company {
   postalCode: string | null;
   city: string | null;
   country: string;
+  /** Shown in the invoice PDF's own header contact block, when set — see CompanyProfilePage. */
+  phone: string | null;
+  email: string | null;
   regimeTvaServices: RegimeTvaServices;
   bankName: string | null;
   iban: string | null;

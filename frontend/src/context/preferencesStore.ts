@@ -19,6 +19,9 @@ export interface PreferencesContextValue {
   /** A route path, e.g. "/tableau-de-bord" or "/ecritures" — where "/" redirects to. */
   defaultLandingRoute: string;
   setDefaultLandingRoute: (route: string) => void;
+  /** Hides the sidebar entirely so the current screen fills the width — see AppShell.tsx. */
+  sidebarCollapsed: boolean;
+  toggleSidebarCollapsed: () => void;
 }
 
 export const PreferencesContext = createContext<PreferencesContextValue | null>(null);

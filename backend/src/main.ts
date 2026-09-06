@@ -42,7 +42,7 @@ async function bootstrap(): Promise<void> {
   // app.module.ts "configure" for why that middleware is applied to an
   // explicit controller allowlist instead of a wildcard.
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('compta-fr-mc API')
+    .setTitle('Citaledge API')
     .setDescription(
       'French/Monaco double-entry accounting suite: PCG chart of accounts, ' +
         'FEC export (Article A47 A-1 du LPF), Excel journal import, ' +

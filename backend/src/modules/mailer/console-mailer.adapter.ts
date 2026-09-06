@@ -35,7 +35,7 @@ export class ConsoleMailerAdapter implements MailerPort {
       `\n----- Company invite email -----\n` +
         `To: ${to}\n` +
         `Subject: ${invitedByEmail} vous invite à rejoindre « ${companyName} »\n\n` +
-        `${invitedByEmail} vous invite à rejoindre « ${companyName} » sur compta. ` +
+        `${invitedByEmail} vous invite à rejoindre « ${companyName} » sur Citaledge. ` +
         `Cliquez sur ce lien pour accepter (valable 7 jours) :\n` +
         `${inviteUrl}\n` +
         `---------------------------------`,

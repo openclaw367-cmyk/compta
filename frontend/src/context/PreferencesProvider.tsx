@@ -11,6 +11,7 @@ const THEME_KEY = 'compta:theme';
 const DENSITY_KEY = 'compta:density';
 const LANDING_ROUTE_KEY = 'compta:defaultLandingRoute';
 const DEFAULT_LANDING_ROUTE = '/tableau-de-bord';
+const SIDEBAR_COLLAPSED_KEY = 'compta:sidebarCollapsed';
 
 function readTheme(): ThemePreference {
   const stored = localStorage.getItem(THEME_KEY);
@@ -21,12 +22,17 @@ function readDensity(): DensityPreference {
   return localStorage.getItem(DENSITY_KEY) === 'compact' ? 'compact' : 'comfortable';
 }
 
+function readSidebarCollapsed(): boolean {
+  return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+}
+
 export function PreferencesProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemePreference>(readTheme);
   const [density, setDensityState] = useState<DensityPreference>(readDensity);
   const [defaultLandingRoute, setDefaultLandingRouteState] = useState(
     () => localStorage.getItem(LANDING_ROUTE_KEY) ?? DEFAULT_LANDING_ROUTE,
   );
+  const [sidebarCollapsed, setSidebarCollapsedState] = useState<boolean>(readSidebarCollapsed);
 
   // "system" stamps nothing, so the CSS media query alone governs it —
   // matches index.html's own inline pre-paint script exactly, so there's
@@ -62,6 +68,14 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(LANDING_ROUTE_KEY, next);
   }
 
+  function toggleSidebarCollapsed() {
+    setSidebarCollapsedState((prev) => {
+      const next = !prev;
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
+      return next;
+    });
+  }
+
   const value: PreferencesContextValue = {
     theme,
     setTheme,
@@ -69,6 +83,8 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     setDensity,
     defaultLandingRoute,
     setDefaultLandingRoute,
+    sidebarCollapsed,
+    toggleSidebarCollapsed,
   };
 
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;

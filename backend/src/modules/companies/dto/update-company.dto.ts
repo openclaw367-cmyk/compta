@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Jurisdiction, RegimeTvaServices } from '@prisma/client';
 
@@ -58,6 +58,24 @@ export class UpdateCompanyDto {
   @IsOptional()
   @IsString()
   country?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Shown in the invoice PDF header contact block, when set. No format validation ' +
+      '(international formats vary, e.g. Monaco "+377 93 50 05 24").',
+    example: '+33 1 23 45 67 89',
+  })
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @ApiPropertyOptional({
+    description: 'Shown in the invoice PDF header contact block, when set.',
+    example: 'contact@exemple.fr',
+  })
+  @IsOptional()
+  @IsEmail()
+  email?: string;
 
   @ApiPropertyOptional({
     enum: RegimeTvaServices,

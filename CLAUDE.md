@@ -94,6 +94,15 @@ docs/        Compliance artifacts (e.g. Test Compta Demat reports)
 5. API docs are served at `/docs` (Swagger UI), deliberately not `/api`
    since that's the REST prefix. `/docs` loads without any tenant context —
    see the middleware note below for why that's safe.
+6. `cd frontend && npm install && npm run dev` — Vite dev server on
+   `:5173`. **On Windows, `scripts/desktop/install-desktop-shortcut.ps1`
+   sets up a one-click "Citaledge" Desktop shortcut** (own icon, the same
+   citadel mark as the in-app brand mark — see "Frontend" above) that
+   starts both `npm run start:dev` and `npm run dev` (skipping either
+   one already running) and opens `http://localhost:5173` once the
+   frontend responds — see `scripts/desktop/README.md`. Re-run the
+   install script after moving the repo; it re-derives its own paths
+   from wherever it's run from, nothing is hardcoded.
 
 ## Test fixtures — multi-year regression company
 
@@ -4261,6 +4270,199 @@ already tied to the actual posted écriture.
   frontend, listed here as deferred in the original pass, is now real
   — see immediately below.
 
+## Invoicing — PDF layout modeled on a real reference invoice
+
+`factur-x-pdf.ts`'s `renderInvoicePdf()` (2026-09-06) was restyled at
+the user's own request, given a real reference document —
+`specs/Facture ACS.pdf`, a Monaco translator's "note d'honoraires" —
+to model this app's own invoice PDFs on. This changes ONLY the
+human-readable PDF layer's layout; the CII XML / EN16931 data model
+(`invoice-to-cii.ts`) and every mandatory mention `InvoiceMentions`
+already computed are completely untouched — this pass repositions and
+restyles content, it never drops or adds a mention.
+
+- **What was adopted from the reference document**: sender identity
+  top-left; the recipient in its OWN right-aligned block a fixed
+  distance below the top (`BUYER_BLOCK_OFFSET`) — the classic French
+  letter/"fenêtre" (envelope-window) placement, replacing the previous
+  side-by-side "Émetteur | Client" two-column layout; a right-aligned
+  "\<Ville\>, / Le \<date\>." line using a spelled-out French month
+  name (`formatFrenchDate()`: "01 septembre 2026", not "2026-09-01");
+  a centered, bold, underlined document title; a right-aligned totals
+  block with a rule before the grand total and the grand total itself
+  double-underlined; a courteous centered closing line, "Valeur en
+  votre aimable règlement." (FACTURE/AVOIR only — a DEVIS isn't a
+  payment request); and a small centered footer combining the bank
+  details with the seller's own VAT number, mirroring the reference
+  document's own "Banque : ... / IBAN : ... BIC : ... - N°TVA
+  intracommunautaire : ..." line.
+- **What was deliberately NOT copied from the reference document**:
+  its own title, "NOTE D'HONORAIRES" — a note d'honoraires is a
+  legally distinct document type (a liberal-profession fee note), not
+  a generic commercial invoice, so renaming FACTURE/AVOIR/DEVIS to
+  match would misrepresent what this app's own invoices legally are.
+  The reference document's own single-line-item, no-table content
+  (just "Traduction n° ... / d'anglais / en français") also isn't
+  reproduced — this app's own invoices support multiple line items at
+  different VAT rates, a real capability the reference document's own
+  simpler business (a single translation fee) never needed, so the
+  existing line-items table stays, just restyled to match the
+  reference's typographic restraint (thin grey rule, generous line
+  height, no shaded header). Its top-right contact block (tel/fax/
+  email) was NOT reproduced in this original pass — `Company` had no
+  phone/email field at the time — but was added the same day once the
+  user asked for it; see the dedicated entry below for that follow-up.
+  The general principle held either way and still does: an absent
+  field is omitted, never invented, even to fill a layout slot the
+  reference document happens to have.
+- **A real formatting bug found live, not by inspection, while
+  verifying this**: VAT rate percentages (`line.vatRatePercent`,
+  `bucket.ratePercent`) are raw domain strings like `"20.00"` (decimal
+  POINT) — drawing them directly produced "20.00 %" on the page,
+  inconsistent with every money figure on the same document (already
+  correctly comma-formatted). Fixed by routing both through
+  `formatPercentForPdf()` (already shared with `pdf-report-renderer.ts`,
+  see below) — "20,00 %", matching the rest of the page. Caught by the
+  one-off `ts-node` smoke test's own literal-string assertions, not by
+  visual inspection of the rendered PDF alone.
+- **Two formatting helpers extracted for reuse, not duplicated**:
+  `formatMoneyForPdf()` and `formatPercentForPdf()` (French comma
+  formatting for pdf-lib's WinAnsi-encoded fonts) were previously
+  private to `pdf-report-renderer.ts` (the liasse/VAT/cash-flow/etc.
+  PDF exports — see "Reporting/export flexibility" above) — now
+  exported and imported here too, so this renderer's money/percent
+  formatting can never drift from every other PDF export's own
+  convention. `sanitizeForWinAnsi()` (the same WinAnsi-unsupported-
+  character backstop that section's own bug already found and fixed)
+  is reused verbatim here as well, via `drawRight()`/`drawCentered()`
+  wrapping every text draw and width measurement — the exact
+  "sanitize at draw time AND at measure time" discipline that
+  section's own doc comment already established as load-bearing (a
+  right-aligned/centered string's WIDTH must be measured against the
+  sanitized text, or the positioning itself would be wrong even before
+  drawing throws).
+- **Verified two ways.** New `factur-x-pdf.spec.ts` (8 tests, following
+  `pdf-report-renderer.spec.ts`'s own established discipline — pdf-lib
+  has no text-extraction API, so these verify STRUCTURE, a single page
+  produced without throwing, across FACTURE/AVOIR/DEVIS, multiple VAT
+  rates, no payment instructions, no seller city, a business buyer with
+  its own VAT number, and a WinAnsi-unsupported character reaching the
+  page) via `PDFDocument.load()` round-tripping — 862 backend tests
+  passing overall; `tsc`/`eslint` clean. Real CONTENT verification (do
+  the mandatory mentions actually appear, correctly formatted) used a
+  one-off `ts-node` smoke test extracting text via `pdf-parse`, same
+  "can't run pdf-parse under Jest" constraint already documented above
+  and in `factur-x-pdf.spec.ts`'s own doc comment — every mention
+  checked (seller/buyer identity, French-formatted date, both line
+  descriptions, per-rate VAT subtotals, the grand total, the closing
+  phrase, the bank details, all three L441-10 notices) was found
+  present and correctly formatted; this is what caught the VAT-percent
+  formatting bug above. **Live, against the FR demo company, through
+  the real running server**: created and finalized a real two-rate
+  SALE invoice (`invoiceNumber "14"`, 1 050,00 € HT / 205,00 € TVA /
+  1 255,00 € TTC across 20 % and 10 % lines), downloaded its real
+  Factur-X file (**HTTP 200** — proof the full XSD/Schematron
+  validation pipeline, both pre- and post-embed, passed with the new
+  layout, not just the smoke test's own unvalidated PDF), and rendered
+  it to an image for a direct visual comparison against
+  `specs/Facture ACS.pdf` — confirmed the seller/buyer placement, the
+  centered underlined title, the totals block, the closing line, and
+  the footer all match the intended layout on a real, compliance-
+  validated file. The live invoice also exercised the "no seller city
+  on file" honest-omission path for real (the FR demo company has no
+  structured address configured) — the "Fait à ..." line correctly
+  didn't appear, rather than guessing one. Test invoice's posted
+  écriture reversed and validated afterward (confirmed via the
+  liasse's own Actif=Passif check: 39 441,00 = 39 441,00, the FR demo
+  company's own documented baseline); the test `Invoice`/`InvoiceLine`
+  rows removed via a temporary script (no delete endpoint exists for a
+  FINALIZED invoice, by design).
+- **Not touched by this pass**: `invoice-to-cii.ts` (the CII XML the
+  human-readable PDF layer is embedded alongside), the devis endpoint's
+  own use of `renderInvoicePdf()` (same function, same restyle, already
+  covered by the DEVIS test case above), and `InvoiceDetailView.tsx`
+  (the in-app React review screen) — that screen follows this app's
+  own established UI design system like every other screen, and isn't
+  "the invoice" a client receives; restyling it to resemble a paper
+  invoice would clash with the rest of the app's own conventions for no
+  real benefit, so it was deliberately left alone.
+
+## Invoicing — company phone/email header block
+
+`Company.phone`/`Company.email` (2026-09-06, same day as the PDF
+restyle above, a direct follow-up once the user asked for the layout's
+top-right contact block to actually be fillable) closes the one gap
+the restyle pass itself had flagged and explicitly deferred.
+
+- **Both fields are optional strings, no phone-format validation**
+  (international formats vary too much to validate meaningfully — e.g.
+  Monaco's own `+377 93 50 05 24`), but `email` DOES get `@IsEmail()`
+  on `UpdateCompanyDto` — a real, worthwhile validation win a phone
+  number's own format diversity doesn't allow. Added to
+  `UpdateCompanyDto` only, matching `bankName`/`iban`/`bic`'s own
+  precedent exactly — NOT added to `CreateCompanyDto`/the signup flow,
+  which deliberately stays minimal (company name only, see "Multi-user
+  / roles & permissions" above); a company fills in phone/email later
+  via `CompanyProfilePage`'s own edit flow, same as bank details.
+- **`InvoiceMentionsPartyIdentity` (shared by both seller and buyer)
+  gained `phone`/`email`, not a seller-only field** — a deliberate
+  shape choice: `Account` (a tiers, the buyer's own identity source)
+  has no phone/email field either, so the buyer's will always resolve
+  to `null` today, but keeping the shape symmetric costs nothing and
+  means a future business-client contact capability would need zero
+  interface change. `buildParty()`'s existing conditional-extraction
+  pattern (`'sirenOrRci' in input ? ... : ...`, already there for the
+  company/client input-shape union) was extended the same way for
+  phone/email rather than introducing a new pattern.
+- **The header block itself is genuinely optional per-field, not
+  all-or-nothing** — `factur-x-pdf.ts` pushes a `Tél. : ...` line only
+  when `phone` is set and an `E-mail : ...` line only when `email` is
+  set, independently; the whole block simply doesn't exist when
+  neither is configured. Positioned top-right at the seller's own
+  starting row (a temporary save/restore of the shared mutable `y`
+  cursor, since the seller's own left-column block and this right-
+  column block are drawn independently over the same vertical span,
+  not sequentially) — exactly the reference template's own "Tél. /
+  Fax .../ E-mail ..." placement, now real instead of honestly omitted.
+- **Verified two ways.** New tests: `invoice-mentions.spec.ts` (seller
+  phone/email null by default, carried through when configured, buyer's
+  own stay null regardless) and `factur-x-pdf.spec.ts` (a seller with
+  both configured — the new default fixture, so every other existing
+  test in that file now also exercises the header block being present
+  — and a dedicated "no phone/email on file" case proving the block is
+  omitted, not blanked) — 865 backend tests passing overall;
+  `tsc`/`eslint`/`vite build` clean on both sides. **Live, against the
+  FR demo company, through the real running server**: set
+  `phone`/`email` via `PATCH /companies/current`, created and finalized
+  a real invoice (`invoiceNumber "15"`), downloaded its real Factur-X
+  file (**HTTP 200** — the new header block doesn't affect XSD/
+  Schematron validity, as expected since the CII XML is untouched),
+  and rendered the PDF's own header region to confirm "Tél. : +33 1 23
+  45 67 89" / "E-mail : contact@societe-demo.fr" render top-right
+  exactly as designed. Separately verified the real `CompanyProfilePage`
+  edit flow end to end in the browser (new "Contact" section, a
+  `type="tel"` and a `type="email"` input following the page's own
+  existing `Row`/`TextInput` conventions) — filled both fields, saved,
+  confirmed the persisted values via a follow-up read, confirmed the
+  view-mode display renders them correctly. All test state reverted
+  afterward: the test invoice's posted écriture reversed and validated,
+  the `Invoice`/`InvoiceLine` rows removed via a temporary script, and
+  `Company.phone`/`email` reset to `null` (the FR demo company had
+  neither configured before this pass) — confirmed via the liasse's own
+  Actif=Passif check that the ledger returned to its exact
+  39 441,00 = 39 441,00 baseline.
+- **Not touched**: `invoice-to-cii.ts` / the Factur-X CII XML — EN16931
+  does have an optional seller contact block
+  (`DefinedTradeContact`/`TelephoneUniversalCommunication`/
+  `EmailURIUniversalCommunication`), and threading `phone`/`email`
+  into it would be a natural, additive next step, but this pass scoped
+  itself to what was actually asked (the PDF header block a human
+  reads) — a stated, deliberate deferral, not an oversight. The exact
+  field/type names would need confirming against the installed
+  `@stafyniaksacha/facturx` package's own type definitions first, same
+  "never guess a library type shape" discipline as every other CII
+  field already in that file.
+
 ## Invoicing — frontend
 
 `frontend/src/pages/InvoicingPage.tsx` (route `/factures`, nav item
@@ -5447,6 +5649,120 @@ and built in the same session.
   confirming the standing "don't touch the calculation engine, only
   the display/UX" constraint held for the whole pass except the one
   explicitly-scoped, explicitly-flagged activity-feed backend addition.
+
+## Sidebar collapse, brand mark, a desktop launcher, and the Citaledge rename
+
+Four small, user-requested polish items (2026-09-06), display-only
+(plus one local dev-tooling addition) — no calculation-engine file
+touched.
+
+- **Sidebar collapse**: `PreferencesProvider`/`preferencesStore.ts`
+  gained `sidebarCollapsed`/`toggleSidebarCollapsed`, following the
+  exact same localStorage-persisted pattern as `theme`/`density`
+  (`compta:sidebarCollapsed`, read once at boot via `useState`'s lazy
+  initializer). `AppShell.tsx` conditionally renders `<Sidebar />` based
+  on it — collapsed means the sidebar isn't rendered at all (not a
+  shrunk icon rail), so the current screen genuinely fills the width, as
+  asked. The toggle itself lives as the leading element in `TopBar.tsx`
+  (a new `IconSidebar` glyph, same icon both directions — only the
+  tooltip/`aria-label` text changes between "Masquer le menu"/"Afficher
+  le menu") rather than inside the Sidebar itself, since the Sidebar is
+  literally absent when collapsed and couldn't host its own reopen
+  control. Verified live in the browser both directions, plus a full
+  page reload confirming the collapsed state survives it.
+- **Brand mark**: replaced the bare "C" badge (used identically in both
+  `Sidebar.tsx` and `AuthLayout.tsx`, previously copy-pasted) with a
+  shared `BrandMark` component (`components/layout/BrandMark.tsx`)
+  wrapping a new filled glyph, `IconCitadel` (`icons.tsx`) — a small
+  crenellated keep (three merlons, a tapered fortress body, a shadowed
+  gate), standing in for the ledger's own guarded integrity
+  (immutability once validated, gapless sequential numbering, an
+  audited trail for anything that bends those rules — see "Ledger
+  integrity" above) rather than an arbitrary initial. Filled, not
+  stroked, unlike every nav glyph — a solid silhouette reads better at
+  the small badge size (28px in the sidebar, 32px on the auth screens)
+  this renders at. The same shape is also baked into
+  `frontend/public/favicon.svg` (the app had no favicon at all before
+  this) as a static SVG with a `prefers-color-scheme` media query
+  switching the badge's own background between the light/dark accent
+  hex values (`#33488a`/`#8098db`, copied from `theme.css` — a favicon
+  can't reach a Tailwind token, so these two are duplicated on purpose
+  and must be kept in sync if that palette ever changes), and as a
+  multi-resolution `.ico` for the desktop shortcut below
+  (`scripts/desktop/citadel.ico`, committed to the repo — generated by a
+  one-off Pillow script that itself was NOT checked in, same "temporary
+  verification/generation script, deleted after use" discipline as
+  elsewhere in this project). Verified live in both themes, on both the sidebar and the
+  login page.
+- **Desktop launcher** (`scripts/desktop/`, see its own `README.md`):
+  a "Citaledge" Desktop shortcut that starts both dev servers (skipping
+  either one already running, detected via `Get-NetTCPConnection`) and
+  opens `http://localhost:5173` once the frontend actually responds —
+  replacing "open two terminals and type `npm run start:dev`/
+  `npm run dev` by hand" for local development. `install-desktop-
+  shortcut.ps1` creates the `.lnk` (re-runnable after moving the repo,
+  since it derives every path from its own location, nothing
+  hardcoded); `launch-citaledge.ps1` is the actual orchestration script
+  the shortcut points at, invoked via `powershell.exe -WindowStyle Hidden`
+  so double-clicking the icon doesn't flash a console window (the two
+  dev servers still each get their own minimized, titled window, so
+  they stay reachable/killable from the taskbar).
+  - **Both `.ps1` files are plain ASCII on purpose, comments included —
+    a real bug, not a style choice.** Windows PowerShell 5.1
+    (`powershell.exe`, the one this project's shortcut must target
+    since `pwsh.exe`/PowerShell 7 isn't guaranteed installed) reads a
+    `.ps1` with no UTF-8 BOM using the system codepage. A French
+    accented character (`é`, `ê`, ...) in a comment or string a few
+    lines before an otherwise-unrelated string literal silently
+    corrupted that later literal and threw a confusing "string is
+    missing the terminator" parse error — found live, by actually
+    running the script, not by inspection. Fixed by rewriting both
+    files in plain ASCII; user-facing French text stays in the React
+    app, which has no such problem.
+  - **A second real bug, also found live**: opening the browser via
+    PowerShell's own `Start-Process $frontendUrl` hung indefinitely
+    (confirmed via `Get-Process`'s own CPU-time column never
+    advancing) specifically when the launcher script itself was
+    invoked under `-WindowStyle Hidden` — i.e. exactly the real
+    double-click-the-shortcut path, not the "run the .ps1 directly"
+    path that was tested first and looked fine. Fixed by opening the
+    URL via the classic `cmd.exe /c start "" <url>` idiom instead,
+    which doesn't share whatever COM/ShellExecute quirk
+    `Start-Process` has under a hidden host window. Re-verified live,
+    twice: once running `launch-citaledge.ps1` directly, once by
+    literally invoking the real `Citaledge.lnk` file end to end (cold
+    start — both dev servers stopped first, confirmed both came back
+    up and the browser opened, confirmed no duplicate server processes
+    spawned when invoked again while already running).
+  - **Not part of the shipped app** — `scripts/desktop/` is a local
+    dev-convenience addition (like the existing `seed-sample.ts`/
+    `seed-monaco.ts` scripts), not a feature end users of a deployed
+    instance would ever see; it has no bearing on anything documented
+    elsewhere in this file.
+- **Renamed to "Citaledge"** — the user's own explicit request,
+  scoped (via `AskUserQuestion`, confirmed to the recommended option)
+  to **branding only**: everywhere a user actually sees the product's
+  name changed (the sidebar/login logo text — `Sidebar.tsx`/
+  `AuthLayout.tsx` — the browser tab title in `index.html`, the
+  Swagger `/docs` title in `main.ts`, the company-invite email text in
+  `console-mailer.adapter.ts`, the "Écran de démarrage" preference
+  description in `SettingsPage.tsx`, and the desktop shortcut/scripts
+  above). **Deliberately NOT renamed**: the repo folder
+  (`compta-fr-mc`) itself, both `package.json` `"name"` fields
+  (`compta-fr-mc-backend`/`-frontend`), and every internal
+  localStorage key prefix (`compta:theme`, `compta:density`,
+  `compta:sidebarCollapsed`, `compta:companyId`,
+  `compta:onboarding-dismissed:*`) — renaming those would have either
+  been genuinely disruptive (moving the actual folder breaks every
+  currently-open terminal/editor session and the desktop shortcut's own
+  paths) or silently reset every existing user's saved local
+  preferences for zero user-visible benefit. This file's own title and
+  the "Repo layout"/"Local dev setup" sections above still correctly
+  describe the codebase as `compta-fr-mc` — that's the project's
+  technical/repo identity, a separate thing from the product's own
+  display name, and the two are allowed to diverge (a common,
+  unremarkable pattern — the codebase folder doesn't have to be
+  renamed every time the product it builds is renamed).
 
 ## Known scope boundaries
 

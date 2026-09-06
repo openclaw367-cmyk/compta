@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { BrandMark } from '../layout/BrandMark';
 
 /**
  * The shared shell for every unauthenticated screen (login, signup,
@@ -25,10 +26,8 @@ export function AuthLayout({
     <div className="flex min-h-screen items-center justify-center bg-bg px-4 py-12">
       <div className="w-full max-w-[400px]">
         <Link to="/" className="mb-8 flex items-center justify-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-accent text-[14px] font-semibold text-white shadow-card">
-            C
-          </div>
-          <span className="text-[17px] font-semibold tracking-tight text-ink">compta</span>
+          <BrandMark size={32} />
+          <span className="text-[17px] font-semibold tracking-tight text-ink">Citaledge</span>
         </Link>
 
         <div className="rounded-lg border border-border bg-surface p-7 shadow-card">
