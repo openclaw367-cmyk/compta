@@ -7,6 +7,7 @@ import {
 import { Account, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
+import { resolvePcgClass } from '../../common/pcg/resolve-pcg-class';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { CreateTiersDto } from './dto/create-tiers.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
@@ -34,7 +35,7 @@ export class AccountsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(company: CompanyContext, dto: CreateAccountDto): Promise<Account> {
-    const pcgClass = this.resolvePcgClass(dto.number);
+    const pcgClass = resolvePcgClass(dto.number);
 
     try {
       return await this.prisma.account.create({
@@ -175,16 +176,5 @@ export class AccountsService {
       .filter((n) => Number.isInteger(n));
     const next = usedSuffixes.length === 0 ? 1 : Math.max(...usedSuffixes) + 1;
     return root + String(next).padStart(suffixLength, '0');
-  }
-
-  /** Leading digit of a PCG account number determines its class (1-8). */
-  private resolvePcgClass(number: string): number {
-    const leadingDigit = Number(number.trim().charAt(0));
-    if (!Number.isInteger(leadingDigit) || leadingDigit < 1 || leadingDigit > 8) {
-      throw new BadRequestException(
-        `Account number "${number}" does not map to a known PCG class (1-8).`,
-      );
-    }
-    return leadingDigit;
   }
 }

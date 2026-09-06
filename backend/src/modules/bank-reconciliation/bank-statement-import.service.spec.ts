@@ -3,6 +3,7 @@ import { join } from 'path';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { BankStatementImportService } from './bank-statement-import.service';
 import { Camt053ParserService } from './camt053-parser.service';
+import { CsvStatementParserService } from './csv-statement-parser.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 
@@ -31,6 +32,7 @@ describe('BankStatementImportService', () => {
     service = new BankStatementImportService(
       prisma as unknown as PrismaService,
       new Camt053ParserService(),
+      new CsvStatementParserService(),
     );
   });
 
@@ -77,6 +79,48 @@ describe('BankStatementImportService', () => {
       await expect(service.confirmImport(company, 'bank-1', 'releve.xml', xml)).rejects.toThrow(
         ConflictException,
       );
+      expect(bankStatementLineCreateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('CSV import (previewCsv/confirmImportCsv)', () => {
+    const csv = 'Date;Libelle;Montant;Reference\n01/03/2026;Virement;100,00;REF-CSV-1\n';
+    const mapping = {
+      dateColumn: 'Date',
+      labelColumn: 'Libelle',
+      amountColumn: 'Montant',
+      referenceColumn: 'Reference',
+      dateFormat: 'DMY' as const,
+      decimalSeparator: ',' as const,
+    };
+
+    it('previewCsv() parses without persisting, and reuses the same duplicate detection', async () => {
+      prisma.bankAccount.findFirst.mockResolvedValueOnce({ id: 'bank-1', compteId: 'acc-512' });
+      prisma.bankStatementLine.findMany.mockResolvedValueOnce([{ bankReference: 'REF-CSV-1' }]);
+      const result = await service.previewCsv(company, 'bank-1', csv, mapping);
+      expect(result.openingBalance).toBeNull();
+      expect(result.lines[0].isDuplicate).toBe(true);
+      expect(prisma.bankStatementImport.create).not.toHaveBeenCalled();
+    });
+
+    it('confirmImportCsv() persists with null balances', async () => {
+      prisma.bankAccount.findFirst.mockResolvedValueOnce({ id: 'bank-1', compteId: 'acc-512' });
+      const bankStatementLineCreateMany = jest.fn();
+      (prisma as any).bankStatementLine.createMany = bankStatementLineCreateMany;
+      const result = await service.confirmImportCsv(company, 'bank-1', 'releve.csv', csv, mapping);
+      expect(result.fileName).toBe('releve.csv');
+      expect((result as unknown as { openingBalance: null }).openingBalance).toBeNull();
+      expect(bankStatementLineCreateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('confirmImportCsv() refuses (all-or-nothing) on a duplicate reference', async () => {
+      prisma.bankAccount.findFirst.mockResolvedValueOnce({ id: 'bank-1', compteId: 'acc-512' });
+      prisma.bankStatementLine.findMany.mockResolvedValueOnce([{ bankReference: 'REF-CSV-1' }]);
+      const bankStatementLineCreateMany = jest.fn();
+      (prisma as any).bankStatementLine.createMany = bankStatementLineCreateMany;
+      await expect(
+        service.confirmImportCsv(company, 'bank-1', 'releve.csv', csv, mapping),
+      ).rejects.toThrow(ConflictException);
       expect(bankStatementLineCreateMany).not.toHaveBeenCalled();
     });
   });

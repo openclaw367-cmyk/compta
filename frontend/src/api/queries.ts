@@ -20,6 +20,8 @@ import type {
   CloudCredentialSummary,
   CloudProvider,
   Company,
+  CsvColumnMapping,
+  CsvColumnsPreview,
   DashboardSummary,
   DepreciationEntry,
   DocumentAccountSuggestion,
@@ -29,6 +31,7 @@ import type {
   EcritureWriteResult,
   ExtractedInvoiceFacts,
   FinancialAnalysisResult,
+  FecImportPreviewResponse,
   FiscalYear,
   FixedAsset,
   ImportBatch,
@@ -964,6 +967,37 @@ export function useConfirmImport() {
   });
 }
 
+function fecImportFormData(file: File): FormData {
+  const formData = new FormData();
+  formData.append('file', file);
+  return formData;
+}
+
+/**
+ * FEC file import (.txt/.csv/.xlsx) — see CLAUDE.md "FEC import".
+ * Unlike Excel import, confirm() can create accounts/journals/a fiscal
+ * year in addition to écritures, so its own invalidation is wider.
+ */
+export function usePreviewFecImport() {
+  return useMutation({
+    mutationFn: (file: File) =>
+      api.postForm<FecImportPreviewResponse>('/fec-import/preview', fecImportFormData(file)),
+  });
+}
+
+export function useConfirmFecImport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => api.postForm<ImportBatch>('/fec-import/confirm', fecImportFormData(file)),
+    onSuccess: () => {
+      invalidateEcrituresAndLedger(queryClient);
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      void queryClient.invalidateQueries({ queryKey: ['journals'] });
+      void queryClient.invalidateQueries({ queryKey: ['fiscal-years'] });
+    },
+  });
+}
+
 /** Fails loudly (see backend) if any écriture in the fiscal year is still a draft, or the company has no SIREN. */
 export function useDownloadFec() {
   return useMutation({
@@ -1286,6 +1320,74 @@ export function useConfirmStatementImport() {
       api.postForm<BankStatementImport>(
         '/bank-reconciliation/statements',
         statementFormData(bankAccountId, file),
+      ),
+    onSuccess: (_data, { bankAccountId }) => invalidateReconciliation(queryClient, bankAccountId),
+  });
+}
+
+function csvFormData(bankAccountId: string, file: File, mapping: CsvColumnMapping): FormData {
+  const formData = new FormData();
+  formData.append('bankAccountId', bankAccountId);
+  formData.append('file', file);
+  formData.append('dateColumn', mapping.dateColumn);
+  formData.append('labelColumn', mapping.labelColumn);
+  if (mapping.amountColumn) formData.append('amountColumn', mapping.amountColumn);
+  if (mapping.debitColumn) formData.append('debitColumn', mapping.debitColumn);
+  if (mapping.creditColumn) formData.append('creditColumn', mapping.creditColumn);
+  if (mapping.referenceColumn) formData.append('referenceColumn', mapping.referenceColumn);
+  formData.append('dateFormat', mapping.dateFormat);
+  formData.append('decimalSeparator', mapping.decimalSeparator);
+  if (mapping.delimiter) formData.append('delimiter', mapping.delimiter);
+  formData.append('invertSign', mapping.invertSign ? 'true' : 'false');
+  return formData;
+}
+
+/** Pure read — sniffs the delimiter/header row, no company context needed. */
+export function useDetectCsvColumns() {
+  return useMutation({
+    mutationFn: (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return api.postForm<CsvColumnsPreview>('/bank-reconciliation/statements/csv/columns', formData);
+    },
+  });
+}
+
+/** Pure read — writes nothing server-side. */
+export function usePreviewCsvStatement() {
+  return useMutation({
+    mutationFn: ({
+      bankAccountId,
+      file,
+      mapping,
+    }: {
+      bankAccountId: string;
+      file: File;
+      mapping: CsvColumnMapping;
+    }) =>
+      api.postForm<StatementPreviewResponse>(
+        '/bank-reconciliation/statements/csv/preview',
+        csvFormData(bankAccountId, file, mapping),
+      ),
+  });
+}
+
+/** The real commit — re-submits the same file/mapping previewed a moment earlier. */
+export function useConfirmCsvStatementImport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      bankAccountId,
+      file,
+      mapping,
+    }: {
+      bankAccountId: string;
+      file: File;
+      mapping: CsvColumnMapping;
+    }) =>
+      api.postForm<BankStatementImport>(
+        '/bank-reconciliation/statements/csv',
+        csvFormData(bankAccountId, file, mapping),
       ),
     onSuccess: (_data, { bankAccountId }) => invalidateReconciliation(queryClient, bankAccountId),
   });

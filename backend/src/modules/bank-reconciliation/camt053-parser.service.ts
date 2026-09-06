@@ -15,8 +15,17 @@ export interface ParsedStatement {
   iban: string | null;
   periodStart: string;
   periodEnd: string;
-  openingBalance: string;
-  closingBalance: string;
+  /**
+   * Null for a source format with no balance oracle at all — the CSV
+   * bank-statement importer (see CsvStatementParserService), whose
+   * files commonly carry no opening/closing balance columns, unlike
+   * CAMT.053's own OPBD/CLBD. Always non-null for CAMT.053 or a
+   * Bridge-aggregator sync, both of which DO reconcile against a real
+   * balance (assertBalancesReconcile()). See CLAUDE.md "Bank
+   * reconciliation".
+   */
+  openingBalance: string | null;
+  closingBalance: string | null;
   lines: ParsedStatementLine[];
 }
 

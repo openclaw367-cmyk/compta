@@ -3,6 +3,8 @@ import { BankStatementImport } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { Camt053ParserService, ParsedStatement } from './camt053-parser.service';
+import { CsvColumnMapping, CsvStatementParserService } from './csv-statement-parser.service';
+import { CsvColumnsPreviewDto } from './dto/csv-columns-preview.dto';
 import { StatementPreviewResponseDto } from './dto/statement-preview.dto';
 
 /**
@@ -21,6 +23,7 @@ export class BankStatementImportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly parser: Camt053ParserService,
+    private readonly csvParser: CsvStatementParserService,
   ) {}
 
   async preview(
@@ -53,6 +56,48 @@ export class BankStatementImportService {
   ): Promise<BankStatementImport> {
     const bankAccount = await this.requireBankAccount(company, bankAccountId);
     const parsed = this.parser.parse(xml);
+    const existingReferences = await this.existingReferences(company, bankAccount.id);
+    this.assertNoDuplicates(parsed, existingReferences);
+    return this.persistParsedStatement(company, bankAccount.id, fileName, parsed);
+  }
+
+  /** Header sniff for the CSV mapping UI — no company/bank-account context needed. */
+  detectCsvColumns(csv: string): CsvColumnsPreviewDto {
+    return this.csvParser.detectColumns(csv);
+  }
+
+  async previewCsv(
+    company: CompanyContext,
+    bankAccountId: string,
+    csv: string,
+    mapping: CsvColumnMapping,
+  ): Promise<StatementPreviewResponseDto> {
+    const bankAccount = await this.requireBankAccount(company, bankAccountId);
+    const parsed = this.csvParser.parse(csv, mapping);
+    const existingReferences = await this.existingReferences(company, bankAccount.id);
+
+    return {
+      iban: parsed.iban,
+      periodStart: parsed.periodStart,
+      periodEnd: parsed.periodEnd,
+      openingBalance: parsed.openingBalance,
+      closingBalance: parsed.closingBalance,
+      lines: parsed.lines.map((line) => ({
+        ...line,
+        isDuplicate: line.bankReference !== null && existingReferences.has(line.bankReference),
+      })),
+    };
+  }
+
+  async confirmImportCsv(
+    company: CompanyContext,
+    bankAccountId: string,
+    fileName: string,
+    csv: string,
+    mapping: CsvColumnMapping,
+  ): Promise<BankStatementImport> {
+    const bankAccount = await this.requireBankAccount(company, bankAccountId);
+    const parsed = this.csvParser.parse(csv, mapping);
     const existingReferences = await this.existingReferences(company, bankAccount.id);
     this.assertNoDuplicates(parsed, existingReferences);
     return this.persistParsedStatement(company, bankAccount.id, fileName, parsed);

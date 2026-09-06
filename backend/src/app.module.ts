@@ -26,6 +26,8 @@ import { FecModule } from './modules/fec/fec.module';
 import { FecController } from './modules/fec/fec.controller';
 import { ImportExcelModule } from './modules/import-excel/import-excel.module';
 import { ImportExcelController } from './modules/import-excel/import-excel.controller';
+import { FecImportModule } from './modules/fec-import/fec-import.module';
+import { FecImportController } from './modules/fec-import/fec-import.controller';
 import { DepreciationModule } from './modules/depreciation/depreciation.module';
 import { DepreciationController } from './modules/depreciation/depreciation.controller';
 import { VatModule } from './modules/vat/vat.module';
@@ -83,6 +85,7 @@ const companyScopedControllers = [
   EntriesController,
   FecController,
   ImportExcelController,
+  FecImportController,
   DepreciationController,
   VatController,
   LiasseController,
@@ -122,6 +125,7 @@ const companyScopedControllers = [
     EntriesModule,
     FecModule,
     ImportExcelModule,
+    FecImportModule,
     DepreciationModule,
     VatModule,
     LiasseModule,

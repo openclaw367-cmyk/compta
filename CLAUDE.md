@@ -3517,10 +3517,302 @@ written.
   call before the local row was removed. All test `BankAccount`s and
   related rows deleted afterward, confirmed via a follow-up `GET
   /bank-accounts` returning `[]` on both companies used.
-- **Not built this pass**: OFX/QIF/CSV, and — the explicit gate above —
+- **Not built this pass**: OFX/QIF, and — the explicit gate above —
   verification against a real Bridge sandbox. `specs/roadmap.md`
   updated to mark this shipped-with-caveats, matching Layer 1a's own
-  "shipped, pre-ship blocker still open" framing.
+  "shipped, pre-ship blocker still open" framing. **CSV import is now
+  built too, see the section immediately below** — OFX/QIF remain the
+  only genuinely unimplemented statement formats.
+
+## Bank reconciliation — CSV statement import
+
+`src/modules/bank-reconciliation/csv-statement-parser.service.ts`
+(2026-09-06) adds a second supported statement format alongside
+CAMT.053 — a flexible-column-mapping CSV import, per the user's own
+explicit request ("on top of the camt.053 bank import, i need to have
+the ability to also import csv files"). Two design forks were resolved
+via `AskUserQuestion` before any code was written, both to the
+recommended option: **flexible column mapping** (not a fixed
+bank-specific template) and **no balance check for CSV**.
+
+- **Why flexible mapping, not a fixed layout**: unlike CAMT.053 (one
+  ISO 20022 standard), a bank's own CSV export has no standardized
+  column layout at all — names, order, a single signed-amount column
+  vs. separate debit/credit columns, and date format all vary bank to
+  bank. `GET .../statements/csv/columns` (`CsvStatementParserService.
+  detectColumns()`) sniffs the delimiter (tries `;`, `,`, tab, `|` and
+  keeps whichever split produces the widest header row) and returns the
+  header names plus up to 5 sample rows — a human then picks, in the
+  UI, which column is which (`CsvColumnMappingDto`: `dateColumn`,
+  `labelColumn`, either `amountColumn` or a `debitColumn`+`creditColumn`
+  pair, an optional `referenceColumn`, `dateFormat`
+  (`DMY`/`MDY`/`YMD`), `decimalSeparator` (`,`/`.`), an optional
+  `invertSign` for a bank that exports outflows as positive) before any
+  data row is ever parsed against it — never guessed from column
+  position or name pattern-matching.
+- **Deliberately NO opening/closing balance, and therefore no
+  `assertBalancesReconcile()`-style oracle** — the confirmed,
+  recommended answer to the second `AskUserQuestion`, not an oversight.
+  A bank CSV export commonly has no balance columns at all, unlike
+  CAMT.053's own OPBD/CLBD. `ParsedStatement.openingBalance`/
+  `closingBalance` (in `camt053-parser.service.ts`, the shared type both
+  parsers produce) widened from `string` to `string | null` to make
+  this honest rather than faking a `"0.00"`; `BankStatementImport.
+  openingBalance`/`closingBalance` became nullable columns at the
+  schema level (migration
+  `20260906052706_make_bank_statement_balances_nullable`) to match.
+  `StatementPreviewSummary` (frontend) simply omits the solde
+  initial/final rows when they're null — the same component the
+  CAMT.053 importer's own preview already used, now shared verbatim
+  between both formats.
+- **Reuses `persistParsedStatement()` verbatim, zero duplicated
+  persistence logic** — the exact seam Layer 1b (Bridge sync) already
+  proved reusable; a CSV import just produces the same `ParsedStatement`
+  shape (`iban: null`, both balances `null`) and lands in the identical
+  `BankStatementImport`/`BankStatementLine` rows. Dedup
+  (`assertNoDuplicates()`) is free either way, keyed off whichever
+  source populates `bankReference` (here, the caller's own
+  `referenceColumn`, if mapped).
+- **A shared, hand-rolled delimited-text parser** —
+  `src/common/text/delimited-text-parser.ts`'s `parseDelimitedText()`
+  (RFC4180-ish: configurable delimiter, quoted fields that may contain
+  the delimiter or a literal newline, doubled-quote escaping) is new
+  shared infrastructure, not CSV-specific — built once so the FEC file
+  importer (see "FEC file import" below, built the same day) could
+  reuse it for its own `.txt`/`.csv` parsing rather than each
+  hand-rolling a parser. Deliberately NOT `exceljs`'s own CSV reader
+  (stream-oriented, awkward for an in-memory string already held as a
+  `Buffer`) and deliberately NOT a new npm dependency — ~60 lines was
+  judged small enough to own outright.
+- **Frontend**: `BankReconciliationPage.tsx`'s former single
+  `StatementImportSection` is now a format-toggle wrapper (CAMT.053 (XML)
+  / CSV) over two sibling components — `Camt053ImportSection` (the
+  pre-existing flow, unchanged) and the new `CsvImportSection`, which
+  drives the two-step flow (`ColumnSelect` dropdowns populated from
+  `detectColumns()`'s own headers, a signed-column-vs-debit/crédit-pair
+  toggle, then Aperçu/Confirmer using the same preview-then-confirm
+  buttons and the shared `StatementPreviewSummary`).
+- **Verified two ways.** Unit: `delimited-text-parser.spec.ts` (9 tests
+  — quoted fields, embedded delimiter/newline, doubled-quote escaping,
+  CRLF, no-trailing-newline), `csv-statement-parser.service.spec.ts` (11
+  tests — delimiter sniffing, both amount-column shapes, sign inversion,
+  missing-column/bad-date/bad-amount refusals, blank-row skipping, the
+  honest placeholder label), plus 5 new tests in
+  `bank-statement-import.service.spec.ts`'s own `describe('CSV import
+  ...')` block (preview reuses duplicate detection, confirm persists
+  with null balances, confirm refuses all-or-nothing on a duplicate) —
+  854 backend tests passing overall (shared final count with the FEC
+  import below, built the same pass); `tsc`/`eslint` clean both sides,
+  `vite build` clean. **Live, against the FR demo company (SIREN
+  `123456789`)**: created a real test `BankAccount` on `512000`;
+  `POST .../statements/csv/columns` on a real 2-line semicolon-delimited
+  CSV correctly returned `{delimiter: ";", headers: [...], sampleRows:
+  [...]}`; `POST .../statements/csv/preview` with an explicit mapping
+  (single signed `Montant` column, `DMY`, comma decimal) correctly
+  produced `openingBalance: null`/`closingBalance: null` and two
+  correctly-signed lines (`100.00`, `-120.50`); `POST
+  .../statements/csv` persisted both lines for real, confirmed via `GET
+  .../statement-lines`; re-submitting the identical file correctly
+  409'd naming both already-imported references, with nothing
+  double-persisted. Test `BankAccount`/`BankStatementImport`/
+  `BankStatementLine` rows removed afterward via a temporary script (no
+  delete endpoint exists for `BankAccount`, same standing limitation as
+  `Journal`/`Account`/`VatRate`/`FiscalYear`); confirmed via a follow-up
+  `GET /bank-accounts` returning `[]` that the company was restored to
+  its exact original state.
+- **Not built this pass**: OFX/QIF import formats (unchanged from
+  Layer 1a's own list), and no memory of a previously-used column
+  mapping (re-selected by hand on every import) — a natural, low-cost
+  future polish item if repeat imports from the same bank turn out to
+  be common, not attempted speculatively here.
+
+## FEC file import
+
+`src/modules/fec-import/` (2026-09-06) imports a company's own chart of
+accounts, journals, and écritures from an external FEC (Fichier des
+Écritures Comptables) file — `.txt` (pipe-delimited, Article A47 A-1 du
+LPF's own compliant convention), `.csv`, or `.xlsx` — per the user's own
+explicit request, built the same day as the CSV bank-statement import
+above and sharing its new `parseDelimitedText()` primitive. Two design
+forks were resolved via `AskUserQuestion` before any code was written,
+both to the recommended option: **accounts + journals + draft
+écritures** (the full scope, not accounts-only) and **auto-create the
+fiscal year** when none already covers the file's own date range.
+
+- **This is the mirror image of `import-excel.service.ts`, not a
+  variant of it — stated explicitly since the two modules look
+  superficially similar.** Excel import assumes the company is ALREADY
+  set up and REJECTS an unknown `CompteNum`/`JournalCode` (it's for
+  adding entries to an existing ledger); FEC import's whole point is
+  bootstrapping a company's books from an external export, so a missing
+  account or journal is CREATED, never rejected. The two modules are
+  intentionally NOT unified behind one shared "resolve-or-create"
+  abstraction — the "reject vs. create" branch is a load-bearing
+  behavioral difference between them, not an implementation detail to
+  factor out.
+- **Every posted écriture is a DRAFT, unconditionally** — `validatedAt`
+  and `ecritureNum` are never set, regardless of what the source file's
+  own `ValidDate` column says. This is the user's own explicit
+  requirement ("post all the entries present in the file as drafts and
+  then have the user confirm") and also the only safe default: this
+  app's own sequential-numbering invariant
+  (`Company.nextEcritureNum`) must never be seeded from an external
+  file's numbering, so nothing here ever calls `EntriesService.validate()`.
+- **`EcritureNum` groups by `(JournalCode, EcritureNum)` together, never
+  `EcritureNum` alone** — Article A47 A-1 du LPF §100 permits a
+  per-journal numbering scheme, under which the same `EcritureNum` can
+  legitimately repeat across different journals. `groupAndValidate()`'s
+  key is `` `${journalCode} ${sourceEcritureNum}` ``. The file's own
+  `EcritureNum` is a within-file grouping key only, analogous to Excel
+  import's own caller-invented `EcritureRef` column — never confused
+  with this app's own `Ecriture.ecritureNum` (assigned only at
+  validation time, per CLAUDE.md "Ledger integrity").
+- **Format detection + parsing is genuinely shared with the CSV
+  bank-statement importer** — `fec-file-parser.ts`'s `parseFecFile()`
+  routes `.xlsx` through `exceljs` (already a dependency) and
+  everything else through the same `parseDelimitedText()` primitive,
+  auto-detecting the delimiter by trying `|`/`;`/tab/`,` and keeping
+  whichever split matches the most real FEC column NAMES (case-
+  insensitive, order-independent) against `FEC_COLUMNS` — the exact
+  canonical list `fec-export.service.ts` already writes. A column order
+  differing from the export's own canonical order is fine; only the
+  column NAMES need to match.
+- **Auxiliary (CompAuxNum) accounts always inherit their PARENT
+  collectif's pcgClass, never their own leading digit** — a real,
+  load-bearing distinction found while designing this, not an
+  afterthought. `CompAuxNum` is frequently an arbitrary alphanumeric
+  identifier (e.g. `"CLI0001"`), not a PCG-shaped number at all, so
+  `resolvePcgClass()` is never called on it — only on its parent
+  `CompteNum`, matching `AccountsService.createTiers()`'s own
+  `pcgClass: parent.pcgClass` convention exactly. A genuine identity
+  conflict (the same number used as a plain `CompteNum` somewhere in
+  the file AND as a `CompAuxNum` under a different/no parent elsewhere,
+  or the same `CompAuxNum` appearing under two different parent
+  collectifs) is refused as a file-level error, since `Account.number`
+  is unique per company and there's no honest way to resolve which one
+  wins.
+- **`resolvePcgClass()` extracted out of `AccountsService`** (new
+  `src/common/pcg/resolve-pcg-class.ts`) so a FEC-imported account's
+  leading-digit validation is the exact same check manual account
+  creation already enforces, not a second reimplementation —
+  `AccountsService.create()` now delegates to it, zero behavior change,
+  verified by its own pre-existing test suite passing unmodified.
+- **`inferJournalType()` is a best-effort guess from common French
+  accounting-software code/label conventions** (`AC`/`ACH` → achats,
+  `VE`/`VT` → ventes, `BQ`/`BAN`/`BNQ` → banque, `CA`/`CAI` → caisse,
+  `AN` → à-nouveau, `OD` → opérations diverses), defaulting to
+  `OPERATIONS_DIVERSES` with `typeConfident: false` for anything
+  unrecognized — surfaced in the preview (`journalsToCreate[].
+  typeConfident`, rendered with a "(à vérifier)" flag in the frontend)
+  so a human reviews it before confirming, since `JournalType` isn't a
+  FEC concept at all (FEC has no journal-type column) and other
+  features in this app (e.g. `disposeFixedAsset()`'s own
+  `OPERATIONS_DIVERSES`-type journal lookup) depend on it being right.
+  Never blocks the import either way — a wrong guess is a
+  post-import correction, not a reason to refuse the whole file.
+- **Fiscal-year resolution — the exact decision tree, since this is
+  the one place a bad guess would be hard to undo**: `resolveFiscalYearPlan()`
+  computes `[min, max]` across every valid group's own `EcritureDate`,
+  then (1) if an existing fiscal year FULLY CONTAINS that range, reuses
+  it (`action: 'REUSE_EXISTING'`, zero new fiscal year); (2) else if any
+  existing fiscal year PARTIALLY overlaps it (intersects without fully
+  containing it), refuses the ENTIRE import naming both ranges — never
+  guesses which one the file "really" belongs to; (3) else (no overlap
+  at all) plans a brand-new fiscal year spanning EXACTLY `[min, max]`
+  (`action: 'CREATE_NEW'`), labeled `"Import FEC <year>"` (or
+  `"<startYear>-<endYear>"` when the range spans more than one calendar
+  year), with a `" (2)"`/`" (3)"` suffix appended if that exact label
+  is already taken. No DB-level non-overlap constraint exists between a
+  company's own `FiscalYear` rows (only `@@unique([companyId, label])`)
+  — this is an application-level guard specific to this import path.
+- **All-or-nothing, same discipline as Excel/CSV-bank import**: an
+  unbalanced group, an unparseable date/amount, a required-field gap, an
+  unclassifiable account number, an aux-parent identity conflict, or a
+  fiscal-year overlap conflict each independently blocks the ENTIRE
+  `confirm()` call — never a partial import silently skipping the bad
+  rows. Every blocking path also writes a `FAILED` `ImportBatch` row
+  first (same "always leaves a real import history" discipline
+  `ImportExcelService.persistFailedBatch()` already established) before
+  throwing.
+- **A real FEC file can have thousands of écritures — the preview is
+  bounded, confirm() never is.** `PREVIEW_SAMPLE_SIZE = 200`: the
+  preview response's own `toImport` array is capped there
+  (`truncated`/`totalEcrituresCount` tell the frontend the real count),
+  purely so the browser never has to render an unbounded table —
+  `confirmImport()` always re-parses and processes the FULL file
+  regardless of what the preview showed. The persistence transaction's
+  own timeout is raised to 120s (`IMPORT_TRANSACTION_TIMEOUT_MS`) for
+  the same reason — a large file's nested écriture/ligne creation is
+  many sequential inserts, not one batch.
+- **Duplicate detection reuses Excel import's own signature approach,
+  keyed by account NUMBER instead of id** (since some accounts in a FEC
+  import don't have an id yet at comparison time) — `journalCode|date|
+  sorted(compteNum:debit:credit)` compared against both the company's
+  existing ledger and other groups within the same file. Preview-only,
+  never blocks confirm(), same as Excel import.
+- **`EcritureLet`/`DateLet`/`Montantdevise`/`Idevise` are imported
+  verbatim onto each `EcritureLigne`** when present in the source file
+  — a draft's own lettrage is freely editable with no audit log either
+  way (see CLAUDE.md "Bank reconciliation" on `setLettrage()`'s own
+  narrow validated-line-only audit scope), so writing it directly at
+  creation time needs no special handling.
+- **Frontend**: `FecImportPage.tsx` (route `/import-fec`, nav item
+  "Import FEC" next to "Import Excel") — no fiscal-year picker at all
+  (unlike `ImportExcelPage`), since the fiscal year is entirely resolved
+  from the file itself. `FecImportPlanSummary` renders the fiscal-year
+  plan (reuse vs. create, with dates), the journals-to-create table
+  (flagging an unconfident type guess), and the accounts-to-create table
+  (an aux row shown as "Tiers de \<parent\>") ABOVE the écriture-level
+  preview table, so a reviewer sees the STRUCTURAL consequences of the
+  import before the individual écritures.
+- **Verified two ways.** Unit: `fec-file-parser.spec.ts` (8 tests —
+  pipe/.txt, semicolon-delimited .csv with case-insensitive/reordered
+  headers, .xlsx, missing-column and empty-file refusals),
+  `fec-import.service.spec.ts` (22 tests — the full preview/confirm
+  matrix: new-journal/new-account planning, unrecognized-journal
+  fallback, fiscal-year reuse/create/partial-overlap-refusal, an
+  unbalanced group rejected without blocking a sibling group, an
+  unclassifiable account number blocking the whole file, an auxiliary
+  account correctly inheriting its parent's pcgClass, duplicate
+  detection, all-or-nothing confirm behavior including the FAILED-batch
+  write, and `EcritureLet`/`DateLet` round-tripping) — 854 backend tests
+  passing overall (shared final count with the CSV import above, built
+  the same pass); `tsc`/`eslint` clean both sides, `vite build` clean.
+  **Live, against two real companies, via curl, cleaned up afterward**:
+  against the FR demo company (SIREN `123456789`), a 2-line `.txt` FEC
+  file referencing one new account (`618900`) and reusing the existing
+  `OD` journal and `2026` fiscal year previewed exactly as expected
+  (`fiscalYearPlan.action: "REUSE_EXISTING"`) and confirmed to a real,
+  correctly-drafted (`ecritureNum: null`, `validatedAt: null`) écriture;
+  against the Monaco demo company, a `.txt` file with an unrecognized
+  journal code (`ZZ`, correctly defaulted to `OPERATIONS_DIVERSES` with
+  `typeConfident: false`), a new auxiliary account (`CLI99` under
+  existing `401000`, correctly inheriting `pcgClass: 4`), and a date
+  entirely outside its existing `2026` fiscal year correctly planned and
+  created a brand-new `"Import FEC 2027"` fiscal year spanning exactly
+  the file's own single date; a THIRD file (two groups, one dated inside
+  the existing `2026` fiscal year and one dated in 2027) against the
+  same company correctly triggered the partial-overlap refusal, naming
+  both date ranges, with nothing persisted. All test écritures deleted
+  through the ordinary `DELETE /entries/:id` (both landed as real
+  drafts, confirmed via the response body before deletion); the
+  new account/journal/fiscal-year rows (no delete endpoint exists for
+  any of the three, per "Known scope boundaries") removed via a
+  temporary script; confirmed via follow-up `GET
+  /fiscal-years`/`GET /journals` on both companies that every list
+  returned to its exact original contents.
+- **Not verified live this pass**: the `.xlsx` FEC variant (covered by
+  2 dedicated unit tests against a real `exceljs`-written workbook, but
+  not round-tripped through a live curl call against a running
+  company) — the `.xlsx` code path is a straightforward, already-proven
+  pattern shared with `import-excel.service.ts`, judged sufficient
+  without an additional live pass; worth a quick check in a future
+  session if a real-world `.xlsx` FEC export ever surfaces an
+  unanticipated shape. Also not attempted: remembering/importing a
+  file's own `ImportBatch` history listing (this app has no `GET` for
+  past `ImportBatch` rows at all yet, a pre-existing, already-documented
+  gap — see "Known scope boundaries" — unrelated to and not widened by
+  this feature).
 
 ## Batch invoice review queue
 
@@ -5293,13 +5585,17 @@ assume they're covered either:
   settable at line-creation time, but there's no lettering
   endpoint/DTO field for `dateLettrage` (DateLet) — the only way to set it
   today is a direct Prisma write (see `backend/prisma/seed-sample.ts`).
-- **No way to list or inspect past Excel import batches.**
-  `ImportExcelController` only exposes `POST /import-excel`; there's no
-  `GET` for `ImportBatch` records, so past imports are only visible
-  indirectly via the écritures they created. Relatedly, `ImportStatus.FAILED`
-  is defined in the schema but never persisted — a parse failure throws
-  before any `ImportBatch` row exists, so nothing is ever written as
-  `FAILED` today.
+- **No way to list or inspect past Excel/FEC import batches.**
+  Neither `ImportExcelController` nor `FecImportController` (see "FEC
+  file import" above) exposes a `GET` for `ImportBatch` records, so past
+  imports are only visible indirectly via the écritures they created —
+  a gap in both modules' own admin surface, not just Excel's. Relatedly,
+  `ImportStatus.FAILED` is defined in the schema and IS now persisted by
+  `FecImportService` (every blocking preview/confirm failure writes a
+  `FAILED` batch first) — but `ImportExcelService` still never writes it
+  (a parse failure there throws before any `ImportBatch` row exists), so
+  the two modules genuinely differ on this point today, not just in
+  test coverage.
 
 ## Current state & roadmap
 
@@ -5537,6 +5833,20 @@ A-1 §VIII uncross-checked).
    (activity feed not refreshing after a membership mutation — a
    missing `['activity']` query invalidation) was found and fixed as
    part of verifying the last of them.
+7. **CSV bank statement import + FEC file import** (2026-09-06) — see
+   "Bank reconciliation — CSV statement import" and "FEC file import"
+   above. A second bank-statement format (flexible column mapping, no
+   balance oracle by design) reusing the same `persistParsedStatement()`
+   seam as CAMT.053/Bridge; and a new module that bootstraps a
+   company's accounts/journals/écritures from an external FEC export
+   (`.txt`/`.csv`/`.xlsx`), creating what's missing rather than
+   rejecting it (the opposite of Excel import's own behavior), always
+   as drafts, auto-resolving or auto-creating the covering fiscal year.
+   Both share a new hand-rolled `parseDelimitedText()` primitive. Live-
+   verified on three real companies (FR demo, Monaco demo), covering
+   fiscal-year reuse, fiscal-year auto-creation, the partial-overlap
+   refusal, and an unrecognized-journal-type fallback; all test data
+   cleaned up afterward.
 
 Not on this numbered list but still open whenever it's picked back up:
 widening either VAT computation — FR: remaining taux particuliers beyond
