@@ -1,11 +1,20 @@
 import { useMemo, useState } from 'react';
-import { useAccounts, useCreateAccount, useCreateJournal, useJournals } from '../api/queries';
+import {
+  useAccounts,
+  useCreateAccount,
+  useCreateJournal,
+  useDeleteAccount,
+  useJournals,
+  useRenameAccount,
+} from '../api/queries';
 import type { CreateAccountDto, CreateJournalDto } from '../api/dto';
 import { ApiError } from '../api/client';
-import type { Journal } from '../api/types';
+import type { Account, Journal } from '../api/types';
 import { SettingsBackLink } from '../components/layout/SettingsBackLink';
 import { SectionTabs, type TabSection } from '../components/layout/SectionTabs';
 import { useSectionTab } from '../lib/useSectionTab';
+import { PlainAccountEditModal } from '../components/accounts/PlainAccountEditModal';
+import { PlanComptableImportSection } from '../components/accounts/PlanComptableImportSection';
 
 const NO_JOURNALS: never[] = [];
 const NO_ACCOUNTS: never[] = [];
@@ -198,6 +207,8 @@ function JournalsSection() {
 function AccountsSection() {
   const accountsQuery = useAccounts();
   const createAccount = useCreateAccount();
+  const renameAccount = useRenameAccount();
+  const deleteAccount = useDeleteAccount();
 
   const accounts = accountsQuery.data ?? NO_ACCOUNTS;
   const baseAccounts = useMemo(() => accounts.filter((a) => !a.isAuxiliary), [accounts]);
@@ -217,8 +228,11 @@ function AccountsSection() {
 
   const [expandedClass, setExpandedClass] = useState<number | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [draft, setDraft] = useState<CreateAccountDto>({ number: '', label: '' });
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Account | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
 
   const canCreate = /^[1-8]/.test(draft.number.trim()) && draft.label.trim() !== '';
 
@@ -238,22 +252,57 @@ function AccountsSection() {
     }
   }
 
+  async function handleEditSubmit(values: { label: string; number: string }) {
+    if (!editing) return;
+    setRowError(null);
+    const updated = await renameAccount.mutateAsync({ id: editing.id, dto: values });
+    setEditing(null);
+    setExpandedClass(updated.pcgClass);
+  }
+
+  async function handleDelete(account: Account) {
+    if (!window.confirm(`Supprimer le compte "${account.number} — ${account.label}" ?`)) return;
+    setRowError(null);
+    try {
+      await deleteAccount.mutateAsync(account.id);
+    } catch (err) {
+      setRowError(err instanceof ApiError ? err.message : 'La suppression a échoué.');
+    }
+  }
+
   return (
     <section className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h2 className="text-[14px] font-semibold text-ink">Plan comptable</h2>
-        <button
-          type="button"
-          onClick={() => {
-            setIsCreating(true);
-            setError(null);
-          }}
-          disabled={isCreating}
-          className="rounded-md bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
-        >
-          + Nouveau compte
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsImporting((v) => !v)}
+            className="rounded-md border border-border px-3.5 py-2 text-[13px] font-medium text-ink hover:bg-bg"
+          >
+            Importer depuis Excel
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setIsCreating(true);
+              setError(null);
+            }}
+            disabled={isCreating}
+            className="rounded-md bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-border-strong disabled:text-ink-faint"
+          >
+            + Nouveau compte
+          </button>
+        </div>
       </div>
+
+      {isImporting && <PlanComptableImportSection onClose={() => setIsImporting(false)} />}
+
+      {rowError && (
+        <p className="rounded-md bg-negative-soft px-4 py-2.5 text-[13px] text-negative">
+          {rowError}
+        </p>
+      )}
 
       {isCreating && (
         <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
@@ -332,6 +381,25 @@ function AccountsSection() {
                           {account.number}
                         </td>
                         <td className="px-4 py-2 text-ink">{account.label}</td>
+                        <td className="w-40 px-4 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRowError(null);
+                              setEditing(account);
+                            }}
+                            className="rounded px-2 py-1 text-[12px] font-medium text-ink-muted hover:bg-bg hover:text-ink"
+                          >
+                            Modifier
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDelete(account)}
+                            className="rounded px-2 py-1 text-[12px] font-medium text-ink-muted hover:bg-negative-soft hover:text-negative"
+                          >
+                            Supprimer
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -341,6 +409,14 @@ function AccountsSection() {
           );
         })}
       </div>
+
+      {editing && (
+        <PlainAccountEditModal
+          account={editing}
+          onSubmit={handleEditSubmit}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </section>
   );
 }

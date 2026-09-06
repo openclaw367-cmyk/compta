@@ -16,7 +16,15 @@ function makePrismaMock() {
         id: args.where.id,
         ...args.data,
       })),
+      count: jest.fn().mockResolvedValue(0),
+      delete: jest.fn(),
     },
+    ecritureLigne: { count: jest.fn().mockResolvedValue(0) },
+    fixedAsset: { count: jest.fn().mockResolvedValue(0) },
+    bankAccount: { count: jest.fn().mockResolvedValue(0) },
+    invoice: { count: jest.fn().mockResolvedValue(0) },
+    invoiceLine: { count: jest.fn().mockResolvedValue(0) },
+    recurringEntryTemplateLine: { count: jest.fn().mockResolvedValue(0) },
     $transaction: jest.fn(),
   };
   prisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(prisma));
@@ -242,6 +250,87 @@ describe('AccountsService', () => {
         },
       });
       expect(updated).toMatchObject({ addressLine: '12 rue de la Paix' });
+    });
+
+    it('recomputes pcgClass and updates the number when a new number is supplied', async () => {
+      prisma.account.findFirst.mockResolvedValueOnce(collectif401);
+      prisma.account.count.mockResolvedValueOnce(0); // no tiers underneath
+      const updated = await service.rename(company, 'acc-401', {
+        label: 'Fournisseurs',
+        number: '607000',
+      });
+      expect(prisma.account.update).toHaveBeenCalledWith({
+        where: { id: 'acc-401' },
+        data: expect.objectContaining({ number: '607000', pcgClass: 6 }),
+      });
+      expect(updated).toMatchObject({ number: '607000', pcgClass: 6 });
+    });
+
+    it('does not touch number/pcgClass when the supplied number matches the current one', async () => {
+      prisma.account.findFirst.mockResolvedValueOnce(collectif401);
+      await service.rename(company, 'acc-401', { label: 'Fournisseurs', number: '401000' });
+      expect(prisma.account.count).not.toHaveBeenCalled();
+      expect(prisma.account.update).toHaveBeenCalledWith({
+        where: { id: 'acc-401' },
+        data: expect.not.objectContaining({ number: expect.anything() }),
+      });
+    });
+
+    it('refuses to renumber a collectif that still has tiers underneath it', async () => {
+      prisma.account.findFirst.mockResolvedValueOnce(collectif401);
+      prisma.account.count.mockResolvedValueOnce(3);
+      await expect(
+        service.rename(company, 'acc-401', { label: 'Fournisseurs', number: '402000' }),
+      ).rejects.toThrow(ConflictException);
+      expect(prisma.account.update).not.toHaveBeenCalled();
+    });
+
+    it('translates a unique-constraint conflict on the new number into a clear ConflictException', async () => {
+      prisma.account.findFirst.mockResolvedValueOnce(collectif401);
+      prisma.account.count.mockResolvedValueOnce(0);
+      prisma.account.update.mockImplementationOnce(() => {
+        throw new Prisma.PrismaClientKnownRequestError('unique constraint', {
+          code: 'P2002',
+          clientVersion: 'test',
+        });
+      });
+      await expect(
+        service.rename(company, 'acc-401', { label: 'Fournisseurs', number: '607000' }),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('remove', () => {
+    it('deletes an account with zero references anywhere', async () => {
+      prisma.account.findFirst.mockResolvedValueOnce(collectif401);
+      await service.remove(company, 'acc-401');
+      expect(prisma.account.delete).toHaveBeenCalledWith({ where: { id: 'acc-401' } });
+    });
+
+    it('refuses to delete an account still referenced by écriture lignes, naming the count', async () => {
+      prisma.account.findFirst.mockResolvedValueOnce(collectif401);
+      prisma.ecritureLigne.count.mockResolvedValueOnce(5).mockResolvedValueOnce(0);
+      await expect(service.remove(company, 'acc-401')).rejects.toThrow(ConflictException);
+      expect(prisma.account.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses to delete a collectif that still has tiers underneath it', async () => {
+      prisma.account.findFirst.mockResolvedValueOnce(collectif401);
+      prisma.account.count.mockResolvedValueOnce(2);
+      await expect(service.remove(company, 'acc-401')).rejects.toThrow(ConflictException);
+      expect(prisma.account.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses to delete an account still referenced by a recurring-entry template line', async () => {
+      prisma.account.findFirst.mockResolvedValueOnce(collectif401);
+      prisma.recurringEntryTemplateLine.count.mockResolvedValueOnce(1);
+      await expect(service.remove(company, 'acc-401')).rejects.toThrow(ConflictException);
+      expect(prisma.account.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejects deleting an unknown account', async () => {
+      prisma.account.findFirst.mockResolvedValueOnce(null);
+      await expect(service.remove(company, 'nope')).rejects.toThrow(NotFoundException);
     });
   });
 });

@@ -4,6 +4,8 @@ import { ApiError } from '../../api/client';
 
 export interface TiersFormValues {
   label: string;
+  /** Only meaningful in edit mode — a create always derives the number server-side. */
+  number?: string;
   addressLine?: string;
   postalCode?: string;
   city?: string;
@@ -14,6 +16,7 @@ export interface TiersFormValues {
 
 interface TiersFormDraft {
   label: string;
+  number: string;
   addressLine: string;
   postalCode: string;
   city: string;
@@ -25,6 +28,7 @@ interface TiersFormDraft {
 function draftFromAccount(account: Account | null, defaultCountryCode: string): TiersFormDraft {
   return {
     label: account?.label ?? '',
+    number: account?.number ?? '',
     addressLine: account?.addressLine ?? '',
     postalCode: account?.postalCode ?? '',
     city: account?.city ?? '',
@@ -88,6 +92,7 @@ export function TiersFormModal({
     try {
       await onSubmit({
         label: draft.label.trim(),
+        number: mode === 'edit' ? optional(draft.number) : undefined,
         addressLine: optional(draft.addressLine),
         postalCode: optional(draft.postalCode),
         city: optional(draft.city),
@@ -124,7 +129,19 @@ export function TiersFormModal({
         )}
 
         <div className="mt-4 grid grid-cols-2 gap-3">
-          <label className={`col-span-2 ${LABEL_CLASS}`}>
+          {mode === 'edit' && (
+            <label className={LABEL_CLASS}>
+              N° de compte
+              <input
+                type="text"
+                value={draft.number}
+                onChange={(e) => patch({ number: e.target.value })}
+                placeholder="411001"
+                className={`${INPUT_CLASS} tabular-nums`}
+              />
+            </label>
+          )}
+          <label className={mode === 'edit' ? LABEL_CLASS : `col-span-2 ${LABEL_CLASS}`}>
             Nom
             <input
               autoFocus

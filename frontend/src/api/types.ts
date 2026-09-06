@@ -428,6 +428,33 @@ export interface FecImportPreviewResponse {
   rejected: FecImportRejectedGroup[];
 }
 
+/** One planned row for POST /accounts/import/{preview,confirm} — see CLAUDE.md "Plan Comptable". */
+export interface PlanComptableImportRow {
+  rowNumber: number;
+  number: string;
+  label: string;
+  pcgClass: number;
+  isAuxiliary: boolean;
+  parentNumber: string | null;
+  action: 'CREATE' | 'UPDATE';
+}
+
+/** Response for POST /accounts/import/preview — writes nothing, purely informational. */
+export interface PlanComptableImportPreviewResponse {
+  rows: PlanComptableImportRow[];
+  totalRowCount: number;
+  truncated: boolean;
+  createCount: number;
+  updateCount: number;
+  errors: string[];
+}
+
+/** Response for POST /accounts/import/confirm. */
+export interface PlanComptableImportResult {
+  createdCount: number;
+  updatedCount: number;
+}
+
 /** Response shape for GET /depreciation/fixed-assets(/:id) — see FixedAssetListItemDto on the backend. */
 export interface FixedAsset {
   id: string;
