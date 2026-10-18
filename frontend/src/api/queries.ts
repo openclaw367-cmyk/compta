@@ -33,6 +33,7 @@ import type {
   FinancialAnalysisResult,
   FecImportPreviewResponse,
   FiscalYear,
+  FiscalYearArchive,
   FixedAsset,
   ImportBatch,
   ImportPreviewResponse,
@@ -183,6 +184,20 @@ export function useFiscalYears() {
     queryKey: ['fiscal-years'],
     queryFn: () => api.get<FiscalYear[]>('/fiscal-years'),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * The fiscal year's own tamper-evident FEC archive record — see
+ * CLAUDE.md "Operational readiness — clôture d'exercice archival".
+ * Null for an open year. Only enabled once a year is closed — no point
+ * firing N queries for every open year on the page.
+ */
+export function useFiscalYearArchive(fiscalYearId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['fiscal-year-archive', fiscalYearId],
+    queryFn: () => api.get<FiscalYearArchive | null>(`/fiscal-years/${fiscalYearId}/archive`),
+    enabled,
   });
 }
 
@@ -520,13 +535,20 @@ export function useCreateFiscalYear() {
   });
 }
 
-/** Refuses (ConflictException) while the year still has draft écritures — see fiscal-years.service.ts. */
+/**
+ * Refuses (ConflictException) while the year still has draft écritures,
+ * or (BadRequestException) if its own FEC can't be generated (e.g.
+ * missing SIREN/RCI) — see fiscal-years.service.ts. Generates and
+ * archives this year's FEC in the same action, so the archive query is
+ * invalidated too, not just the fiscal-years list.
+ */
 export function useCloseFiscalYear() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.post<FiscalYear>(`/fiscal-years/${id}/close`, {}),
-    onSuccess: () => {
+    onSuccess: (_result, id) => {
       void queryClient.invalidateQueries({ queryKey: ['fiscal-years'] });
+      void queryClient.invalidateQueries({ queryKey: ['fiscal-year-archive', id] });
     },
   });
 }

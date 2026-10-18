@@ -3,6 +3,7 @@ import {
   useCloseFiscalYear,
   useCreateFiscalYear,
   useEcritures,
+  useFiscalYearArchive,
   useFiscalYears,
   useGenerateANouveau,
   useJournals,
@@ -282,15 +283,7 @@ export function FiscalYearsPage() {
                       {formatDate(fy.endDate)}
                     </td>
                     <td className="px-4 py-2.5">
-                      {fy.closedAt ? (
-                        <span className="inline-flex items-center rounded-full bg-bg px-2 py-0.5 text-[11.5px] font-medium text-ink-muted">
-                          Clôturé le {formatDate(fy.closedAt)}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center rounded-full bg-positive-soft px-2 py-0.5 text-[11.5px] font-medium text-positive">
-                          Ouvert
-                        </span>
-                      )}
+                      <StatusCell fy={fy} />
                     </td>
                     <td className="px-4 py-2.5">
                       {alreadyGenerated ? (
@@ -352,5 +345,44 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       </span>
       {children}
     </label>
+  );
+}
+
+/**
+ * Open/closed badge, plus — for a closed year — the archival record
+ * close() itself generates (see CLAUDE.md "Operational readiness —
+ * clôture d'exercice archival"): this is the actual user-facing payoff
+ * of that feature, showing that a real, tamper-evident FEC snapshot
+ * exists for this year. A short hash prefix, not the full 64 hex chars
+ * — enough to recognize at a glance, with the full hash in the title
+ * tooltip for anyone who needs to compare it exactly (e.g. against a
+ * fresh re-export, per that feature's own stated verification method).
+ */
+function StatusCell({ fy }: { fy: FiscalYear }) {
+  const archiveQuery = useFiscalYearArchive(fy.id, Boolean(fy.closedAt));
+  const archive = archiveQuery.data;
+
+  if (!fy.closedAt) {
+    return (
+      <span className="inline-flex items-center rounded-full bg-positive-soft px-2 py-0.5 text-[11.5px] font-medium text-positive">
+        Ouvert
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="inline-flex w-fit items-center rounded-full bg-bg px-2 py-0.5 text-[11.5px] font-medium text-ink-muted">
+        Clôturé le {formatDate(fy.closedAt)}
+      </span>
+      {archive && (
+        <span
+          className="text-[11px] text-ink-faint"
+          title={`Fichier archivé : ${archive.fileName}\nSHA-256 : ${archive.sha256Hash}`}
+        >
+          Archivé — SHA-256 : {archive.sha256Hash.slice(0, 12)}…
+        </span>
+      )}
+    </div>
   );
 }
