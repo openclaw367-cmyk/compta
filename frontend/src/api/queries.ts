@@ -757,6 +757,22 @@ export function useDownloadTrialBalanceExcel() {
   });
 }
 
+/**
+ * Full-instance backup (database + attached documents, zipped) — see
+ * CLAUDE.md "Operational readiness — backup and recovery". Same
+ * `api.getFileBlob()` + `downloadBlob()` shape as every other
+ * file-download feature; no params — this endpoint has no `x-company-id`
+ * scoping at all, it spans every company.
+ */
+export function useDownloadBackup() {
+  return useMutation({
+    mutationFn: async () => {
+      const { filename, blob } = await api.getFileBlob('/backup/export');
+      downloadBlob(filename, blob);
+    },
+  });
+}
+
 /** One account's grand livre (line-by-line detail with a running balance). */
 export function useAccountLedger(accountId: string | null, params: PeriodParams) {
   return useQuery({

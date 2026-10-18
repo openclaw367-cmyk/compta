@@ -49,9 +49,11 @@ async function bootstrap(): Promise<void> {
         'depreciation, VAT, liasse. Every endpoint except "/auth/*" requires ' +
         'an "Authorization: Bearer <token>" access token (see POST ' +
         '/auth/login). Every endpoint except "/auth/*", "POST /companies", ' +
-        'and "GET /companies" additionally requires an "x-company-id" ' +
-        'header naming a company the caller is a member of. See CLAUDE.md ' +
-        'for the compliance rules this API enforces.',
+        '"GET /companies", and "GET /backup/export" (a full-instance ' +
+        'backup spanning every company, see CLAUDE.md "Operational ' +
+        'readiness") additionally requires an "x-company-id" header ' +
+        'naming a company the caller is a member of. See CLAUDE.md for ' +
+        'the compliance rules this API enforces.',
     )
     .addBearerAuth()
     .setVersion('0.1.0')

@@ -17,6 +17,7 @@ import { JournalEntriesPage } from './pages/JournalEntriesPage';
 import { InvoicingPage } from './pages/InvoicingPage';
 import { BatchInvoiceQueuePage } from './pages/BatchInvoiceQueuePage';
 import { RecurringTemplatesPage } from './pages/RecurringTemplatesPage';
+import { BackupPage } from './pages/BackupPage';
 import { AnomaliesPage } from './pages/AnomaliesPage';
 import { FiscalYearsPage } from './pages/FiscalYearsPage';
 import { CompanyProfilePage } from './pages/CompanyProfilePage';
@@ -103,6 +104,7 @@ export default function App() {
                         <Route path="/parametres" element={<SettingsPage />} />
                         <Route path="/parametres/nouvelle-societe" element={<CreateCompanyPage />} />
                         <Route path="/parametres/membres" element={<MembersPage />} />
+                        <Route path="/parametres/sauvegarde" element={<BackupPage />} />
                       </Routes>
                     </AppShell>
                   </ToastProvider>

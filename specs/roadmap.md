@@ -1360,47 +1360,46 @@ everything else in this document (GATED/PRESENTATION) plus an honest
 severity read, since these five don't share a single theme the way the
 ERP tiers do.
 
-### Backup and recovery — confirmed: does not exist, not even flagged
+### Backup and recovery — SHIPPED (2026-10-18)
 
-**Severity: the most urgent item in this entire document.** Grepped
-the whole repo for backup-related code: every hit is the credential-
-encryption threat model ("defends against a leaked DB backup"), never
-an actual backup mechanism. No scheduled export, no `pg_dump` wrapper,
-no "export everything" action, no scheduler dependency of any kind
-(`@nestjs/schedule`/`node-cron` — neither is installed). This is also
-the one gap that isn't logged anywhere in CLAUDE.md's own otherwise
-relentless "known scope boundaries" discipline — every other limitation
-in this app gets an honest flag; this one has none, which is itself a
-finding.
+**Was the most urgent item in this entire document — now closed.**
+Grepped the whole repo for backup-related code before building:
+every hit was the credential-encryption threat model ("defends against
+a leaked DB backup"), never an actual backup mechanism, and this was
+the one gap not logged anywhere in CLAUDE.md's own otherwise-thorough
+"known scope boundaries" discipline. See CLAUDE.md "Operational
+readiness — backup and recovery" for the full design/verification
+record; this entry records only the decisions, kept here for context.
 
-- **What "good enough" looks like for v1, deliberately modest**: a
-  single `POST /backup/export` (GATED only in the sense that it must
-  never leak cross-tenant — scoped to the caller's own company, or, for
-  an accountant, their own full company list) that produces a single
-  archive containing a `pg_dump`-equivalent of that company's own rows
-  (not a full-instance dump — this app's own data is already company-
-  scoped, so a company-scoped export is the natural unit) PLUS the
-  asset/document files `EcritureDocument` references on disk. A
-  companion `POST /backup/restore` into a FRESH, empty company (never
-  an in-place overwrite of a live one) closes the loop into something
-  genuinely testable.
-- **Classification: GATED for restore** (it writes real ledger rows —
-  reuse the exact same multi-tenant scoping and validation this app
-  already applies everywhere, never a raw SQL replay) — **PRESENTATION
-  for export** (a read-only dump of already-valid data).
-- **The scheduling half is a separate, smaller decision**: whether this
-  app ever gains its own scheduler, or whether v1 is "a button the user
-  clicks, with the UI reminding them," or an OS-level scheduled task
-  the desktop launcher's own install script could set up (the existing
-  `scripts/desktop/` precedent). Worth deciding deliberately rather
-  than defaulting to "nothing" by omission, which is the current state.
-- **Verification**: export→restore round-trip, hand-verified — export a
-  real fixture company, restore it into a new one, assert every
-  écriture/account/invoice/document matches byte-for-byte, and assert
-  the restored company's own liasse balances identically to the
-  original's. This is a real, checkable oracle (equality), not a soft
-  UX judgment call — treat it with the same rigor as any other GATED
-  feature despite its "just a dump" appearance.
+- **The architecture actually shipped diverges from this section's own
+  original sketch, deliberately, confirmed with the user before
+  building** — a company-scoped, app-level JSON exporter was rejected
+  in favor of a full-instance `pg_dump`/`pg_restore` design: Postgres's
+  own proven, atomic backup mechanism, rather than hand-serializing
+  20+ Prisma models with real risk of a subtle, undetected gap. This
+  also matches the app's own actual single-operator deployment model
+  (one firm backing up all of their own client companies at once) more
+  directly than a per-company export would have.
+- **`GET /backup/export`, gated on the caller owning at least one
+  company** — no instance-admin role exists in this app's `Membership`
+  model, so this is the closest available check; a true multi-firm
+  SaaS deployment would need a real one before exposing this safely
+  across unrelated firms.
+- **Restore is a documented `pg_restore` runbook
+  (`scripts/backup/README.md`), deliberately not a self-service
+  endpoint** — restoring into a live database is a different risk
+  class than exporting from one; the scheduling half (this app has no
+  scheduler at all) is left to an OS-level scheduled task calling the
+  endpoint, documented rather than built.
+- **Verification went further than "the endpoint returns 200"**: a
+  genuine export→restore round trip — restore the real downloaded dump
+  into a fresh, temporary database (never the live one) and confirm
+  byte-for-byte equality on real row counts AND a real monetary figure
+  against the live database. Two real bugs were found and fixed live
+  along the way (pg_dump rejecting Prisma's own `?schema=` URL
+  convention; an ESM-only dependency needing the same dynamic-import
+  workaround already established for Factur-X) — see CLAUDE.md for
+  both.
 
 ### Clôture d'exercice and archival — closing is solid; archival on top of it is not
 
@@ -1544,11 +1543,13 @@ into that company; there's no cross-company rollup.
 ### Sequencing note for this section
 
 Severity-ordered, not dependency-ordered, since none of these five
-block each other: **backup/recovery first** (the one item with a real,
-unbounded data-loss consequence and currently zero mitigation) and
-**clôture archival second** (compliance-adjacent, currently a silent
-gap in an otherwise well-flagged codebase) — both ahead of anything in
-the ERP section above, including Tier 1. Bulk-validate and the
+block each other. **Backup/recovery is now SHIPPED** (2026-10-18, see
+its own entry above and CLAUDE.md) — it was picked first precisely
+because it was the one item with a real, unbounded data-loss
+consequence and zero mitigation. **Clôture archival is next in
+severity order** (compliance-adjacent, currently a silent gap in an
+otherwise well-flagged codebase) — ahead of anything in the ERP
+section above, including Tier 1. Bulk-validate and the
 multi-year-FEC guard are small, cheap, and could be picked up any time,
 including bundled into whichever FEC-import-adjacent work happens next.
 Cabinet UX items 1-2 are also cheap and a reasonable pairing with
