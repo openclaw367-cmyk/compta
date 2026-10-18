@@ -7,6 +7,7 @@ import {
   useFiscalYears,
   useGenerateANouveau,
   useJournals,
+  useValidateFiscalYearDrafts,
 } from '../api/queries';
 import type { CreateFiscalYearDto } from '../api/dto';
 import type { FiscalYear } from '../api/types';
@@ -45,6 +46,7 @@ export function FiscalYearsPage() {
   const createFiscalYear = useCreateFiscalYear();
   const closeFiscalYear = useCloseFiscalYear();
   const generateANouveau = useGenerateANouveau();
+  const validateDrafts = useValidateFiscalYearDrafts();
   const toast = useToast();
 
   const fiscalYears = fiscalYearsQuery.data ?? NO_FISCAL_YEARS;
@@ -55,6 +57,13 @@ export function FiscalYearsPage() {
   const generatedFiscalYearIds = new Set(
     anJournal ? ecritures.filter((e) => e.journalId === anJournal.id).map((e) => e.fiscalYearId) : [],
   );
+  // Computed from the same already-fetched écritures list used for the
+  // à-nouveau check above — no new query needed just to show a count.
+  const draftCountByFiscalYearId = new Map<string, number>();
+  for (const e of ecritures) {
+    if (e.validatedAt) continue;
+    draftCountByFiscalYearId.set(e.fiscalYearId, (draftCountByFiscalYearId.get(e.fiscalYearId) ?? 0) + 1);
+  }
 
   const [isCreating, setIsCreating] = useState(false);
   const [draft, setDraft] = useState<CreateFiscalYearDto>(emptyDraft());
@@ -64,6 +73,8 @@ export function FiscalYearsPage() {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [generateSuccess, setGenerateSuccess] = useState<string | null>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [validatingId, setValidatingId] = useState<string | null>(null);
+  const [validateError, setValidateError] = useState<string | null>(null);
 
   const canCreate =
     draft.label.trim() !== '' &&
@@ -106,6 +117,38 @@ export function FiscalYearsPage() {
       setCloseError(error instanceof ApiError ? error.message : 'La clôture a échoué.');
     } finally {
       setClosingId(null);
+    }
+  }
+
+  async function handleValidateDrafts(id: string, label: string, count: number) {
+    if (
+      !window.confirm(
+        `Valider les ${count} écriture(s) brouillon de « ${label} » ? Chacune recevra un ` +
+          "numéro définitif et deviendra immuable — à utiliser pour amener un import historique " +
+          'à un état clôturable, pas comme une validation ligne par ligne habituelle.',
+      )
+    ) {
+      return;
+    }
+    setValidateError(null);
+    setValidatingId(id);
+    try {
+      const result = await validateDrafts.mutateAsync(id);
+      if (result.failedCount === 0) {
+        toast.show('success', `${result.validatedCount} écriture(s) validée(s) pour « ${label} ».`);
+      } else {
+        setValidateError(
+          `${result.validatedCount} validée(s), ${result.failedCount} en échec pour « ${label} » : ` +
+            result.results
+              .filter((r) => r.status === 'FAILED')
+              .map((r) => r.error)
+              .join(' '),
+        );
+      }
+    } catch (error) {
+      setValidateError(error instanceof ApiError ? error.message : 'La validation a échoué.');
+    } finally {
+      setValidatingId(null);
     }
   }
 
@@ -167,6 +210,15 @@ export function FiscalYearsPage() {
         <div className="flex items-center justify-between rounded-md bg-negative-soft px-4 py-2.5 text-[13px] text-negative">
           <span>{closeError}</span>
           <button type="button" onClick={() => setCloseError(null)} className="font-medium">
+            Fermer
+          </button>
+        </div>
+      )}
+
+      {validateError && (
+        <div className="flex items-center justify-between rounded-md bg-negative-soft px-4 py-2.5 text-[13px] text-negative">
+          <span>{validateError}</span>
+          <button type="button" onClick={() => setValidateError(null)} className="font-medium">
             Fermer
           </button>
         </div>
@@ -283,7 +335,18 @@ export function FiscalYearsPage() {
                       {formatDate(fy.endDate)}
                     </td>
                     <td className="px-4 py-2.5">
-                      <StatusCell fy={fy} />
+                      <StatusCell
+                        fy={fy}
+                        draftCount={draftCountByFiscalYearId.get(fy.id) ?? 0}
+                        isValidating={validatingId === fy.id}
+                        onValidateDrafts={() =>
+                          void handleValidateDrafts(
+                            fy.id,
+                            fy.label,
+                            draftCountByFiscalYearId.get(fy.id) ?? 0,
+                          )
+                        }
+                      />
                     </td>
                     <td className="px-4 py-2.5">
                       {alreadyGenerated ? (
@@ -349,24 +412,58 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 /**
- * Open/closed badge, plus — for a closed year — the archival record
- * close() itself generates (see CLAUDE.md "Operational readiness —
- * clôture d'exercice archival"): this is the actual user-facing payoff
- * of that feature, showing that a real, tamper-evident FEC snapshot
- * exists for this year. A short hash prefix, not the full 64 hex chars
- * — enough to recognize at a glance, with the full hash in the title
- * tooltip for anyone who needs to compare it exactly (e.g. against a
- * fresh re-export, per that feature's own stated verification method).
+ * Open/closed badge, plus:
+ * - for an OPEN year with draft écritures, the bulk-validate action
+ *   (see CLAUDE.md "Operational readiness — bulk-validate") — the
+ *   real friction point for bringing a historical import to a
+ *   clôturable state without validating hundreds of entries one at a
+ *   time. Shown here, not as a separate screen, since this draft count
+ *   is exactly what `close()` itself would otherwise refuse on.
+ * - for a CLOSED year, the archival record `close()` itself generates
+ *   (see CLAUDE.md "Operational readiness — clôture d'exercice
+ *   archival"): the actual user-facing payoff of that feature, showing
+ *   that a real, tamper-evident FEC snapshot exists. A short hash
+ *   prefix, not the full 64 hex chars — enough to recognize at a
+ *   glance, with the full hash in the title tooltip for anyone who
+ *   needs to compare it exactly (e.g. against a fresh re-export, per
+ *   that feature's own stated verification method).
  */
-function StatusCell({ fy }: { fy: FiscalYear }) {
+function StatusCell({
+  fy,
+  draftCount,
+  isValidating,
+  onValidateDrafts,
+}: {
+  fy: FiscalYear;
+  draftCount: number;
+  isValidating: boolean;
+  onValidateDrafts: () => void;
+}) {
   const archiveQuery = useFiscalYearArchive(fy.id, Boolean(fy.closedAt));
   const archive = archiveQuery.data;
 
   if (!fy.closedAt) {
     return (
-      <span className="inline-flex items-center rounded-full bg-positive-soft px-2 py-0.5 text-[11.5px] font-medium text-positive">
-        Ouvert
-      </span>
+      <div className="flex flex-col gap-1">
+        <span className="inline-flex w-fit items-center rounded-full bg-positive-soft px-2 py-0.5 text-[11.5px] font-medium text-positive">
+          Ouvert
+        </span>
+        {draftCount > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-ink-faint">
+              {draftCount} brouillon{draftCount > 1 ? 's' : ''}
+            </span>
+            <button
+              type="button"
+              onClick={onValidateDrafts}
+              disabled={isValidating}
+              className="rounded px-1.5 py-0.5 text-[11px] font-medium text-accent hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isValidating ? 'Validation…' : 'Valider tout'}
+            </button>
+          </div>
+        )}
+      </div>
     );
   }
 

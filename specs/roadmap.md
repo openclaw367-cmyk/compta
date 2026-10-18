@@ -1468,23 +1468,35 @@ FEC/CSV/Excel import genuinely work for bringing in an existing chart +
 historical écritures. Two confirmed frictions for migrating a real
 client at scale:
 
-- **No bulk-validate.** Every imported écriture lands as an
-  unvalidated draft by design; there is no endpoint to validate many at
-  once (confirmed — grepped, nothing). A multi-year historical import
-  means validating every entry one API call at a time.
-  - **What**: `POST /entries/validate-batch` (an array of ids, or a
-    `fiscalYearId` + "all drafts in it" mode), reusing
-    `EntriesService.validate()`'s own per-entry transaction in a loop —
-    no new posting logic, just a bulk entry point to it.
+- **Bulk-validate — SHIPPED (2026-10-18).** `POST /entries/validate-batch`
+  — see CLAUDE.md "Operational readiness — bulk-validate" for the full
+  record. Reuses `EntriesService.validate()` verbatim per id, in a loop
+  (zero new posting/numbering logic, confirming the "zero new risk"
+  classification below); `ecritureIds` (caller's own order) XOR
+  `fiscalYearId` (every draft in that year, ordered by `ecritureDate`
+  then `createdAt` — reproducing the chronological `EcritureNum`
+  sequence a historical import's entries would originally have
+  received); never all-or-nothing — one failure never aborts or rolls
+  back the rest, `results` names every id's own outcome. Surfaced on
+  `FiscalYearsPage.tsx` as a "Valider tout" action per open fiscal year
+  with drafts. Verified by 6 new unit tests (including the exact
+  regression-equivalence check called for below) plus live curl/browser
+  runs confirming both the chronological-ordering logic and the
+  partial-failure reporting against real data — 922 backend tests
+  passing overall.
+  - **What it replaced**: every imported écriture landed as an
+    unvalidated draft by design, with no endpoint to validate many at
+    once (confirmed — grepped, nothing) — a multi-year historical
+    import meant validating every entry one API call at a time.
   - **Classification: GATED** (it's the real numbering-assignment path,
     just called many times) — **but zero new risk**, since each
-    individual assignment is already correctly atomic; verification is
+    individual assignment is already correctly atomic; verification was
     a regression test asserting N calls through the batch endpoint
     produce IDENTICAL results to N individual calls, plus a check that
     a failure partway through (e.g. one draft unexpectedly already
     validated by a concurrent request) doesn't silently skip or
-    corrupt the rest — it should report exactly which ids succeeded and
-    which didn't, never a partial silent success.
+    corrupt the rest — it reports exactly which ids succeeded and which
+    didn't, never a partial silent success.
 - **A FEC file spanning multiple calendar years creates ONE fiscal year
   spanning that whole range** — traced `resolveFiscalYearPlan()`
   directly. Not a bug against normal usage (a real FEC export is
@@ -1547,13 +1559,15 @@ into that company; there's no cross-company rollup.
 ### Sequencing note for this section
 
 Severity-ordered, not dependency-ordered, since none of these five
-block each other. **Backup/recovery and clôture archival are both now
-SHIPPED** (2026-10-18, same day — see their own entries above and
-CLAUDE.md) — picked first and second precisely because they carried
-the two most severe, currently-unmitigated consequences (unbounded
-data loss; a silent compliance-archival gap in an otherwise
-well-flagged codebase). Bulk-validate and the multi-year-FEC guard are
-next in severity order, small and cheap, and could be picked up any
+block each other. **Backup/recovery, clôture archival, AND bulk-validate
+are all now SHIPPED** (2026-10-18, same day — see their own entries
+above and CLAUDE.md) — backup/recovery and archival picked first and
+second precisely because they carried the two most severe,
+currently-unmitigated consequences (unbounded data loss; a silent
+compliance-archival gap in an otherwise well-flagged codebase);
+bulk-validate picked up next, same day, as the next-most-severe item,
+small and cheap as scoped. The multi-year-FEC guard is the one
+remaining item from this pair, still open, and could be picked up any
 time, including bundled into whichever FEC-import-adjacent work
 happens next. Cabinet UX items 1-2 are also cheap and a reasonable
 pairing with Multi-user/roles work if that's ever revisited; item 3
