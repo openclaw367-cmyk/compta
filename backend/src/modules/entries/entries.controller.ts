@@ -16,6 +16,7 @@ import { CompanyContext } from '../../common/tenant/company-context';
 import { EntriesService } from './entries.service';
 import { CreateEcritureDto } from './dto/create-ecriture.dto';
 import { SetLettrageDto } from './dto/set-lettrage.dto';
+import { ValidateBatchDto } from './dto/validate-batch.dto';
 
 @ApiTags('entries')
 @ApiHeader({
@@ -91,6 +92,21 @@ export class EntriesController {
   @Post(':id/validate')
   validate(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
     return this.entriesService.validate(company, id);
+  }
+
+  @ApiOperation({
+    summary:
+      'Validate many drafts at once — see CLAUDE.md "Operational readiness — bulk-validate".',
+    description:
+      'Supply either ecritureIds (validated in the given order) or fiscalYearId (validates ' +
+      'every draft in that year, ordered by ecritureDate then createdAt — earliest first). ' +
+      'Never all-or-nothing: each id goes through the exact same per-entry validate() path ' +
+      'independently, so one failure never aborts or rolls back the rest — the response names ' +
+      "every id's own outcome.",
+  })
+  @Post('validate-batch')
+  validateBatch(@CurrentCompany() company: CompanyContext, @Body() dto: ValidateBatchDto) {
+    return this.entriesService.validateBatch(company, dto);
   }
 
   @ApiOperation({

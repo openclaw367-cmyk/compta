@@ -652,4 +652,80 @@ describe('EntriesService', () => {
       expect(result.results).toHaveLength(1);
     });
   });
+
+  describe('validateBatch', () => {
+    /** Each draft findFirst/update call is keyed by id, mirroring the real
+     *  DB behaviour across however many ids a batch validates. */
+    function makeDrafts(ids: string[]) {
+      const drafts = new Map(ids.map((id) => [id, { id, validatedAt: null as Date | null }]));
+      prisma.ecriture.findFirst.mockImplementation(
+        (args: { where: { id: string } }) => drafts.get(args.where.id) ?? null,
+      );
+      let counter = 0;
+      prisma.company.update.mockImplementation(() => {
+        counter += 1;
+        return { nextEcritureNum: counter + 1 };
+      });
+      return drafts;
+    }
+
+    it('rejects when both ecritureIds and fiscalYearId are supplied', async () => {
+      await expect(
+        service.validateBatch(company, { ecritureIds: ['e1'], fiscalYearId: 'fy-1' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects when neither ecritureIds nor fiscalYearId is supplied', async () => {
+      await expect(service.validateBatch(company, {})).rejects.toThrow(BadRequestException);
+    });
+
+    it('validates every id in ecritureIds, in the given order, assigning sequential EcritureNums', async () => {
+      makeDrafts(['e1', 'e2', 'e3']);
+      const result = await service.validateBatch(company, { ecritureIds: ['e1', 'e2', 'e3'] });
+      expect(result.validatedCount).toBe(3);
+      expect(result.failedCount).toBe(0);
+      expect(result.results).toEqual([
+        { ecritureId: 'e1', status: 'VALIDATED', ecritureNum: '1' },
+        { ecritureId: 'e2', status: 'VALIDATED', ecritureNum: '2' },
+        { ecritureId: 'e3', status: 'VALIDATED', ecritureNum: '3' },
+      ]);
+    });
+
+    it('fiscalYearId mode queries only drafts in that year, ordered by ecritureDate then createdAt', async () => {
+      makeDrafts(['e1', 'e2']);
+      prisma.ecriture.findMany.mockResolvedValueOnce([{ id: 'e1' }, { id: 'e2' }]);
+      await service.validateBatch(company, { fiscalYearId: 'fy-1' });
+      expect(prisma.ecriture.findMany).toHaveBeenCalledWith({
+        where: { companyId: 'company-1', fiscalYearId: 'fy-1', validatedAt: null },
+        select: { id: true },
+        orderBy: [{ ecritureDate: 'asc' }, { createdAt: 'asc' }],
+      });
+    });
+
+    it('a failure on one id never aborts the rest — each id gets its own independent outcome', async () => {
+      makeDrafts(['e1', 'e3']); // e2 deliberately absent — simulates "already validated elsewhere"
+      const result = await service.validateBatch(company, { ecritureIds: ['e1', 'e2', 'e3'] });
+      expect(result.validatedCount).toBe(2);
+      expect(result.failedCount).toBe(1);
+      expect(result.results).toEqual([
+        { ecritureId: 'e1', status: 'VALIDATED', ecritureNum: '1' },
+        { ecritureId: 'e2', status: 'FAILED', error: expect.stringContaining('not found') },
+        { ecritureId: 'e3', status: 'VALIDATED', ecritureNum: '2' },
+      ]);
+    });
+
+    it('produces identical results to calling validate() individually for the same ids', async () => {
+      makeDrafts(['e1', 'e2']);
+      const direct1 = await service.validate(company, 'e1');
+      const direct2 = await service.validate(company, 'e2');
+
+      makeDrafts(['e1', 'e2']); // reset counters/drafts for a fresh comparison run
+      const batch = await service.validateBatch(company, { ecritureIds: ['e1', 'e2'] });
+
+      expect(batch.results).toEqual([
+        { ecritureId: 'e1', status: 'VALIDATED', ecritureNum: direct1.ecritureNum },
+        { ecritureId: 'e2', status: 'VALIDATED', ecritureNum: direct2.ecritureNum },
+      ]);
+    });
+  });
 });

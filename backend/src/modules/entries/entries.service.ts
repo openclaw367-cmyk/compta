@@ -11,6 +11,11 @@ import { assertFiscalYearOpen } from '../../common/ledger/assert-fiscal-year-ope
 import { Money } from '../../common/decimal';
 import { CreateEcritureDto } from './dto/create-ecriture.dto';
 import { EntrySearchResponseDto, EntrySearchResultDto } from './dto/entry-search-response.dto';
+import { ValidateBatchDto } from './dto/validate-batch.dto';
+import {
+  ValidateBatchResponseDto,
+  ValidateBatchResultItemDto,
+} from './dto/validate-batch-response.dto';
 import { EntryValidationService } from './entry-validation.service';
 
 /** A bare digit string, with an optional 1-2 digit decimal part after a comma OR a point — a
@@ -316,6 +321,74 @@ export class EntriesService {
         include: { lignes: true },
       });
     });
+  }
+
+  /**
+   * Validates many drafts in one call — the real friction point for
+   * migrating a client's historical import (see CLAUDE.md "Operational
+   * readiness — bulk-validate"): every imported écriture lands as a
+   * draft by design, and without this, bringing in years of history
+   * means clicking validate one écriture at a time.
+   *
+   * Deliberately NOT one big transaction — each id goes through the
+   * EXACT SAME per-entry `validate()` above, independently, in a loop.
+   * No new posting/numbering logic exists here at all. A failure on
+   * one id (e.g. it was already validated by a concurrent request)
+   * never aborts or rolls back the rest — `results` names every id's
+   * own outcome, so the caller always sees exactly what happened,
+   * never a silent partial success.
+   *
+   * `fiscalYearId` mode orders drafts by `ecritureDate` then
+   * `createdAt` (earliest first) before validating — that order IS the
+   * EcritureNum assignment order, so a historical import's own
+   * chronological order is what the sequence actually reproduces,
+   * matching how the entries would have been numbered originally.
+   * `ecritureIds` mode uses the caller's own given order instead.
+   */
+  async validateBatch(
+    company: CompanyContext,
+    dto: ValidateBatchDto,
+  ): Promise<ValidateBatchResponseDto> {
+    if (dto.ecritureIds && dto.fiscalYearId) {
+      throw new BadRequestException('Supply either ecritureIds or fiscalYearId, not both.');
+    }
+    if (!dto.ecritureIds && !dto.fiscalYearId) {
+      throw new BadRequestException('Supply either ecritureIds or fiscalYearId.');
+    }
+
+    const ids = dto.ecritureIds
+      ? dto.ecritureIds
+      : (
+          await this.prisma.ecriture.findMany({
+            where: {
+              companyId: company.companyId,
+              fiscalYearId: dto.fiscalYearId,
+              validatedAt: null,
+            },
+            select: { id: true },
+            orderBy: [{ ecritureDate: 'asc' }, { createdAt: 'asc' }],
+          })
+        ).map((e) => e.id);
+
+    const results: ValidateBatchResultItemDto[] = [];
+    for (const id of ids) {
+      try {
+        const validated = await this.validate(company, id);
+        results.push({ ecritureId: id, status: 'VALIDATED', ecritureNum: validated.ecritureNum });
+      } catch (error) {
+        results.push({
+          ecritureId: id,
+          status: 'FAILED',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return {
+      results,
+      validatedCount: results.filter((r) => r.status === 'VALIDATED').length,
+      failedCount: results.filter((r) => r.status === 'FAILED').length,
+    };
   }
 
   /**

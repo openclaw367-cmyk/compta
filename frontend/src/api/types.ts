@@ -186,6 +186,21 @@ export interface FiscalYearArchive {
   generatedAt: string;
 }
 
+/** One id's own outcome from POST /entries/validate-batch — never a silent partial success. */
+export interface ValidateBatchResultItem {
+  ecritureId: string;
+  status: 'VALIDATED' | 'FAILED';
+  ecritureNum?: string | null;
+  error?: string;
+}
+
+/** See CLAUDE.md "Operational readiness — bulk-validate". */
+export interface ValidateBatchResponse {
+  results: ValidateBatchResultItem[];
+  validatedCount: number;
+  failedCount: number;
+}
+
 export interface EcritureLigne {
   id: string;
   companyId: string;

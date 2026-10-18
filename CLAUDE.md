@@ -6473,6 +6473,97 @@ from "whatever the endpoint produces if re-run today."
   enum is deliberately left open for e.g. a future liasse PDF archive,
   but nothing else is wired to it yet).
 
+## Operational readiness — bulk-validate
+
+`POST /entries/validate-batch` (2026-10-18) closes the gap
+`specs/roadmap.md`'s own "Onboarding/migration path" section had flagged:
+before this, every imported écriture (FEC import, Excel import, a
+template application) landed as an unvalidated draft by design, with no
+way to validate many at once — a real historical import (hundreds of
+drafts) could only be brought to a clôturable state one écriture at a
+time through the ordinary journal-grid "Valider" button.
+
+- **Zero new posting/numbering logic — reuses `EntriesService.validate()`
+  verbatim, per id, in a loop.** `validateBatch()` is NOT one big
+  transaction: each id goes through the exact same per-entry `validate()`
+  call (its own atomic `$transaction` incrementing `Company.nextEcritureNum`
+  and assigning it) independently, inside its own try/catch. This is the
+  roadmap's own stated classification — "GATED... but zero new risk" —
+  confirmed true by construction: there is no new code path that could
+  ever assign an `EcritureNum` differently than the existing single-entry
+  endpoint already does.
+- **Never all-or-nothing — the deliberate opposite of Excel/FEC import's
+  own all-or-nothing semantics.** One id failing (already validated
+  elsewhere, deleted mid-batch, whatever `validate()` itself would refuse)
+  never aborts or rolls back the rest — `ValidateBatchResponseDto.results`
+  names every id's own outcome (`VALIDATED` with its real new
+  `ecritureNum`, or `FAILED` with the real underlying error message), so a
+  partial result is a normal 200/201 response, never an error the caller
+  has to catch. `validatedCount`/`failedCount` summarize it, but `results`
+  is the source of truth — never a silent partial success.
+- **Two selection modes, mutually exclusive, enforced in the service (not
+  a DTO decorator)** — same convention as `InvoicingService`'s own
+  "correctsInvoiceId only for a CREDIT_NOTE" check: `ecritureIds` (an
+  explicit array, validated in the GIVEN order — that order IS the
+  `EcritureNum` assignment order) XOR `fiscalYearId` (every draft in that
+  year). **`fiscalYearId` mode orders by `ecritureDate` ascending, then
+  `createdAt` ascending** — not insertion/creation order — so a batch
+  validation of a historical import reproduces the chronological
+  `EcritureNum` sequence that import's entries would have originally
+  received, not an arbitrary one tied to whatever order a bulk tool
+  happened to insert them in. Verified live with écritures created in
+  deliberately NON-chronological order (see below) — this is the one
+  piece of real logic this feature adds beyond "call `validate()` in a
+  loop," and it was tested against real data specifically because it's
+  the one place a wrong default would be hard to notice.
+- **Frontend surface: `FiscalYearsPage.tsx`'s own `StatusCell`**, not a
+  new screen — an open fiscal year with ≥1 draft shows its draft count
+  (computed from the already-fetched écritures list, no new query) plus a
+  "Valider tout" action, `window.confirm()`-then-mutate (same irreversible-
+  action discipline as cession/dotation/à-nouveau/finalize — each
+  validated écriture becomes immediately immutable). A result with
+  `failedCount > 0` shows a dismissible error banner naming which ids
+  failed and why (mirroring the pre-existing `closeError` banner exactly);
+  a clean all-`VALIDATED` result shows a fire-and-forget toast instead,
+  matching this app's own established "confirmatory message → toast,
+  actionable message → banner" split from the UI/UX pass above.
+- **Verified two ways.** 6 new unit tests in `entries.service.spec.ts`
+  (both mutual-exclusivity rejections; `ecritureIds` mode assigning
+  sequential `EcritureNum`s in the given order; `fiscalYearId` mode's
+  exact `orderBy: [{ecritureDate:'asc'},{createdAt:'asc'}]` query args;
+  a failure on one id never aborting the rest, with the other two still
+  succeeding; and the explicit regression-equivalence check the roadmap
+  itself called for — a batch call producing IDENTICAL `ecritureNum`
+  results to calling `validate()` individually for the same ids) — 922
+  backend tests passing overall (up from 916); `tsc`/`eslint` clean,
+  `vite build` clean. **Live, against the FR demo company, via curl AND a
+  real browser, cleaned up afterward**: created a throwaway fiscal year
+  ("Test Bulk Validate 2097") with 4 draft écritures posted in
+  deliberately NON-chronological creation order (June, January,
+  September, then a 5th, November) — a `fiscalYearId`-mode batch call
+  correctly validated them in TRUE chronological order
+  (January→`65`, June→`66`, September→`67`), confirming the ordering
+  logic holds against real data, not just mocked assertions; a second
+  batch call mixing one genuinely-still-draft id, one id already
+  validated by the first call, and one nonexistent id correctly
+  validated the real draft (assigning the next real sequential number)
+  while independently reporting the other two as named failures, with
+  no rollback and no silent skip. Then, in the real browser: the
+  "Test Bulk Validate 2097" row rendered "1 brouillon" + "Valider tout"
+  exactly matching the one remaining draft (E5); clicking it (with
+  `window.confirm` stubbed to auto-accept for the scripted click, the
+  real production code path otherwise unmodified) fired a real
+  `POST /entries/validate-batch` (confirmed `201` via network
+  inspection) and the row updated immediately with no reload, the
+  draft-count/button affordance disappearing. All 5 test écritures, their
+  lines, and the throwaway fiscal year were removed afterward via a
+  temporary script (no delete endpoint exists for a validated écriture
+  or for `FiscalYear`, by design); confirmed via a follow-up
+  `GET /fiscal-years` that only the real "2026" fiscal year remained, and
+  via `POST /liasse/generate` that the ledger returned to its exact
+  known baseline (`39 495,00 = 39 495,00`). Full backend suite re-run
+  afterward as a final sanity check: 922/922 passing, unchanged.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't

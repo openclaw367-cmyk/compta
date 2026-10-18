@@ -34,6 +34,7 @@ import type {
   FecImportPreviewResponse,
   FiscalYear,
   FiscalYearArchive,
+  ValidateBatchResponse,
   FixedAsset,
   ImportBatch,
   ImportPreviewResponse,
@@ -549,6 +550,25 @@ export function useCloseFiscalYear() {
     onSuccess: (_result, id) => {
       void queryClient.invalidateQueries({ queryKey: ['fiscal-years'] });
       void queryClient.invalidateQueries({ queryKey: ['fiscal-year-archive', id] });
+    },
+  });
+}
+
+/**
+ * Validates every draft in a fiscal year in one call — see CLAUDE.md
+ * "Operational readiness — bulk-validate". Never all-or-nothing: the
+ * response names each id's own outcome, so even a partial result
+ * (some validated, some failed) is a normal, expected response, not
+ * an error to catch — the caller always gets a 200 with the full
+ * breakdown.
+ */
+export function useValidateFiscalYearDrafts() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (fiscalYearId: string) =>
+      api.post<ValidateBatchResponse>('/entries/validate-batch', { fiscalYearId }),
+    onSuccess: () => {
+      invalidateEcrituresAndLedger(queryClient);
     },
   });
 }
