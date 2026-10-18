@@ -63,6 +63,9 @@ function makePrismaMock() {
       count: jest.fn().mockResolvedValue(0),
       findMany: jest.fn().mockResolvedValue([makeEcriture()]),
     },
+    archivedExport: {
+      upsert: jest.fn().mockResolvedValue({ id: 'archive-1' }),
+    },
   };
 }
 
@@ -194,6 +197,63 @@ describe('FecExportService', () => {
       const fields = content.split('\r\n')[1].split('|');
       expect(fields[6]).toBe('');
       expect(fields[7]).toBe('');
+    });
+  });
+
+  describe('archival backfill (see FiscalYearsService.close() for the primary path)', () => {
+    it('does NOT archive an export of a still-OPEN fiscal year — a premature snapshot could still change', async () => {
+      prisma.fiscalYear.findFirst.mockResolvedValueOnce({
+        id: 'fy-2026',
+        endDate: new Date(Date.UTC(2026, 11, 31)),
+        closedAt: null,
+      });
+      await service.generate(company, 'fy-2026');
+      expect(prisma.archivedExport.upsert).not.toHaveBeenCalled();
+    });
+
+    it('backfills the archive, hashing the real content, when exporting an already-CLOSED year that has none yet', async () => {
+      prisma.fiscalYear.findFirst.mockResolvedValueOnce({
+        id: 'fy-2026',
+        endDate: new Date(Date.UTC(2026, 11, 31)),
+        closedAt: new Date(Date.UTC(2027, 1, 1)),
+      });
+      const { fileName, content } = await service.generate(company, 'fy-2026');
+      expect(prisma.archivedExport.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            companyId_fiscalYearId_kind: {
+              companyId: 'company-1',
+              fiscalYearId: 'fy-2026',
+              kind: 'FEC',
+            },
+          },
+          create: expect.objectContaining({
+            fileName,
+            sha256Hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+          }),
+          update: {},
+        }),
+      );
+      // The hash is of the ACTUAL content — a regression guard against
+      // ever accidentally hashing a placeholder or a stale value.
+      const { createHash } = await import('crypto');
+      const expectedHash = createHash('sha256').update(content, 'utf8').digest('hex');
+      const call = prisma.archivedExport.upsert.mock.calls[0][0] as {
+        create: { sha256Hash: string };
+      };
+      expect(call.create.sha256Hash).toBe(expectedHash);
+    });
+
+    it('never breaks the actual download if the archive backfill write fails — best-effort, same discipline as ActivityService.log()', async () => {
+      prisma.fiscalYear.findFirst.mockResolvedValueOnce({
+        id: 'fy-2026',
+        endDate: new Date(Date.UTC(2026, 11, 31)),
+        closedAt: new Date(Date.UTC(2027, 1, 1)),
+      });
+      prisma.archivedExport.upsert.mockRejectedValueOnce(new Error('DB hiccup'));
+      const { fileName, content } = await service.generate(company, 'fy-2026');
+      expect(fileName).toBe('123456789FEC20261231.txt');
+      expect(content).toContain(FEC_COLUMNS.join('|'));
     });
   });
 

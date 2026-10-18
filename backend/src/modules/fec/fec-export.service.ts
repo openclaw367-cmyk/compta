@@ -2,9 +2,11 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Account, Company, Ecriture, EcritureLigne, FiscalYear, Journal } from '@prisma/client';
+import { createHash } from 'crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import {
@@ -45,6 +47,8 @@ interface ExportContext {
  */
 @Injectable()
 export class FecExportService {
+  private readonly logger = new Logger(FecExportService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async generate(company: CompanyContext, fiscalYearId: string): Promise<FecFile> {
@@ -79,8 +83,54 @@ export class FecExportService {
     );
 
     const content = [FEC_COLUMNS.join(FEC_DELIMITER), ...rows].join(FEC_LINE_BREAK);
+    const fileName = fecFileName(identifier, fiscalYear.endDate);
 
-    return { fileName: fecFileName(identifier, fiscalYear.endDate), content };
+    // Backfill path only — see CLAUDE.md "Operational readiness — clôture
+    // d'exercice archival". A year closed BEFORE this feature existed (or
+    // closed by a version of close() that, for whatever reason, didn't
+    // archive) gets its archive record created here instead, the first
+    // time its FEC is exported after closing. For a year that is NOT YET
+    // closed, this never fires — `FiscalYearsService.close()` is the
+    // primary path, and archiving an open year's export would capture a
+    // premature snapshot that could still change before the year
+    // actually closes. Best-effort: a failure here must never break the
+    // actual download the caller asked for (same "must never itself
+    // become the thing that breaks the feature it's observing"
+    // discipline as ActivityService.log()).
+    if (fiscalYear.closedAt) {
+      try {
+        await this.recordArchiveIfMissing(company.companyId, fiscalYearId, fileName, content);
+      } catch (error) {
+        this.logger.error(
+          `Failed to backfill FEC archive for fiscal year ${fiscalYearId}`,
+          error instanceof Error ? error.stack : error,
+        );
+      }
+    }
+
+    return { fileName, content };
+  }
+
+  /**
+   * Writes the ArchivedExport row exactly once per (company, fiscalYear,
+   * kind) — the `@@unique` constraint is what actually enforces "never
+   * overwritten after", this upsert's `update: {}` is deliberately a
+   * no-op so a benign race (two concurrent calls) can never corrupt an
+   * already-recorded hash. Shared by both `generate()`'s own backfill
+   * path above and `FiscalYearsService.close()`'s primary path.
+   */
+  async recordArchiveIfMissing(
+    companyId: string,
+    fiscalYearId: string,
+    fileName: string,
+    content: string,
+  ): Promise<void> {
+    const sha256Hash = createHash('sha256').update(content, 'utf8').digest('hex');
+    await this.prisma.archivedExport.upsert({
+      where: { companyId_fiscalYearId_kind: { companyId, fiscalYearId, kind: 'FEC' } },
+      create: { companyId, fiscalYearId, kind: 'FEC', fileName, sha256Hash },
+      update: {},
+    });
   }
 
   /**

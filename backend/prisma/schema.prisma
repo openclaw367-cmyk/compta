@@ -232,6 +232,7 @@ model Company {
   memberships           Membership[]
   companyInvites        CompanyInvite[]
   activityEvents        ActivityEvent[]
+  archivedExports       ArchivedExport[]
 }
 
 /// Exercice comptable. Ecritures are validated (locked) relative to a
@@ -250,6 +251,7 @@ model FiscalYear {
   ecritures           Ecriture[]
   depreciationEntries DepreciationEntry[]
   invoices            Invoice[]
+  archivedExports     ArchivedExport[]
 
   @@unique([companyId, label])
   @@index([companyId])
@@ -1302,4 +1304,37 @@ model ActivityEvent {
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId, createdAt])
+}
+
+/// Which export format an ArchivedExport row records. Only FEC exists
+/// today — the enum shape is kept open deliberately (e.g. a future
+/// liasse PDF archive) rather than naming the field "fecHash" etc.
+enum ArchivedExportKind {
+  FEC
+}
+
+/// A tamper-evident record that a compliance export was generated for a
+/// CLOSED fiscal year — see CLAUDE.md "Operational readiness — clôture
+/// d'exercice archival". Written exactly once per (company, fiscalYear,
+/// kind), never updated afterward: the `@@unique` constraint is the
+/// actual enforcement, not just documentation. Deliberately stores only
+/// a sha256 hash + metadata, never the export's own content — the
+/// content is always re-derivable on demand from the (now immutable,
+/// since the year is closed) underlying écritures, and re-deriving it
+/// and comparing hashes is this record's own stated verification
+/// method, not a redundant copy to keep in sync.
+model ArchivedExport {
+  id           String             @id @default(cuid())
+  companyId    String
+  company      Company            @relation(fields: [companyId], references: [id])
+  fiscalYearId String
+  fiscalYear   FiscalYear         @relation(fields: [fiscalYearId], references: [id])
+
+  kind       ArchivedExportKind
+  fileName   String
+  sha256Hash String
+  generatedAt DateTime @default(now())
+
+  @@unique([companyId, fiscalYearId, kind])
+  @@index([companyId])
 }

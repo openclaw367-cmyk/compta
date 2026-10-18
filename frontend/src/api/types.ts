@@ -175,6 +175,17 @@ export interface FiscalYear {
   closedAt: string | null;
 }
 
+/** GET /fiscal-years/:id/archive — see CLAUDE.md "Operational readiness — clôture d'exercice archival". */
+export interface FiscalYearArchive {
+  id: string;
+  companyId: string;
+  fiscalYearId: string;
+  kind: 'FEC';
+  fileName: string;
+  sha256Hash: string;
+  generatedAt: string;
+}
+
 export interface EcritureLigne {
   id: string;
   companyId: string;

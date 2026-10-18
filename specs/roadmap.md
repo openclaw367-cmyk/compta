@@ -1401,35 +1401,39 @@ record; this entry records only the decisions, kept here for context.
   workaround already established for Factur-X) — see CLAUDE.md for
   both.
 
-### Clôture d'exercice and archival — closing is solid; archival on top of it is not
+### Clôture d'exercice and archival — SHIPPED (2026-10-18)
 
-Confirmed `FiscalYearsService.close()` genuinely refuses while any
-draft écriture remains in the year, and `assertFiscalYearOpen()` is
-shared by every posting path (create/update/reverse/import) — this
-part already meets the bar. What's missing: closing a year doesn't
-produce or require an archived FEC. `FecController.export` streams
-straight to the HTTP response every time it's called — nothing is
-persisted, so there's no `FecExportLog`-shaped record proving "this
-exact file, this exact hash, was generated and filed on this date,"
-which is what a contrôle fiscal actually wants to see distinguished
-from "whatever the endpoint produces if re-run today."
+Was the second-most-urgent item in this document — now closed, the
+same day as backup/recovery. See CLAUDE.md "Operational readiness —
+clôture d'exercice archival" for the full design/verification record;
+this entry records only the decisions.
 
-- **What**: an `ArchivedExport` record (company, fiscalYearId, kind —
-  FEC for now, a sha256 hash of the content, generatedAt) written the
-  FIRST time a closed year's FEC is exported, never overwritten after —
-  and, ideally, `FiscalYearsService.close()` itself prompts for or
-  requires this before closing completes, so "closed" and "archived"
-  become the same moment rather than two independent, easy-to-forget
-  actions.
-- **Classification: GATED for the archival-triggering link to close()**
-  (a real compliance-adjacent behavior change) — **PRESENTATION for the
-  hash/record-keeping itself** (no new computation, just capturing a
-  fingerprint of output this app already correctly produces).
-- **Verification**: the FEC content itself is ALREADY verified (Test
-  Compta Demat, per CLAUDE.md "Known scope boundaries") — this item
-  only needs to verify the ARCHIVE mechanism: that the stored hash
-  matches a fresh re-generation (proving nothing silently drifted), and
-  that `close()` can't complete without it once wired together.
+- **The firmer version shipped, not the hedged one this section
+  originally sketched** — `close()` now REQUIRES its own FEC to
+  generate successfully before completing (not "ideally" or
+  best-effort): if the company is missing its SIREN/RCI, closing
+  fails with that exact error and the year stays open. A real
+  judgment call made while implementing an already-approved
+  direction, consistent with this app's own "fail loud rather than
+  silently skip" discipline.
+- **New `ArchivedExport` model**, written exactly once per
+  `(company, fiscalYear, kind)`, storing only a sha256 hash + metadata
+  — never the content itself, which is always re-derivable on demand
+  from the now-immutable underlying écritures.
+- **Two write paths**: `close()` is the primary one (archives the
+  year's own final state atomically with setting `closedAt`); a
+  backfill path in `FecExportService.generate()` covers a year closed
+  BEFORE this feature existed, firing only when the year is already
+  closed and has no archive yet — never for a still-open year, which
+  would risk capturing a premature snapshot.
+- **`GET /fiscal-years/:id/archive`**, surfaced on `FiscalYearsPage`
+  as "Archivé — SHA-256: ..." under a closed year's badge — the actual
+  user-facing payoff, letting someone show a real, tamper-evident
+  snapshot exists rather than just knowing one does internally.
+- **Verified two ways**, including live confirmation that a stored
+  hash matches an independent fresh re-export byte-for-byte
+  (`sha256sum`), and that the SIREN-missing refusal genuinely leaves
+  the year open with no archive created.
 
 ### Data integrity under concurrency/failure — holds for the one invariant that matters most; two named exceptions
 
@@ -1543,19 +1547,19 @@ into that company; there's no cross-company rollup.
 ### Sequencing note for this section
 
 Severity-ordered, not dependency-ordered, since none of these five
-block each other. **Backup/recovery is now SHIPPED** (2026-10-18, see
-its own entry above and CLAUDE.md) — it was picked first precisely
-because it was the one item with a real, unbounded data-loss
-consequence and zero mitigation. **Clôture archival is next in
-severity order** (compliance-adjacent, currently a silent gap in an
-otherwise well-flagged codebase) — ahead of anything in the ERP
-section above, including Tier 1. Bulk-validate and the
-multi-year-FEC guard are small, cheap, and could be picked up any time,
-including bundled into whichever FEC-import-adjacent work happens next.
-Cabinet UX items 1-2 are also cheap and a reasonable pairing with
-Multi-user/roles work if that's ever revisited; item 3 (batch
-cross-company actions) is the only genuinely large piece here and
-should wait until there's a real multi-client user to design it against.
+block each other. **Backup/recovery and clôture archival are both now
+SHIPPED** (2026-10-18, same day — see their own entries above and
+CLAUDE.md) — picked first and second precisely because they carried
+the two most severe, currently-unmitigated consequences (unbounded
+data loss; a silent compliance-archival gap in an otherwise
+well-flagged codebase). Bulk-validate and the multi-year-FEC guard are
+next in severity order, small and cheap, and could be picked up any
+time, including bundled into whichever FEC-import-adjacent work
+happens next. Cabinet UX items 1-2 are also cheap and a reasonable
+pairing with Multi-user/roles work if that's ever revisited; item 3
+(batch cross-company actions) is the only genuinely large piece here
+and should wait until there's a real multi-client user to design it
+against.
 
 ---
 

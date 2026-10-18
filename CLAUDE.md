@@ -6369,6 +6369,110 @@ database plus every attached document file.
   export in this app); and self-service restore (see above — a
   deliberate, reasoned deferral, not an oversight).
 
+## Operational readiness — clôture d'exercice archival
+
+`backend/src/modules/fiscal-years/fiscal-years.service.ts` and
+`backend/src/modules/fec/fec-export.service.ts` (2026-10-18, same day
+as backup/recovery) close the second-most-urgent item from the
+operational-readiness audit: `FiscalYearsService.close()` was already
+solid (genuinely refuses while a draft remains, enforced on every
+posting path) but closing a year never produced or required an
+archived FEC — `FecController.export` streamed straight to the HTTP
+response every time, with nothing persisted, so there was no record
+proving "this exact file, this exact hash, was generated when this
+year closed" — exactly what a contrôle fiscal would want distinguished
+from "whatever the endpoint produces if re-run today."
+
+- **New `ArchivedExport` model** (`companyId`, `fiscalYearId`, `kind`
+  — only `FEC` exists today, `fileName`, `sha256Hash`, `generatedAt`),
+  written exactly once per `(company, fiscalYear, kind)` — the
+  `@@unique` constraint is the real enforcement, not just a comment.
+  Deliberately stores only a hash + metadata, never the export's own
+  content: the content is always re-derivable on demand from the
+  (now immutable, since the year is closed) underlying écritures, and
+  re-deriving it and comparing hashes is this record's own stated
+  verification method, not a redundant copy to keep in sync.
+- **`close()` now generates and archives the year's own FEC as part of
+  the SAME action — a real, deliberate precondition, not a
+  best-effort side effect.** If the FEC can't be generated (most
+  likely: the company is missing its SIREN/RCI), `close()` fails with
+  that EXACT error and the year stays open. This was a genuine design
+  reconsideration, not assumed from the roadmap's own softer "ideally"
+  phrasing: a company whose own mandatory audit file can't be produced
+  shouldn't be able to lock its books either — closing without the
+  ability to archive would silently recreate the exact gap this
+  feature exists to close. The FEC content is generated OUTSIDE the
+  transaction (a pure read over already-validated, immutable
+  écritures — nothing can add a new one to this year mid-close, since
+  every posting path shares `assertFiscalYearOpen()`), then the
+  archive-row insert and the `closedAt` update happen together inside
+  one `$transaction`, re-checking the draft count under the lock to
+  guard the rare race where one appeared between the first check and
+  here.
+- **A separate backfill path, for a year closed BEFORE this feature
+  existed** — `FecExportService.generate()` itself now archives the
+  export too, but ONLY when the fiscal year is already closed AND no
+  archive exists yet. For a still-OPEN year, exporting never archives
+  anything — archiving an open year's export would capture a premature
+  snapshot that could still change before the year actually closes;
+  `close()` above is the only path that ever archives an open year's
+  final state. This backfill write is wrapped in try/catch and never
+  rethrown — a failure here must never break the actual FEC download
+  the caller asked for, the same "must never itself become the thing
+  that breaks the feature it's observing" discipline as
+  `ActivityService.log()`.
+- **`GET /fiscal-years/:id/archive`** returns the record (or `null`)
+  — surfaced on `FiscalYearsPage` under a closed year's own status
+  badge as "Archivé — SHA-256: \<12-char prefix\>…", with the full
+  64-character hash in a hover tooltip. This is the actual user-facing
+  payoff of the whole feature: being able to SHOW someone a real,
+  tamper-evident snapshot exists for a closed year, not just know one
+  does internally.
+- **A real architecture reconsideration, not assumed from the
+  roadmap's own first sketch** — the roadmap text said "ideally...
+  close() itself prompts for or requires this before closing
+  completes," hedged language rather than a firm commitment. Building
+  it, the firmer version (close() REQUIRES archival to succeed) was
+  judged correct and consistent with this app's own established
+  "fail loud rather than silently skip" discipline (`assertFiscalYearOpen`,
+  the FEC export's own draft-block) — recorded here as a judgment call
+  made while implementing an already-approved design direction, not a
+  fork that needed a fresh confirmation.
+- **Verified two ways.** 8 new/updated unit tests across
+  `fiscal-years.service.spec.ts` (archival+close happening together,
+  the real sha256 hash of the actual content — not a placeholder,
+  close() refusing when FEC generation fails and leaving the year
+  untouched, the in-transaction draft re-check) and
+  `fec-export.service.spec.ts` (the backfill firing only for an
+  already-closed year, never an open one, hashing the real content,
+  and never breaking the download when the backfill write itself
+  fails) — 916 backend tests passing overall (up from 908); `tsc`/
+  `eslint` clean, `vite build` clean. **Live, against the FR demo
+  company, cleaned up afterward**: created two real throwaway fiscal
+  years; closed the first with zero écritures (confirming an empty
+  year's FEC — just a header row — still archives correctly) and
+  confirmed the stored hash matched a FRESH independent re-export's
+  own hash byte-for-byte (`sha256sum` on the re-downloaded file);
+  temporarily unset the company's own real SIREN, confirmed closing
+  the second year was refused with the exact FEC error, confirmed the
+  year stayed open with no archive record created, restored the SIREN
+  immediately, then closed it successfully; confirmed closing either
+  year a second time correctly refused as already-closed; confirmed
+  both archive records rendered correctly in a real browser
+  (`/exercices`, "Archivé — SHA-256: ..." under each closed year's
+  badge). Both throwaway fiscal years and their archive records were
+  removed via a temporary script afterward, and the FR demo company
+  was confirmed restored to its exact baseline (only its real "2026"
+  fiscal year remains; the liasse still balances at
+  `39 495,00 = 39 495,00`).
+- **Not built this pass**: any UI to trigger a backfill from the
+  archive screen itself (today it only happens as a side effect of
+  calling the ordinary FEC export endpoint — downloading the FEC once
+  is enough, no dedicated "archive now" button exists or is needed);
+  archival for any export kind other than FEC (the `ArchivedExportKind`
+  enum is deliberately left open for e.g. a future liasse PDF archive,
+  but nothing else is wired to it yet).
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
