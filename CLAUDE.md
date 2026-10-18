@@ -6241,6 +6241,134 @@ across every fiscal year** (not scoped to the currently-selected one).
     `compta:searchHistory:<companyId>` held exactly `[]` afterward.
     `tsc`/`eslint`/`vite build` clean.
 
+## Operational readiness — backup and recovery
+
+`backend/src/modules/backup/` (2026-10-18) closes the single most
+urgent gap found in a direct operational-readiness audit requested by
+the user (see `specs/roadmap.md`'s own "Operational readiness" section)
+— this local-first app had ZERO backup/export mechanism, and that gap
+wasn't even flagged anywhere in this file's own otherwise-thorough
+"known scope boundaries" discipline. `GET /backup/export` downloads a
+single zip containing a real `pg_dump` (custom format) of the WHOLE
+database plus every attached document file.
+
+- **Whole-instance, deliberately not company-scoped — a real
+  architecture reconsideration, confirmed with the user before
+  building, not assumed.** The roadmap's own first draft of this
+  feature sketched a company-scoped, app-level JSON export + an
+  in-app restore into a new company. On reflection, and confirmed via
+  `AskUserQuestion` before any code was written, that design was
+  rejected in favor of this one: the real threat ("the disk died, is
+  my data gone") is best answered by Postgres's own proven, atomic
+  `pg_dump`/`pg_restore` mechanism, not a bespoke exporter that would
+  have to hand-serialize 20+ Prisma models and their foreign keys —
+  with the worst possible failure mode for a backup feature being a
+  subtle gap (a silently-dropped table) nobody notices until the day
+  they actually need to restore. This also matches the app's own real
+  deployment model: one operator/firm running their own Postgres
+  instance for several of their OWN client companies (the same
+  "local-first, single-tenant-in-practice" model already accepted for
+  `CredentialEncryptionService`'s own threat model) — backing up the
+  whole instance at once is what that operator actually wants.
+- **Gated on the caller owning at least one company** — there is no
+  instance-level admin role in this app's `Membership` model (OWNER/
+  MEMBER/READ_ONLY are all per-company); a true multi-firm SaaS
+  deployment sharing one instance across unrelated firms would need a
+  real instance-admin role before this endpoint could be exposed
+  safely, out of scope for this app's actual single-operator
+  deployment today. `BackupController` needs `AuthMiddleware` (must
+  know who) but is deliberately NEVER added to
+  `CompanyContextMiddleware`'s `forRoutes()` — the same "needs
+  AuthMiddleware, never company context" shape as `POST`/`GET
+  /companies`'s own exclusion, just expressed by omission rather than
+  `.exclude()` since it's a single-route controller.
+- **Restore is deliberately NOT a self-service endpoint** — see
+  `scripts/backup/README.md` for the documented `pg_restore` runbook.
+  Restoring into a live, running database while the app might be
+  serving other requests is an operational action with real
+  consequences if done wrong, categorically different from export's
+  read-only risk profile; building and verifying a custom restore
+  endpoint was judged not worth the risk for a v1 whose actual job is
+  closing "no backup exists at all," not "restore without leaving the
+  browser."
+- **A real, live-found bug, fixed before this could be called
+  done**: `pg_dump` rejects Prisma's own `?schema=` query-string
+  convention on `DATABASE_URL` outright ("invalid URI query
+  parameter"), since that parameter means something to Prisma's
+  client, not to the standard libpq connection-string grammar
+  `pg_dump` parses. Found live, on the very first real export attempt
+  against this project's own real `DATABASE_URL` — not assumed, not
+  caught by any unit test, since mocked tests only exercise the
+  SHAPE of the call, not a real Postgres connection string. Fixed in
+  `splitPrismaSchemaParam()`: the `schema` query param is stripped
+  from the connection string and passed via `pg_dump`'s own `-n`/
+  `--schema` flag instead (defaulting to `"public"`, Prisma's own
+  default, when absent — never guessed, the documented convention).
+- **A second thing found live, benign but worth documenting
+  precisely rather than leaving as a scary-looking warning**:
+  restoring a `pg_dump` custom-format dump into an ordinary,
+  non-empty-schema target database (i.e. any freshly-`createdb`'d
+  Postgres database, which already has its own default `public`
+  schema) produces a harmless `pg_restore: warning: errors ignored on
+  restore: 1` / `schema "public" already exists` — confirmed this
+  doesn't affect the restored data at all, then confirmed
+  `pg_restore --clean --if-exists` avoids the warning entirely by
+  dropping each object before recreating it. The runbook recommends
+  `--clean --if-exists --no-owner` for exactly this reason, not a
+  guess at reasonable-sounding flags.
+- **`archiver@8` is ESM-only** (`"type": "module"`, no CommonJS
+  build at all) — the same class of incompatibility CLAUDE.md already
+  documents for `@stafyniaksacha/facturx`/`@nestjs/jwt`, confirmed the
+  same way: a static `import` of it throws the moment this file is
+  required, not just under Jest. Fixed with the exact same
+  `common/esm-interop.ts` pattern already established (a cached,
+  un-downleveled dynamic `import()`, `loadArchiver()` mirroring
+  `factur-x.service.ts`'s own `loadFacturX()`) — confirmed live against
+  the real running NestJS app (not just `tsc`) that the dynamic import
+  resolves correctly at runtime. Also required the newer class-based
+  API (`new ZipArchive(options)`, not the classic `archiver('zip',
+  options)` factory function the package used before v8 — confirmed
+  directly against the installed package's own source, never guessed
+  from a stale memory of the old API).
+- **Jest coverage is deliberately the Jest-safe subset only** — same
+  discipline as Factur-X's own `factur-x.integration.spec.ts`:
+  `backup.service.spec.ts` covers the ownership guard and every
+  `pg_dump` outcome (not found, non-zero exit with stderr surfaced,
+  the schema-param stripping, the `PG_DUMP_PATH` override), all of
+  which fail BEFORE ever reaching `buildZip()`'s dynamic `archiver`
+  import — `jest-environment-node` itself throws for any real dynamic
+  import regardless of how it's written, the same `--experimental-vm-modules`
+  limitation already documented for Factur-X/pdfjs-dist. The real
+  zip-contents proof is the live verification below, not a Jest test.
+- **Verified two ways, going further than most features in this app
+  because a backup feature that merely LOOKS correct is worse than
+  useless.** 8 unit tests (the Jest-safe subset above) passing.
+  **Live, against this project's own real dev database and real
+  attached documents, including a genuine export→restore round
+  trip**: called the real endpoint through a real browser click
+  (Paramètres → Sauvegarde), confirmed the downloaded zip contains
+  `database.dump`, a correctly-populated `manifest.json` (companies
+  list, generatedBy, generatedAt), and the real attached-document PDFs
+  under `documents/<companyId>/`; then — the part that actually proves
+  this works, not just that it runs — extracted `database.dump` and
+  restored it via `pg_restore` into a FRESH, temporary database
+  (never touching the live dev database), and confirmed BYTE-FOR-BYTE
+  equality against the live database on two independent checks: the
+  `Ecriture` row count per company (64 and 16, matching exactly), and
+  a real monetary figure (account `512000`'s total debit/credit for
+  the FR demo company, `35750.00`/`3395.00`, matching exactly to the
+  centime). The temporary verification database was dropped
+  immediately after.
+- **Not built this pass, stated explicitly**: any scheduling
+  mechanism (this app has no scheduler at all — taking a backup is a
+  manual, on-demand action; the runbook suggests an OS-level scheduled
+  task calling the endpoint as the most direct option if automation is
+  wanted); any cloud-upload destination (the download itself is the
+  v1 answer to "don't let the backup live on the disk that might
+  die" — the user chooses where to save it, same as every other
+  export in this app); and self-service restore (see above — a
+  deliberate, reasoned deferral, not an oversight).
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't

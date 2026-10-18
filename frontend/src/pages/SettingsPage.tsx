@@ -11,6 +11,7 @@ import { ASSISTANT_ITEM, HOME_ITEM, NAV_GROUPS } from '../lib/navigation';
 import {
   IconBuilding,
   IconChat,
+  IconDownload,
   IconList,
   IconMonitor,
   IconMoon,
@@ -166,6 +167,14 @@ export function SettingsPage() {
               Icon={IconUsers}
               title="Membres"
               description="Inviter des collaborateurs, gérer leurs rôles"
+            />
+          )}
+          {isOwner && (
+            <SettingsCard
+              to="/parametres/sauvegarde"
+              Icon={IconDownload}
+              title="Sauvegarde"
+              description="Télécharger une sauvegarde complète (toutes les sociétés)"
             />
           )}
         </div>

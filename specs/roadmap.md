@@ -1043,6 +1043,113 @@ pattern in this app rather than inventing a new one:
   external, already-certified source, the same trust boundary this
   app already accepts for a bank statement import).
 
+#### 1e. Invoice → all related écritures — close a real, confirmed gap
+
+**Added 2026-09-06, from a direct audit of `InvoiceDetailView.tsx` and
+`Invoice`'s own schema** (not a theoretical item — the user asked
+"since we have invoices attached to accounting entries, I would need
+to be able to see all entries related to a specific invoice," and the
+audit confirmed that today, nothing on the invoice screen links to any
+of them). `Invoice` already carries four DIFFERENT kinds of écriture
+relationship, none of them surfaced together, one of them not tracked
+by any field at all:
+
+- `postedEcritureId` — the original posting (exists, used internally,
+  never shown as a link).
+- `encaissementEcritureId` — the cash-basis-VAT reclassification
+  écriture (services under `ENCAISSEMENTS`, exists, never shown).
+- `correctsInvoiceId` / `correctedBy` — credit-note links, exist as
+  relations, never rendered as "see the invoice/avoir this
+  corrects/that corrects it."
+- **The actual bank-receipt/payment écriture — tracked by NOTHING.**
+  Confirmed by reading `EntriesService.setLettrage()` directly: it's a
+  single free-text string set one `EcritureLigne` at a time, with no
+  grouping, no net-to-zero validation, and no FK back to `Invoice` at
+  all. The only way to find a payment today is to already know which
+  `lettrage` code a human typed into both the invoice's own client-line
+  AND the separate payment écriture's line, found by scrolling the
+  grand livre independently.
+- **What**: a single `GET /invoicing/invoices/:id/related-ecritures`
+  (or folded into the existing detail response) that returns all four
+  kinds together — the three FK-backed links read directly, PLUS a
+  real lookup for the fourth: find every validated `EcritureLigne` on
+  the invoice's own `clientAccountId` sharing a `lettrage` code with
+  the invoice's own posted client-line. `InvoiceDetailView.tsx` renders
+  the result as a clickable list (reusing the SAME
+  `AccountLedgerDrilldown` component the traceability drill-down
+  already built, not a new écriture-viewer).
+- **Classification: PRESENTATION.** Every underlying écriture is
+  already posted and validated through the normal gated path — this is
+  read-only aggregation and display, the exact shape of the
+  traceability drill-down (line → account → écriture →
+  justificatif) already shipped elsewhere in this app, extended one
+  more hop (invoice → every écriture that touches it).
+- **Depends on**: Invoicing (exists), the traceability drill-down's own
+  `AccountLedgerDrilldown` component (exists, reused verbatim).
+  Genuinely independent of 1f below, but the two are natural
+  companions — 1f gives prepayment-matching a real FK instead of a
+  free-text `lettrage` guess, and once that FK exists, THIS item's
+  "payment via lettrage" lookup gets a cleaner, more direct companion
+  ("payment via the real link") rather than replacing it (a client
+  might still pay the ordinary way, with no prepayment involved, so
+  the lettrage-based lookup stays necessary regardless).
+- **Verification**: no new computation to hand-trace — the three FK
+  reads are trivial, and the fourth (lettrage lookup) is exactly the
+  query shape `computePaymentAnomalies()` already runs and is already
+  tested. Verify by regression-testing that this new endpoint's result
+  for a known fixture invoice (with a real posted écriture, a real
+  credit note, and a real lettered payment) matches what each
+  underlying source independently shows, plus a live click-through
+  confirming every link actually opens the right écriture.
+
+#### 1f. Prepayments / acomptes — a real entity, not a free-text lettrage guess
+
+**Added 2026-09-06, from the same audit — confirmed a real, complete
+gap, not a partially-built feature.** `419000` ("avances et acomptes
+reçus") exists only as a liasse bilan-line mapping target (which line
+a balance there routes to) — there is no `Prepayment` model, no
+"record an acompte received" action, no "apply this acompte to that
+invoice" action, anywhere in the app. Today, recording and later
+applying a client prepayment means hand-journaling both postings and
+manually typing a matching `lettrage` string into two unrelated
+screens, with zero system enforcement that the amounts even net to
+zero.
+
+- **What**: a `Prepayment` model (companyId, clientAccountId, amount,
+  receivedDate, `postedEcritureId` — the débit-banque/crédit-419000
+  écriture, posted through the ordinary `EntriesService`) plus an
+  explicit "appliquer à une facture" action: at invoice finalize time
+  (or after, against an already-finalized invoice), applying a
+  prepayment posts the reclassification écriture (débit 419000 /
+  crédit 411xxx, the client account) and sets `Prepayment.appliedToInvoiceId`
+  + `appliedEcritureId` — a real FK, not a lettrage string two people
+  have to agree on by typing the same thing twice. Partial application
+  (a 500€ acompte against a 1200€ invoice) leaves the `Prepayment`
+  row's own remaining balance queryable, rather than silently "used up."
+- **Classification: GATED.** Both the initial receipt and the
+  application-to-invoice step post real écritures through the ordinary
+  `EntriesService.create()`/`.validate()` path — no privileged write.
+  The MATCHING/application step itself (which prepayment can apply to
+  which invoice, enforcing the applied amount never exceeds the
+  prepayment's own remaining balance) is a real correctness control,
+  same discipline as procure-to-pay's 3-way match in §1c.
+- **Depends on**: nothing beyond `EntriesService` for posting; pairs
+  naturally with 1e above (once `appliedToInvoiceId` is a real FK, 1e's
+  "all related écritures" view should show it as its own row, not fall
+  through to the lettrage-guess lookup) but neither blocks the other.
+- **Verification**: fully hand-oracle-testable, same discipline as
+  everywhere else in this app — a hand-traced scenario (receive a
+  1000€ acompte, apply 600€ to invoice A, apply the remaining 400€ to
+  invoice B, assert both reclassification écritures balance and the
+  `Prepayment`'s own remaining balance hits exactly 0,00) plus a guard
+  test proving an over-application (applying more than the remaining
+  balance) is refused rather than silently allowed to go negative. The
+  419000 account's own bilan-line mapping (already correct today, per
+  `bilan-2050.ts`/`bilan-2033-a.ts`) needs no changes — it already
+  nets to the right figure once the reclassification écritures post
+  correctly; this item only needs to confirm that live, not redesign
+  the mapping.
+
 ---
 
 ### Tier 2 — feeds the accounting: the management-accounting layer
@@ -1198,11 +1305,21 @@ Not re-litigating the GATED/PRESENTATION-driven priority order that got
 when picked up, not assumed to slot in ahead of anything. A few honest
 observations to inform that future conversation:
 
-- **1a (Quote/Order) and 1b (invoice payment status) are the cheapest
-  real wins here** — both extend an already-mature module
-  (Invoicing) rather than building new ledger-adjacent machinery from
-  scratch, and 1b in particular is close to "expose an existing
-  computation from a second endpoint."
+- **1a (Quote/Order), 1b (invoice payment status), and 1e (invoice →
+  all related écritures) are the cheapest real wins here** — all three
+  extend an already-mature module (Invoicing) rather than building new
+  ledger-adjacent machinery from scratch; 1b and 1e in particular are
+  close to "expose an existing computation/relation from a new call
+  site," confirmed directly against a real, specific user complaint
+  ("I can't see all the entries related to an invoice"), not a
+  hypothetical gap.
+- **1f (prepayments) is the one Tier-1 item confirmed as a COMPLETE
+  gap, not a partial one** — every other Tier-1 item extends something
+  real; prepayments today have no entity, no action, and no link at
+  all, only a chart-of-accounts line with the right bilan mapping and
+  nothing using it. Pairs naturally with 1e (a real `appliedToInvoiceId`
+  FK is a strictly better answer than 1e's own lettrage-guess fallback)
+  but each stands alone and either could ship first.
 - **1c (procure-to-pay) is the single largest item in this section** —
   three new entities, a real matching engine, and a genuine regulatory
   question (e-invoicing receipt) to research fresh — closer in scope to
@@ -1226,6 +1343,219 @@ observations to inform that future conversation:
   first, with Monaco's own equivalent rules confirmed separately before
   enabling for an MC-jurisdiction company, exactly like Invoicing
   Phase A's own Monaco gate.
+
+---
+
+## Operational readiness — backup, archival, migration at scale, cabinet UX
+
+**Added 2026-09-06, from a direct audit requested by the user** (five
+specific questions: backup/recovery, clôture/archival, concurrency/
+failure safety, the onboarding/migration path, and multi-client/cabinet
+management) — checked against the real code, not recalled. Unlike the
+ERP section above, none of this is a new business-operational module —
+it's the infrastructure layer around the EXISTING product that
+determines whether it's actually shippable to a real accountant with
+real clients and real disk drives. Classified the same way as
+everything else in this document (GATED/PRESENTATION) plus an honest
+severity read, since these five don't share a single theme the way the
+ERP tiers do.
+
+### Backup and recovery — SHIPPED (2026-10-18)
+
+**Was the most urgent item in this entire document — now closed.**
+Grepped the whole repo for backup-related code before building:
+every hit was the credential-encryption threat model ("defends against
+a leaked DB backup"), never an actual backup mechanism, and this was
+the one gap not logged anywhere in CLAUDE.md's own otherwise-thorough
+"known scope boundaries" discipline. See CLAUDE.md "Operational
+readiness — backup and recovery" for the full design/verification
+record; this entry records only the decisions, kept here for context.
+
+- **The architecture actually shipped diverges from this section's own
+  original sketch, deliberately, confirmed with the user before
+  building** — a company-scoped, app-level JSON exporter was rejected
+  in favor of a full-instance `pg_dump`/`pg_restore` design: Postgres's
+  own proven, atomic backup mechanism, rather than hand-serializing
+  20+ Prisma models with real risk of a subtle, undetected gap. This
+  also matches the app's own actual single-operator deployment model
+  (one firm backing up all of their own client companies at once) more
+  directly than a per-company export would have.
+- **`GET /backup/export`, gated on the caller owning at least one
+  company** — no instance-admin role exists in this app's `Membership`
+  model, so this is the closest available check; a true multi-firm
+  SaaS deployment would need a real one before exposing this safely
+  across unrelated firms.
+- **Restore is a documented `pg_restore` runbook
+  (`scripts/backup/README.md`), deliberately not a self-service
+  endpoint** — restoring into a live database is a different risk
+  class than exporting from one; the scheduling half (this app has no
+  scheduler at all) is left to an OS-level scheduled task calling the
+  endpoint, documented rather than built.
+- **Verification went further than "the endpoint returns 200"**: a
+  genuine export→restore round trip — restore the real downloaded dump
+  into a fresh, temporary database (never the live one) and confirm
+  byte-for-byte equality on real row counts AND a real monetary figure
+  against the live database. Two real bugs were found and fixed live
+  along the way (pg_dump rejecting Prisma's own `?schema=` URL
+  convention; an ESM-only dependency needing the same dynamic-import
+  workaround already established for Factur-X) — see CLAUDE.md for
+  both.
+
+### Clôture d'exercice and archival — closing is solid; archival on top of it is not
+
+Confirmed `FiscalYearsService.close()` genuinely refuses while any
+draft écriture remains in the year, and `assertFiscalYearOpen()` is
+shared by every posting path (create/update/reverse/import) — this
+part already meets the bar. What's missing: closing a year doesn't
+produce or require an archived FEC. `FecController.export` streams
+straight to the HTTP response every time it's called — nothing is
+persisted, so there's no `FecExportLog`-shaped record proving "this
+exact file, this exact hash, was generated and filed on this date,"
+which is what a contrôle fiscal actually wants to see distinguished
+from "whatever the endpoint produces if re-run today."
+
+- **What**: an `ArchivedExport` record (company, fiscalYearId, kind —
+  FEC for now, a sha256 hash of the content, generatedAt) written the
+  FIRST time a closed year's FEC is exported, never overwritten after —
+  and, ideally, `FiscalYearsService.close()` itself prompts for or
+  requires this before closing completes, so "closed" and "archived"
+  become the same moment rather than two independent, easy-to-forget
+  actions.
+- **Classification: GATED for the archival-triggering link to close()**
+  (a real compliance-adjacent behavior change) — **PRESENTATION for the
+  hash/record-keeping itself** (no new computation, just capturing a
+  fingerprint of output this app already correctly produces).
+- **Verification**: the FEC content itself is ALREADY verified (Test
+  Compta Demat, per CLAUDE.md "Known scope boundaries") — this item
+  only needs to verify the ARCHIVE mechanism: that the stored hash
+  matches a fresh re-generation (proving nothing silently drifted), and
+  that `close()` can't complete without it once wired together.
+
+### Data integrity under concurrency/failure — holds for the one invariant that matters most; two named exceptions
+
+Verified directly, not assumed: `EntriesService.validate()` (the
+gapless-numbering assignment) wraps the counter increment and the
+écriture update in one `$transaction` — this is the single most
+load-bearing correctness property in the app, and it's genuinely
+crash-safe. Every multi-écriture import (Excel/FEC/Plan Comptable) is
+either one nested Prisma `create` call (atomic by construction) or an
+explicit `$transaction`.
+
+- **Two deliberate, already-documented exceptions**: fixed-asset
+  cession (`disposeFixedAsset()`) and invoice finalization both post
+  the écriture first, then write the linking field
+  (`cessionEcritureId`/`postedEcritureId`) as a separate second step —
+  a crash in that exact window leaves a real, correctly-posted,
+  validated écriture with the FixedAsset/Invoice row not yet reflecting
+  it. Already named as an accepted risk in both places' own code
+  comments — recorded here only to confirm it's genuinely the full
+  extent of the exposure, not a hidden pattern elsewhere too.
+- **No further action proposed here** — this is a verification finding,
+  not a new roadmap item. If it's ever revisited, wrapping those two
+  call sequences in `$transaction` is a small, contained fix (NestJS/
+  Prisma's interactive transactions already support awaiting an
+  external service call inside the callback — `EntriesService.create()`/
+  `.validate()` would need to accept an optional `tx` client parameter
+  rather than always using `this.prisma` directly).
+
+### Onboarding/migration path — further along than expected, with one real scaling gap
+
+FEC/CSV/Excel import genuinely work for bringing in an existing chart +
+historical écritures. Two confirmed frictions for migrating a real
+client at scale:
+
+- **No bulk-validate.** Every imported écriture lands as an
+  unvalidated draft by design; there is no endpoint to validate many at
+  once (confirmed — grepped, nothing). A multi-year historical import
+  means validating every entry one API call at a time.
+  - **What**: `POST /entries/validate-batch` (an array of ids, or a
+    `fiscalYearId` + "all drafts in it" mode), reusing
+    `EntriesService.validate()`'s own per-entry transaction in a loop —
+    no new posting logic, just a bulk entry point to it.
+  - **Classification: GATED** (it's the real numbering-assignment path,
+    just called many times) — **but zero new risk**, since each
+    individual assignment is already correctly atomic; verification is
+    a regression test asserting N calls through the batch endpoint
+    produce IDENTICAL results to N individual calls, plus a check that
+    a failure partway through (e.g. one draft unexpectedly already
+    validated by a concurrent request) doesn't silently skip or
+    corrupt the rest — it should report exactly which ids succeeded and
+    which didn't, never a partial silent success.
+- **A FEC file spanning multiple calendar years creates ONE fiscal year
+  spanning that whole range** — traced `resolveFiscalYearPlan()`
+  directly. Not a bug against normal usage (a real FEC export is
+  legally one-file-per-exercice), but a multi-year file (which does
+  happen — a contrôle fiscal's own historical request, for one) would
+  silently create an accounting-nonsensical multi-year "fiscal year"
+  rather than refusing or offering to split it.
+  - **What**: detect a file whose date range spans more than ~13 months
+    and refuse with a clear message naming the span, rather than
+    silently creating a wrong-shaped fiscal year — a narrow, cheap
+    guard, not a new splitting feature (splitting a multi-year file by
+    date automatically would mean GUESSING where one exercice ends and
+    the next begins, which this app's own "never guess, fail loud"
+    discipline should reject in favor of asking the user to split the
+    file themselves).
+  - **Classification: GATED** (it changes what `resolveFiscalYearPlan()`
+    accepts) but trivial — a single boundary check, verified by a
+    straightforward unit test asserting the exact span threshold.
+
+### Multi-client / cabinet management — the data model is ready; there's no UI for it
+
+Multi-tenancy already supports this correctly: one `User` can hold a
+`Membership` in many companies, so an accountant's single login against
+40 client files is already structurally sound — confirmed, nothing to
+fix at the data-model layer. What's missing is entirely presentational:
+the only way to move between companies is a flat native `<select>` in
+`TopBar.tsx` (read directly — `companies.map(c => <option>)`, no
+search, no grouping, no per-company signal), and the existing
+per-company "needs attention" panel (drafts pending, anomalies, pending
+invites — all real, already built) only renders once you've switched
+into that company; there's no cross-company rollup.
+
+- **What, phased from cheapest to most work**:
+  1. Replace the flat `<select>` with a searchable combobox (reusing
+     the SAME combobox pattern `AccountCombobox` already established)
+     — pure UI, zero backend change.
+  2. A cabinet-level landing view: one row per company the caller has
+     a `Membership` in, each showing the SAME signals
+     `NeedsAttentionPanel` already computes per-company (draft count,
+     anomaly count, pending invites) — a fan-out of `N` already-existing,
+     already-tested per-company queries, not a new aggregation engine.
+  3. Batch operations across companies (e.g. "export FEC for every
+     client with a fiscal year closing this month") — the largest part
+     of this item, genuinely new orchestration logic, sequenced last.
+- **Classification: PRESENTATION for 1 and 2** (pure read-side
+  aggregation of already-correct per-company data) — **item 3 is GATED
+  per-action** (each underlying action, e.g. an FEC export, is already
+  gated; running several in sequence needs its own partial-failure
+  handling — "17 of 20 succeeded, here are the 3 that didn't and why,"
+  never a silent partial batch).
+- **Verification**: 1 and 2 need no accounting oracle at all — they're
+  UI/aggregation correctness, verified by confirming the cabinet view's
+  per-company numbers match what that company's own dashboard already
+  shows (a regression/consistency check, not a hand-traced oracle, the
+  same honest distinction this document already draws for Tier-1/2's
+  own presentation-layer items). Item 3's verification is per-underlying-
+  action (already has its own oracle) plus a new test specifically for
+  the partial-failure reporting path.
+
+### Sequencing note for this section
+
+Severity-ordered, not dependency-ordered, since none of these five
+block each other. **Backup/recovery is now SHIPPED** (2026-10-18, see
+its own entry above and CLAUDE.md) — it was picked first precisely
+because it was the one item with a real, unbounded data-loss
+consequence and zero mitigation. **Clôture archival is next in
+severity order** (compliance-adjacent, currently a silent gap in an
+otherwise well-flagged codebase) — ahead of anything in the ERP
+section above, including Tier 1. Bulk-validate and the
+multi-year-FEC guard are small, cheap, and could be picked up any time,
+including bundled into whichever FEC-import-adjacent work happens next.
+Cabinet UX items 1-2 are also cheap and a reasonable pairing with
+Multi-user/roles work if that's ever revisited; item 3 (batch
+cross-company actions) is the only genuinely large piece here and
+should wait until there's a real multi-client user to design it against.
 
 ---
 
@@ -1277,15 +1607,40 @@ an external, commercial PA-provider decision this project can't
 resolve alone, and Monaco's own transmission-regime question stays
 open — see `specs/invoicing-plan.md`.
 
-**"Business-operations / ERP direction"** (added 2026-09-06) is the
-next planning horizon above, per the user's own explicit request for an
-honest inventory of what already exists beyond core accounting, plus a
-roadmap organized by coupling to the ledger rather than this document's
-own priority-order convention. Nothing in it is designed or built —
-same MAP-ONLY status as everything else in this file — but it does
-already establish two concrete recommendations worth carrying forward
-even before any of it is picked up: (1) the cheapest real win is
-promoting the anomaly engine's own existing payment-status logic into a
-first-class `Invoice` property (§1b there), and (2) a full payroll
-engine is explicitly NOT recommended, ever, in favor of best-of-breed
-providers — the clearest "don't build" call this project has made.
+**"Business-operations / ERP direction"** (added 2026-09-06, extended
+the same day with Tier-1 items 1e/1f) is the next planning horizon
+above, per the user's own explicit request for an honest inventory of
+what already exists beyond core accounting, plus a roadmap organized
+by coupling to the ledger rather than this document's own
+priority-order convention. Nothing in it is designed or built — same
+MAP-ONLY status as everything else in this file — but it does already
+establish concrete recommendations worth carrying forward even before
+any of it is picked up: (1) the cheapest real wins are promoting the
+anomaly engine's own existing payment-status logic into a first-class
+`Invoice` property (§1b) and surfacing the invoice's own already-
+scattered écriture links on its own detail screen (§1e); (2) a real
+`Prepayment` entity (§1f) is needed — confirmed, via direct audit, to
+be a COMPLETE gap today, not a partial one, with `lettrage` serving
+only as an unenforced free-text correlation guess in its place; and (3)
+a full payroll engine is explicitly NOT recommended, ever, in favor of
+best-of-breed providers — the clearest "don't build" call this project
+has made.
+
+**"Operational readiness — backup, archival, migration at scale,
+cabinet UX"** (added 2026-09-06, same day) is a second, separate audit
+— not a business-operational feature set, but the infrastructure layer
+determining whether this app is actually shippable to a real
+accountant. The single most urgent finding in the whole document: **a
+local-first app with zero backup/export mechanism and zero mention of
+that gap anywhere in CLAUDE.md's own otherwise-thorough "known scope
+boundaries" discipline** — confirmed by direct grep, not assumed. Also
+confirmed: clôture d'exercice itself is solid (genuinely blocks on
+draft écritures, genuinely enforced on every posting path), but nothing
+archives the resulting FEC with a tamper-evident record; the one
+invariant that would be catastrophic to get wrong under a crash
+(gapless sequential numbering) IS transaction-safe, with two already-
+self-documented, narrow exceptions elsewhere; FEC/Excel import genuinely
+support onboarding an existing client but have no bulk-validate action
+and would silently mishandle a multi-year FEC file; and multi-tenancy
+already supports an accountant managing many client companies at the
+data-model layer, with zero cabinet-level UI built on top of it yet.
