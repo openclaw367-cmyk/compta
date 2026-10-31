@@ -18,8 +18,9 @@ export function setCurrentCompanyId(companyId: string | null): void {
   currentCompanyId = companyId;
 }
 
-function companyHeaders(): Record<string, string> {
-  return currentCompanyId ? { 'x-company-id': currentCompanyId } : {};
+function companyHeaders(companyIdOverride?: string): Record<string, string> {
+  const id = companyIdOverride ?? currentCompanyId;
+  return id ? { 'x-company-id': id } : {};
 }
 
 function authHeaders(): Record<string, string> {
@@ -68,7 +69,7 @@ async function fetchWithAuthRetry(path: string, init: RequestInit): Promise<Resp
   });
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, companyIdOverride?: string): Promise<T> {
   // FormData bodies (file upload) must NOT get an explicit Content-Type —
   // fetch sets multipart/form-data with the correct boundary itself, and
   // overriding it here would break the boundary and the upload with it.
@@ -78,7 +79,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: {
       ...(init?.body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
       Accept: 'application/json',
-      ...companyHeaders(),
+      ...companyHeaders(companyIdOverride),
       ...authHeaders(),
       ...init?.headers,
     },
@@ -189,6 +190,18 @@ async function requestFileBlobPost(path: string, data: unknown): Promise<Downloa
 
 export const api = {
   get: <T>(path: string): Promise<T> => request<T>(path),
+  /**
+   * A GET scoped to a company OTHER than the ambient current one — used
+   * only by the cabinet landing view (see CLAUDE.md "Multi-client /
+   * cabinet management"), which fans out N already-existing per-company
+   * reads (fiscal years, entries, memberships, anomalies) in parallel
+   * without disturbing the global `currentCompanyId`/query-cache reset
+   * every other screen relies on. Never use this for a company the
+   * caller isn't a real member of — the backend's own
+   * `CompanyContextMiddleware` still enforces that regardless.
+   */
+  getForCompany: <T>(path: string, companyId: string): Promise<T> =>
+    request<T>(path, undefined, companyId),
   post: <T>(path: string, data: unknown): Promise<T> =>
     request<T>(path, { method: 'POST', body: JSON.stringify(data) }),
   patch: <T>(path: string, data: unknown): Promise<T> =>

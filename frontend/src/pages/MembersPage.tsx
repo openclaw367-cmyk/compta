@@ -13,12 +13,7 @@ import { useAuth } from '../context/authContextStore';
 import { useToast } from '../context/toastStore';
 import { SettingsBackLink } from '../components/layout/SettingsBackLink';
 import { ActivityFeedSection } from '../components/activity/ActivityFeedSection';
-
-const ROLE_LABEL: Record<MembershipRole, string> = {
-  OWNER: 'Propriétaire',
-  MEMBER: 'Membre',
-  READ_ONLY: 'Lecture seule',
-};
+import { ROLE_LABEL } from '../lib/membershipRoles';
 
 const ROLE_DESCRIPTION: Record<MembershipRole, string> = {
   OWNER: 'Accès complet, y compris la gestion des membres',

@@ -39,6 +39,7 @@ import { AssistantPage } from './pages/AssistantPage';
 import { AssistantSettingsPage } from './pages/AssistantSettingsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { CreateCompanyPage } from './pages/CreateCompanyPage';
+import { CabinetPage } from './pages/CabinetPage';
 
 /** "/" redirects to whatever screen the user picked as their default
  * landing screen (see SettingsPage's "Écran de démarrage") — Dashboard
@@ -105,6 +106,7 @@ export default function App() {
                         <Route path="/parametres/nouvelle-societe" element={<CreateCompanyPage />} />
                         <Route path="/parametres/membres" element={<MembersPage />} />
                         <Route path="/parametres/sauvegarde" element={<BackupPage />} />
+                        <Route path="/cabinet" element={<CabinetPage />} />
                       </Routes>
                     </AppShell>
                   </ToastProvider>

@@ -17,6 +17,7 @@ const EXTRA_DESTINATIONS: ExtraDestination[] = [
   { to: '/parametres/nouvelle-societe', label: 'Nouvelle société', hint: 'Paramètres' },
   { to: '/parametres/membres', label: 'Membres', hint: 'Paramètres' },
   { to: '/comptes', label: 'Comptes & journaux', hint: 'Paramètres' },
+  { to: '/cabinet', label: 'Cabinet', hint: 'Toutes les sociétés' },
 ];
 
 /** Keystrokes settle for this long before the (server-side) écriture search fires — pages/

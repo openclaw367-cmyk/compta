@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
 import { downloadBlob } from '../lib/download';
 import type {
@@ -12,6 +12,7 @@ import type {
   Ca3Declaration,
   Ca3LineTraceResult,
   Ca3TraceColumn,
+  CabinetCompanySummary,
   CashFlowStatement,
   CessionResult,
   ChatMessage,
@@ -1829,5 +1830,59 @@ export function useAnomaliesSummary(fiscalYearId: string | null) {
     queryKey: ['anomalies', fiscalYearId],
     queryFn: () => api.get<AnomaliesSummary>(`/anomalies?fiscalYearId=${fiscalYearId}`),
     enabled: Boolean(fiscalYearId),
+  });
+}
+
+/**
+ * Cabinet landing view — see CLAUDE.md "Multi-client / cabinet
+ * management". One independent query PER company (never a single
+ * aggregate request — no backend endpoint exists for that, by design:
+ * this is a frontend-side fan-out of the SAME already-existing,
+ * already-tested per-company reads NeedsAttentionPanel already uses for
+ * the current company — fiscal years, entries, memberships, anomalies —
+ * via `api.getForCompany()`, never a new aggregation engine). A failure
+ * fetching one company's own summary never blocks the others — each
+ * row in TanStack Query's own result array carries its own
+ * isLoading/isError independently.
+ */
+export function useCabinetSummaries(companies: Company[]) {
+  return useQueries({
+    queries: companies.map((company) => ({
+      queryKey: ['cabinet-summary', company.id],
+      queryFn: async (): Promise<CabinetCompanySummary> => {
+        const fiscalYears = await api.getForCompany<FiscalYear[]>('/fiscal-years', company.id);
+        // Same "open, else most recent" default AppProvider/DashboardService already use.
+        const currentFiscalYear = fiscalYears.find((fy) => fy.closedAt === null) ?? fiscalYears[0] ?? null;
+
+        const [entries, memberships, anomalies] = await Promise.all([
+          currentFiscalYear
+            ? api.getForCompany<Ecriture[]>('/entries', company.id)
+            : Promise.resolve<Ecriture[]>([]),
+          company.role === 'OWNER'
+            ? api.getForCompany<MembershipsList>('/memberships', company.id)
+            : Promise.resolve<MembershipsList | null>(null),
+          currentFiscalYear
+            ? api.getForCompany<AnomaliesSummary>(
+                `/anomalies?fiscalYearId=${currentFiscalYear.id}`,
+                company.id,
+              )
+            : Promise.resolve<AnomaliesSummary | null>(null),
+        ]);
+
+        const draftCount = currentFiscalYear
+          ? entries.filter((e) => e.fiscalYearId === currentFiscalYear.id && e.validatedAt === null)
+              .length
+          : 0;
+
+        return {
+          companyId: company.id,
+          fiscalYearLabel: currentFiscalYear?.label ?? null,
+          draftCount,
+          anomalyCount: (anomalies?.spending.length ?? 0) + (anomalies?.payments.length ?? 0),
+          pendingInviteCount: memberships?.pendingInvites.length ?? 0,
+        };
+      },
+      staleTime: 30 * 1000,
+    })),
   });
 }

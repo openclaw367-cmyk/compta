@@ -87,6 +87,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
 const UNLISTED_ROUTE_LABELS: { prefix: string; label: string }[] = [
   { prefix: '/immobilisations/', label: 'Immobilisations' },
   { prefix: '/assistant/parametres', label: 'Assistant — Paramètres' },
+  { prefix: '/cabinet', label: 'Cabinet' },
 ];
 
 /** TopBar's page-title lookup — never used for routing itself, purely a display label. */

@@ -6564,6 +6564,84 @@ time through the ordinary journal-grid "Valider" button.
   known baseline (`39 495,00 = 39 495,00`). Full backend suite re-run
   afterward as a final sanity check: 922/922 passing, unchanged.
 
+## Multi-client / cabinet management (items 1–2)
+
+(2026-10-31) Closes the first two of the three phased items in
+`specs/roadmap.md`'s own "Multi-client / cabinet management" section —
+pure presentation, zero backend change, confirming its own classification.
+Item 3 (batch cross-company actions, e.g. "export FEC for every client
+with a fiscal year closing this month") remains deliberately unbuilt —
+the roadmap's own stated reason still holds: it's genuinely new
+orchestration logic, best designed against a real multi-client user.
+
+- **Item 1 — `CompanySwitcher.tsx` (new) replaces TopBar's former flat
+  `<select>`.** A type-to-filter combobox reusing the exact interaction
+  idiom `AccountCombobox.tsx` already established (ArrowUp/Down + Enter,
+  Escape reverts, the same ref-vs-stale-closure fix for its blur
+  handler) rather than inventing a second combobox pattern — deliberately
+  NOT a copy-paste of `AccountCombobox` itself (that component's "+
+  create new" affordance and grid-cell-specific styling don't apply
+  here). Still gated on `companies.length > 1`, same as the `<select>`
+  it replaces — with exactly one company, a picker (searchable or not)
+  is still just noise.
+- **Item 2 — `CabinetPage.tsx` (new, route `/cabinet`)** is a pure
+  read-side fan-out, NOT a new aggregation engine — confirmed true by
+  construction. `useCabinetSummaries()` (`api/queries.ts`) issues one
+  INDEPENDENT `useQueries` entry per company (never a single combined
+  request — no backend endpoint exists for that, by design), each
+  internally calling the SAME already-existing, already-tested
+  per-company endpoints `NeedsAttentionPanel` already reads for the
+  CURRENT company (`/fiscal-years`, `/entries`, `/memberships`,
+  `/anomalies`) — just for a DIFFERENT company each time. A failure
+  computing one company's own summary never blocks the others —
+  TanStack Query's own per-entry `isLoading`/`isError` already gives
+  that independence for free, no extra code needed.
+- **`api.getForCompany<T>(path, companyId)` (new, `api/client.ts`)** is
+  the one small, additive seam this required: a GET scoped to a company
+  OTHER than the ambient `currentCompanyId` every other hook in this app
+  implicitly uses. `companyHeaders()`/`request()` both gained an
+  optional override parameter — the ambient convention itself is
+  completely unchanged for every existing call site (all of which omit
+  the override and keep reading the global `currentCompanyId`, exactly
+  as before). Scoped deliberately to GET only — this view never writes
+  anything, so no `postForCompany`/etc. exists or is needed.
+  `request()`'s own backend-side enforcement (`CompanyContextMiddleware`)
+  still independently verifies a real `Membership` for whichever company
+  id is sent, regardless of which header-building path produced it —
+  this frontend seam can't itself grant access to a company the caller
+  isn't really a member of.
+- **The "open, else most recent" fiscal-year default is reproduced
+  client-side, not re-fetched from a shared source** — the exact same
+  one-line rule `AppProvider.tsx`/`DashboardService.getSummary()` already
+  use (`fiscalYears.find(fy => fy.closedAt === null) ?? fiscalYears[0]`).
+  A company with NO fiscal year at all gets `fiscalYearLabel: null` and
+  every count reads `0`, honestly — not an error, not a skipped row.
+- **Verified two ways.** `tsc`/`eslint`/`vite build` all clean on the
+  frontend (no backend file touched — confirmed via `git status`). Live,
+  real browser, against the three companies the dev-admin account
+  already owns (FR demo, Monaco demo, "Société Test Multi-Année" — see
+  "Test fixtures" above): the TopBar combobox correctly filtered to one
+  match typing "monaco", selecting it switched the active company and
+  the dashboard immediately reflected the new company's own data;
+  `/cabinet` rendered all three companies with the FR demo company's
+  real `4 anomalies` badge (matching that same company's own dashboard
+  "Toutes les anomalies (4)" link exactly — the cross-check the roadmap's
+  own verification note calls for) and the other two correctly showing
+  "À jour"; clicking a row switched the active company (confirmed via
+  the dashboard immediately showing that company's own onboarding
+  progress and anomaly state) and navigated to `/tableau-de-bord`.
+  **One pre-existing, unrelated data issue surfaced by this view, not
+  caused by it**: "Société Test Multi-Année"'s own stored `Company.name`
+  contains mangled accented characters (confirmed via a direct,
+  unauthenticated-by-this-feature `GET /companies` call — the raw API
+  response already carries the corruption) — a stale artifact from
+  however that fixture company's name was originally typed/encoded when
+  it was "built by hand through the real APIs" (see "Test fixtures"
+  above), not something this page's own rendering introduced. Left
+  alone, per that same section's own "don't touch this fixture casually"
+  rule — worth a deliberate fix in a future pass if it's ever revisited,
+  not attempted here as an unrequested side effect.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't
