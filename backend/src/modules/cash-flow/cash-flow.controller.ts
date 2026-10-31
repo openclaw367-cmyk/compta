@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Res } from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiProduces, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { CurrentCompany } from '../../common/tenant/current-company.decorator';
@@ -7,6 +7,9 @@ import { CompaniesService } from '../companies/companies.service';
 import { FiscalYearsService } from '../fiscal-years/fiscal-years.service';
 import { CashFlowService } from './cash-flow.service';
 import { ComputeCashFlowDto } from './dto/compute-cash-flow.dto';
+import { CashFlowTraceCafQueryDto } from './dto/cash-flow-trace-caf-query.dto';
+import { CashFlowTraceDeltaLineQueryDto } from './dto/cash-flow-trace-delta-line-query.dto';
+import { CashFlowTraceOpeningLineQueryDto } from './dto/cash-flow-trace-opening-line-query.dto';
 import { renderCashFlowPdf } from './cash-flow-pdf';
 import { renderCashFlowExcel } from './cash-flow-excel';
 
@@ -14,7 +17,8 @@ import { renderCashFlowExcel } from './cash-flow-excel';
 @ApiHeader({
   name: 'x-company-id',
   required: true,
-  description: 'Tenant id — must name a company the caller (see Authorization header) is a member of.',
+  description:
+    'Tenant id — must name a company the caller (see Authorization header) is a member of.',
 })
 @Controller('cash-flow')
 export class CashFlowController {
@@ -35,6 +39,48 @@ export class CashFlowController {
   @Post('generate')
   generate(@CurrentCompany() company: CompanyContext, @Body() dto: ComputeCashFlowDto) {
     return this.cashFlowService.generate(company, dto);
+  }
+
+  @ApiOperation({
+    summary:
+      "Trace la CAF jusqu'à ses propres termes (Tier 4 — voir CLAUDE.md « Traceability drill-down (Tier 4) »).",
+    description:
+      "GET, auto-fetched à l'ouverture de la ligne, jamais une action déclenchée. Chaque terme qui " +
+      'se décompose en codes CDR peut être retracé plus loin via le /liasse/cdr-line-trace déjà ' +
+      'existant (Tier 1) — ce module ne duplique jamais cette logique.',
+  })
+  @Get('trace-caf')
+  traceCaf(@CurrentCompany() company: CompanyContext, @Query() dto: CashFlowTraceCafQueryDto) {
+    return this.cashFlowService.traceCaf(company, dto);
+  }
+
+  @ApiOperation({
+    summary: "Trace une ligne de flux « delta de ligne du bilan » jusqu'à ses codes (Tier 4).",
+    description:
+      'Couvre variationCreancesClients/variationStocks/variationDettesExploitation/' +
+      'variationDettesSurImmobilisations/variationEmprunts/variationCapital — voir cash-flow-trace.ts ' +
+      'pour la liste complète des lignes refusées à la place.',
+  })
+  @Get('trace-delta-line')
+  traceDeltaLine(
+    @CurrentCompany() company: CompanyContext,
+    @Query() dto: CashFlowTraceDeltaLineQueryDto,
+  ) {
+    return this.cashFlowService.traceDeltaLine(company, dto);
+  }
+
+  @ApiOperation({
+    summary: "Trace le côté OUVERTURE (à-nouveau) d'une ligne jusqu'à ses comptes (Tier 4).",
+    description:
+      'Le côté CLÔTURE de la même ligne se retrace via le /liasse/bilan-line-trace déjà existant ' +
+      "(regime=REEL_NORMAL) — cet endpoint n'existe que parce que ce côté-là n'a pas d'équivalent.",
+  })
+  @Get('trace-opening-bilan-line')
+  traceOpeningBilanLine(
+    @CurrentCompany() company: CompanyContext,
+    @Query() dto: CashFlowTraceOpeningLineQueryDto,
+  ) {
+    return this.cashFlowService.traceOpeningBilanLine(company, dto);
   }
 
   @ApiOperation({ summary: 'Download the tableau des flux de trésorerie as a PDF.' })

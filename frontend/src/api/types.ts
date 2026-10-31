@@ -940,6 +940,92 @@ export interface CashFlowStatement {
   tresorerieCloture: string;
 }
 
+/**
+ * Traceability drill-down, Tier 4 — "formula trace" shape shared by the
+ * cash-flow CAF trace AND the financial-analysis SIG-cascade trace. See
+ * CLAUDE.md "Traceability drill-down (Tier 4)". A term that further
+ * decomposes into `codes` can be traced one level further via the
+ * EXISTING Tier 1 `/liasse/cdr-line-trace` (reused as-is, never
+ * duplicated); a term with `nonTraceableReason` instead is a genuine,
+ * honestly-flagged non-drillable derived subtotal (e.g. CAF's own
+ * résultat net — the same category as bilan's DI).
+ */
+export interface CashFlowFormulaCode {
+  code: string;
+  label: string;
+  sign: 1 | -1;
+  value: string;
+}
+
+export interface CashFlowFormulaTerm {
+  key: string;
+  label: string;
+  sign: 1 | -1;
+  value: string;
+  codes?: CashFlowFormulaCode[];
+  nonTraceableReason?: string;
+}
+
+export interface CashFlowFormulaTraceResult {
+  key: 'capaciteAutofinancement';
+  label: string;
+  officialValue: string;
+  terms: CashFlowFormulaTerm[];
+}
+
+export type CashFlowDeltaLineKey =
+  | 'variationCreancesClients'
+  | 'variationStocks'
+  | 'variationDettesExploitation'
+  | 'variationDettesSurImmobilisations'
+  | 'variationEmprunts'
+  | 'variationCapital';
+
+export interface CashFlowDeltaLineCode {
+  code: string;
+  label: string;
+  value: string;
+}
+
+export interface CashFlowDeltaLineSide {
+  totalValue: string;
+  codes: CashFlowDeltaLineCode[];
+}
+
+/**
+ * A "clean bilan-line delta" flux line — each side independently traced
+ * from the SAME opening/closing bilan account snapshots
+ * cash-flow-statement.ts itself reads. The CLOSING side's own codes are
+ * each further traceable via the EXISTING `/liasse/bilan-line-trace`
+ * (regime REEL_NORMAL); the OPENING side has no existing equivalent, so
+ * `useTraceCashFlowOpeningBilanLine` is the one genuinely new "→
+ * accounts" hop this tier adds.
+ */
+export interface CashFlowDeltaLineTraceResult {
+  key: CashFlowDeltaLineKey;
+  label: string;
+  officialValue: string;
+  opening: CashFlowDeltaLineSide;
+  closing: CashFlowDeltaLineSide;
+}
+
+export interface CashFlowOpeningAccountTraceWithId {
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  contribution: string;
+}
+
+export interface CashFlowOpeningLineTraceResponse {
+  lineCode: string;
+  lineLabel: string;
+  lineValue: string;
+  fiscalYearId: string;
+  /** ISO date (YYYY-MM-DD) — pass as BOTH periodStart and periodEnd to AccountLedgerDrilldown to scope it to exactly the à-nouveau line. */
+  openingDate: string;
+  accounts: CashFlowOpeningAccountTraceWithId[];
+}
+
 /** Soldes intermédiaires de gestion — see financial-analysis.ts's computeSigCascade on the backend. */
 export interface SigCascade {
   margeCommerciale: string;
@@ -1038,6 +1124,22 @@ export interface FinancialAnalysisResult {
   endettementEtCapitaux: EndettementEtCapitaux;
   coutDeLaDette: CoutDeLaDette;
   ratios: Ratios;
+}
+
+/**
+ * Traceability drill-down, Tier 4 — SIG cascade "formula trace". See
+ * CLAUDE.md "Traceability drill-down (Tier 4)". Reuses the SAME
+ * `CashFlowFormulaTerm`/`CashFlowFormulaCode` shapes the cash-flow CAF
+ * trace already defines — both modules' formula traces render through
+ * the one shared `FormulaTraceDrilldown` component.
+ */
+export type FinancialAnalysisFormulaKey = 'margeCommerciale' | 'valeurAjoutee' | 'ebe';
+
+export interface FinancialAnalysisFormulaTraceResult {
+  key: FinancialAnalysisFormulaKey;
+  label: string;
+  officialValue: string;
+  terms: CashFlowFormulaTerm[];
 }
 
 /** A user-declared or computed réintégration/déduction line — see resultat-fiscal.ts on the backend. */

@@ -19,6 +19,17 @@ import {
   computeCashFlowStatement,
 } from './cash-flow-statement';
 import { ComputeCashFlowDto } from './dto/compute-cash-flow.dto';
+import { CashFlowTraceCafQueryDto } from './dto/cash-flow-trace-caf-query.dto';
+import { CashFlowTraceDeltaLineQueryDto } from './dto/cash-flow-trace-delta-line-query.dto';
+import { CashFlowTraceOpeningLineQueryDto } from './dto/cash-flow-trace-opening-line-query.dto';
+import {
+  CashFlowDeltaLineTraceResult,
+  CashFlowFormulaTraceResult,
+  CashFlowOpeningLineTraceResponse,
+  traceCashFlowCaf,
+  traceCashFlowDeltaLine,
+  traceCashFlowOpeningBilanLine,
+} from './cash-flow-trace';
 
 const CREANCES_SUR_CESSIONS_ACCOUNT_PREFIX = '462';
 const TVA_DEDUCTIBLE_AUTRES_ACCOUNT_PREFIX = '445660';
@@ -40,6 +51,17 @@ export interface CashFlowContext {
   closingBilan: Bilan2050;
   closingCompteResultat: CompteResultat2052_2053;
   closingBilanAccounts: TrialBalanceAccount[];
+  /**
+   * The raw compte-de-résultat (pcgClass 6–7) trial balance behind
+   * `closingCompteResultat` — kept alongside the already-aggregated
+   * figure (not previously exposed outside `buildContext()`) so the
+   * Tier 4 "formula trace" (`cash-flow-trace.ts`) can independently
+   * re-derive a CDR_RULES code's own value via Tier 1's `traceLine()`,
+   * a genuinely separate code path from `computeCompteResultat2052_2053()`'s
+   * own `cdr.lignes` lookup — see CLAUDE.md "Traceability drill-down
+   * (Tier 4)".
+   */
+  closingCdrAccounts: TrialBalanceAccount[];
   openingBilan: Bilan2050;
   openingBilanAccounts: TrialBalanceAccount[];
   openingCreancesSurCessions: Money;
@@ -228,6 +250,7 @@ export class CashFlowService {
       closingBilan,
       closingCompteResultat,
       closingBilanAccounts,
+      closingCdrAccounts,
       openingBilan,
       openingBilanAccounts,
       openingCreancesSurCessions,
@@ -264,5 +287,118 @@ export class CashFlowService {
     assertCashFlowReconciles(statement);
 
     return statement;
+  }
+
+  /** Shared by the three trace methods below — same draft-block guard as generate(). */
+  private async assertNoDrafts(company: CompanyContext, fiscalYearId: string): Promise<void> {
+    const draftCount = await this.prisma.ecriture.count({
+      where: { companyId: company.companyId, fiscalYearId, validatedAt: null },
+    });
+    if (draftCount > 0) {
+      throw new ConflictException(
+        `Cannot trace the tableau des flux de trésorerie: ${draftCount} écriture(s) in this fiscal ` +
+          'year are still unvalidated (draft). Validate them first.',
+      );
+    }
+  }
+
+  /**
+   * Traceability drill-down, Tier 4 — capacité d'autofinancement (CAF).
+   * See CLAUDE.md "Traceability drill-down (Tier 4)" and
+   * `cash-flow-trace.ts`'s own doc comment for the design.
+   */
+  async traceCaf(
+    company: CompanyContext,
+    dto: CashFlowTraceCafQueryDto,
+  ): Promise<CashFlowFormulaTraceResult> {
+    const context = await this.buildContext(company, dto.fiscalYearId);
+    await this.assertNoDrafts(company, context.fiscalYear.id);
+    const statement = computeCashFlowStatement(context);
+    assertCashFlowReconciles(statement);
+    return traceCashFlowCaf(
+      context.closingCdrAccounts,
+      Money.fromString(statement.fluxExploitation.resultatNet),
+      Money.fromString(statement.fluxExploitation.capaciteAutofinancement),
+    );
+  }
+
+  /**
+   * Traceability drill-down, Tier 4 — the six "clean bilan-line delta"
+   * BFR/financing lines. See `cash-flow-trace.ts`'s own doc comment for
+   * exactly which lines these are and which are deliberately refused.
+   */
+  async traceDeltaLine(
+    company: CompanyContext,
+    dto: CashFlowTraceDeltaLineQueryDto,
+  ): Promise<CashFlowDeltaLineTraceResult> {
+    const context = await this.buildContext(company, dto.fiscalYearId);
+    await this.assertNoDrafts(company, context.fiscalYear.id);
+    const statement = computeCashFlowStatement(context);
+    assertCashFlowReconciles(statement);
+    // Each key lives on a different flux section's own output shape — a small, explicit lookup
+    // rather than a cast, so adding a 7th key later is a compile error here if forgotten, not a
+    // silent `undefined`.
+    const officialValues: Record<CashFlowTraceDeltaLineQueryDto['key'], string> = {
+      variationCreancesClients: statement.fluxExploitation.variationCreancesClients,
+      variationStocks: statement.fluxExploitation.variationStocks,
+      variationDettesExploitation: statement.fluxExploitation.variationDettesExploitation,
+      variationDettesSurImmobilisations:
+        statement.fluxInvestissement.variationDettesSurImmobilisations,
+      variationEmprunts: statement.fluxFinancement.variationEmprunts,
+      variationCapital: statement.fluxFinancement.variationCapital,
+    };
+    return traceCashFlowDeltaLine(
+      dto.key,
+      context.openingBilanAccounts,
+      context.closingBilanAccounts,
+      Money.fromString(officialValues[dto.key]),
+    );
+  }
+
+  /**
+   * Traceability drill-down, Tier 4 — one level further on the OPENING
+   * side of a delta line, down to the contributing accounts (ids
+   * resolved here, the one place this trace touches Prisma — same
+   * reasoning as `LiasseService.withAccountIds()`). The CLOSING side of
+   * the same line code is traced by the frontend reusing the EXISTING
+   * `/liasse/bilan-line-trace` directly — no backend duplication needed.
+   */
+  async traceOpeningBilanLine(
+    company: CompanyContext,
+    dto: CashFlowTraceOpeningLineQueryDto,
+  ): Promise<CashFlowOpeningLineTraceResponse> {
+    const context = await this.buildContext(company, dto.fiscalYearId);
+    await this.assertNoDrafts(company, context.fiscalYear.id);
+    const traced = traceCashFlowOpeningBilanLine(dto.lineCode, context.openingBilanAccounts);
+
+    const numbers = traced.accounts.map((a) => a.accountNumber);
+    const accountRows = await this.prisma.account.findMany({
+      where: { companyId: company.companyId, number: { in: numbers } },
+    });
+    const byNumber = new Map(accountRows.map((a) => [a.number, a]));
+    const accountsWithIds = traced.accounts.map((a) => {
+      const row = byNumber.get(a.accountNumber);
+      if (!row) {
+        throw new NotFoundException(
+          `Account "${a.accountNumber}" was traced to the opening side of line ${traced.lineCode} ` +
+            'but no longer exists on this company.',
+        );
+      }
+      return {
+        accountId: row.id,
+        accountNumber: row.number,
+        accountLabel: row.label,
+        contribution: a.contribution,
+      };
+    });
+
+    return {
+      lineCode: traced.lineCode,
+      lineLabel: traced.lineLabel,
+      lineValue: traced.lineValue,
+      fiscalYearId: context.fiscalYear.id,
+      openingDate: context.fiscalYear.startDate.toISOString().slice(0, 10),
+      accounts: accountsWithIds,
+    };
   }
 }
