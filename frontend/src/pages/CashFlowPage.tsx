@@ -4,13 +4,25 @@ import {
   useDownloadCashFlowPdf,
   useEcritures,
   useGenerateCashFlow,
+  useJournals,
 } from '../api/queries';
-import type { CashFlowStatement, FluxExploitation, FluxFinancement, FluxInvestissement } from '../api/types';
+import type {
+  CashFlowDeltaLineKey,
+  CashFlowStatement,
+  FluxExploitation,
+  FluxFinancement,
+  FluxInvestissement,
+  Journal,
+} from '../api/types';
 import { ApiError } from '../api/client';
 import { useAppContext } from '../context/appContextStore';
 import { formatMoneyFr, isZeroMoney, subtractMoneyStrings } from '../lib/money';
 import { useSectionTab } from '../lib/useSectionTab';
 import { SectionTabs, type TabSection } from '../components/layout/SectionTabs';
+import { FormulaTraceDrilldown } from '../components/ledger/FormulaTraceDrilldown';
+import { CashFlowDeltaLineDrilldown } from '../components/ledger/CashFlowDeltaLineDrilldown';
+
+const NO_JOURNALS: never[] = [];
 
 const NO_ECRITURES: never[] = [];
 
@@ -23,6 +35,7 @@ const FLUX_TABS: TabSection[] = [
 export function CashFlowPage() {
   const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
   const ecrituresQuery = useEcritures();
+  const journalsQuery = useJournals();
   const generateCashFlow = useGenerateCashFlow();
   const downloadPdf = useDownloadCashFlowPdf();
   const downloadExcel = useDownloadCashFlowExcel();
@@ -32,6 +45,7 @@ export function CashFlowPage() {
   );
 
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
+  const journals = journalsQuery.data ?? NO_JOURNALS;
 
   const [error, setError] = useState<string[] | null>(null);
   // The currently-generated statement is only shown while it still matches
@@ -150,9 +164,27 @@ export function CashFlowPage() {
 
           <SectionTabs sections={FLUX_TABS} activeId={activeTab} onChange={setActiveTab} />
 
-          {activeTab === 'exploitation' && <FluxExploitationSection flux={statement.fluxExploitation} />}
-          {activeTab === 'investissement' && <FluxInvestissementSection flux={statement.fluxInvestissement} />}
-          {activeTab === 'financement' && <FluxFinancementSection flux={statement.fluxFinancement} />}
+          {activeTab === 'exploitation' && (
+            <FluxExploitationSection
+              flux={statement.fluxExploitation}
+              fiscalYearId={fiscalYearId!}
+              journals={journals}
+            />
+          )}
+          {activeTab === 'investissement' && (
+            <FluxInvestissementSection
+              flux={statement.fluxInvestissement}
+              fiscalYearId={fiscalYearId!}
+              journals={journals}
+            />
+          )}
+          {activeTab === 'financement' && (
+            <FluxFinancementSection
+              flux={statement.fluxFinancement}
+              fiscalYearId={fiscalYearId!}
+              journals={journals}
+            />
+          )}
         </>
       )}
     </div>
@@ -232,7 +264,109 @@ function TotalRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function FluxExploitationSection({ flux }: { flux: FluxExploitation }) {
+/**
+ * Traceability drill-down, Tier 4 — the CAF total row, expandable into
+ * `FormulaTraceDrilldown`. See CLAUDE.md "Traceability drill-down
+ * (Tier 4)". Mirrors `LiassePage.tsx`'s own `ActifRow`/`PassifRow`
+ * click-to-expand idiom exactly (a second `<tr>` holding the drill-down
+ * in a `colSpan` cell), the same inline-expand pattern Tiers 1–3
+ * already established.
+ */
+function CafTraceRow({
+  value,
+  fiscalYearId,
+  journals,
+}: {
+  value: string;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <>
+      <tr className="cursor-pointer bg-bg hover:bg-border/40" onClick={() => setExpanded((v) => !v)}>
+        <td className="px-4 py-2.5 font-semibold text-ink">
+          <span className="mr-1.5 text-ink-faint">{expanded ? '▾' : '▸'}</span>
+          = Capacité d'autofinancement (CAF)
+        </td>
+        <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink">
+          {formatMoneyFr(value)}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={2} className="p-0">
+            <FormulaTraceDrilldown
+              source="caf"
+              fiscalYearId={fiscalYearId}
+              formulaKey="capaciteAutofinancement"
+              journals={journals}
+            />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/**
+ * Traceability drill-down, Tier 4 — one of the six "clean bilan-line
+ * delta" flux lines, expandable into `CashFlowDeltaLineDrilldown`.
+ */
+function DeltaTraceRow({
+  label,
+  lineKey,
+  value,
+  fiscalYearId,
+  journals,
+  muted,
+}: {
+  label: string;
+  lineKey: CashFlowDeltaLineKey;
+  value: string;
+  fiscalYearId: string;
+  journals: Journal[];
+  muted?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <>
+      <tr
+        className="cursor-pointer border-b border-border last:border-b-0 hover:bg-bg"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <td className={['px-4 py-2.5', muted ? 'text-ink-muted' : 'text-ink'].join(' ')}>
+          <span className="mr-1.5 text-ink-faint">{expanded ? '▾' : '▸'}</span>
+          {label}
+        </td>
+        <td
+          className={['px-4 py-2.5 text-right tabular-nums', muted ? 'text-ink-muted' : 'text-ink'].join(
+            ' ',
+          )}
+        >
+          {formatMoneyFr(value)}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={2} className="p-0">
+            <CashFlowDeltaLineDrilldown fiscalYearId={fiscalYearId} lineKey={lineKey} journals={journals} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function FluxExploitationSection({
+  flux,
+  fiscalYearId,
+  journals,
+}: {
+  flux: FluxExploitation;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
   return (
     <section className="flex flex-col gap-4">
       <div>
@@ -267,21 +401,34 @@ function FluxExploitationSection({ flux }: { flux: FluxExploitation }) {
               muted
             />
             <Row label="− Produits des cessions d'éléments d'actif" value={flux.produitsDesCessions} muted />
-            <TotalRow label="= Capacité d'autofinancement (CAF)" value={flux.capaciteAutofinancement} />
-            <Row
+            <CafTraceRow value={flux.capaciteAutofinancement} fiscalYearId={fiscalYearId} journals={journals} />
+            <DeltaTraceRow
               label="− Variation des créances clients (brut)"
+              lineKey="variationCreancesClients"
               value={flux.variationCreancesClients}
+              fiscalYearId={fiscalYearId}
+              journals={journals}
               muted
             />
-            <Row label="− Variation des stocks (brut)" value={flux.variationStocks} muted />
+            <DeltaTraceRow
+              label="− Variation des stocks (brut)"
+              lineKey="variationStocks"
+              value={flux.variationStocks}
+              fiscalYearId={fiscalYearId}
+              journals={journals}
+              muted
+            />
             <Row
               label="− Variation TVA déductible (autres biens et services, 445660)"
               value={flux.variationTvaDeductibleAutres}
               muted
             />
-            <Row
+            <DeltaTraceRow
               label="+ Variation des dettes d'exploitation"
+              lineKey="variationDettesExploitation"
               value={flux.variationDettesExploitation}
+              fiscalYearId={fiscalYearId}
+              journals={journals}
             />
             <TotalRow label="= Flux net de trésorerie d'exploitation" value={flux.total} />
           </tbody>
@@ -291,7 +438,15 @@ function FluxExploitationSection({ flux }: { flux: FluxExploitation }) {
   );
 }
 
-function FluxInvestissementSection({ flux }: { flux: FluxInvestissement }) {
+function FluxInvestissementSection({
+  flux,
+  fiscalYearId,
+  journals,
+}: {
+  flux: FluxInvestissement;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
   return (
     <section className="flex flex-col gap-4">
       <div>
@@ -321,9 +476,12 @@ function FluxInvestissementSection({ flux }: { flux: FluxInvestissement }) {
               value={flux.variationTvaDeductibleImmobilisations}
               muted
             />
-            <Row
+            <DeltaTraceRow
               label="+ Variation des dettes sur immobilisations"
+              lineKey="variationDettesSurImmobilisations"
               value={flux.variationDettesSurImmobilisations}
+              fiscalYearId={fiscalYearId}
+              journals={journals}
             />
             <Row label="+ Cessions d'immobilisations" value={flux.cessionsImmobilisations} />
             <Row
@@ -339,7 +497,15 @@ function FluxInvestissementSection({ flux }: { flux: FluxInvestissement }) {
   );
 }
 
-function FluxFinancementSection({ flux }: { flux: FluxFinancement }) {
+function FluxFinancementSection({
+  flux,
+  fiscalYearId,
+  journals,
+}: {
+  flux: FluxFinancement;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
   return (
     <section className="flex flex-col gap-4">
       <div>
@@ -361,8 +527,20 @@ function FluxFinancementSection({ flux }: { flux: FluxFinancement }) {
             </tr>
           </thead>
           <tbody>
-            <Row label="+ Variation des emprunts" value={flux.variationEmprunts} />
-            <Row label="+ Variation du capital" value={flux.variationCapital} />
+            <DeltaTraceRow
+              label="+ Variation des emprunts"
+              lineKey="variationEmprunts"
+              value={flux.variationEmprunts}
+              fiscalYearId={fiscalYearId}
+              journals={journals}
+            />
+            <DeltaTraceRow
+              label="+ Variation du capital"
+              lineKey="variationCapital"
+              value={flux.variationCapital}
+              fiscalYearId={fiscalYearId}
+              journals={journals}
+            />
             <Row
               label="+ Variation des comptes courants d'associés"
               value={flux.variationComptesCourantsAssocies}

@@ -5,13 +5,16 @@ import {
   useDownloadFinancialAnalysisPdf,
   useEcritures,
   useGenerateFinancialAnalysis,
+  useJournals,
 } from '../api/queries';
 import type {
   BfrSnapshot,
   CoutDeLaDette,
   EndettementEtCapitaux,
+  FinancialAnalysisFormulaKey,
   FondsDeRoulement,
   FreeCashFlow,
+  Journal,
   Margins,
   Ratios,
   SigCascade,
@@ -30,8 +33,10 @@ import {
 } from '../lib/money';
 import { useSectionTab } from '../lib/useSectionTab';
 import { SectionTabs, type TabSection } from '../components/layout/SectionTabs';
+import { FormulaTraceDrilldown } from '../components/ledger/FormulaTraceDrilldown';
 
 const NO_ECRITURES: never[] = [];
+const NO_JOURNALS: never[] = [];
 
 const ANALYSIS_TABS: TabSection[] = [
   { id: 'sig', label: 'Soldes de gestion' },
@@ -51,11 +56,13 @@ function formatDays(value: string | null): string {
 export function FinancialAnalysisPage() {
   const { fiscalYears, fiscalYearId, fiscalYearsLoading } = useAppContext();
   const ecrituresQuery = useEcritures();
+  const journalsQuery = useJournals();
   const generateAnalysis = useGenerateFinancialAnalysis();
   const downloadPdf = useDownloadFinancialAnalysisPdf();
   const downloadExcel = useDownloadFinancialAnalysisExcel();
 
   const ecritures = ecrituresQuery.data ?? NO_ECRITURES;
+  const journals = journalsQuery.data ?? NO_JOURNALS;
   const [activeTab, setActiveTab] = useSectionTab(
     ANALYSIS_TABS.map((t) => t.id),
     'sig',
@@ -172,7 +179,9 @@ export function FinancialAnalysisPage() {
         <>
           <SectionTabs sections={ANALYSIS_TABS} activeId={activeTab} onChange={setActiveTab} />
 
-          {activeTab === 'sig' && <SigSection sig={result.sig} />}
+          {activeTab === 'sig' && (
+            <SigSection sig={result.sig} fiscalYearId={fiscalYearId!} journals={journals} />
+          )}
           {activeTab === 'marges' && <MarginsSection margins={result.margins} />}
           {activeTab === 'bfr' && (
             <>
@@ -261,6 +270,74 @@ function SectionHeader({ title, description }: { title: string; description: str
   );
 }
 
+/**
+ * Traceability drill-down, Tier 4 — one SIG cascade row
+ * (margeCommerciale/valeurAjoutee/ebe), expandable into
+ * `FormulaTraceDrilldown`. See CLAUDE.md "Traceability drill-down
+ * (Tier 4)". `emphasize` mirrors `TotalRow`'s own bold/bg-bg styling —
+ * valeurAjoutee is a subtotal in this cascade, the other two are plain
+ * rows, same visual weight distinction `SigSection` already drew before
+ * this pass.
+ */
+function SigFormulaTraceRow({
+  label,
+  caption,
+  value,
+  formulaKey,
+  fiscalYearId,
+  journals,
+  emphasize,
+}: {
+  label: string;
+  caption: string;
+  value: string;
+  formulaKey: FinancialAnalysisFormulaKey;
+  fiscalYearId: string;
+  journals: Journal[];
+  emphasize?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <>
+      <tr
+        className={[
+          'cursor-pointer border-b border-border last:border-b-0 hover:bg-bg',
+          emphasize ? 'bg-bg' : '',
+        ].join(' ')}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <td className="px-4 py-2.5">
+          <div className={emphasize ? 'font-semibold text-ink' : 'text-ink'}>
+            <span className="mr-1.5 text-ink-faint">{expanded ? '▾' : '▸'}</span>
+            {label}
+          </div>
+          <div className="mt-0.5 text-[11px] text-ink-faint">{caption}</div>
+        </td>
+        <td
+          className={[
+            'px-4 py-2.5 text-right tabular-nums',
+            emphasize ? 'font-semibold text-ink' : 'text-ink',
+          ].join(' ')}
+        >
+          {formatMoneyFr(value)}
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={2} className="p-0">
+            <FormulaTraceDrilldown
+              source="sig"
+              fiscalYearId={fiscalYearId}
+              formulaKey={formulaKey}
+              journals={journals}
+            />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // SIG — soldes intermédiaires de gestion, rendered as a visible cascade:
 // each solde's caption names the exact compte-de-résultat line codes it
@@ -269,18 +346,29 @@ function SectionHeader({ title, description }: { title: string; description: str
 // exists for, so it has to read as a chain, not a flat list of numbers.
 // ---------------------------------------------------------------------------
 
-function SigSection({ sig }: { sig: SigCascade }) {
+function SigSection({
+  sig,
+  fiscalYearId,
+  journals,
+}: {
+  sig: SigCascade;
+  fiscalYearId: string;
+  journals: Journal[];
+}) {
   return (
     <section className="flex flex-col gap-4">
       <SectionHeader
         title="Soldes intermédiaires de gestion (SIG)"
-        description="Cascade complète — chaque solde se déduit du précédent, en partant des comptes du compte de résultat."
+        description="Cascade complète — chaque solde se déduit du précédent, en partant des comptes du compte de résultat. Marge commerciale, valeur ajoutée et EBE sont traçables (▸) jusqu'à leurs comptes."
       />
       <Table header="Cascade">
-        <Row
+        <SigFormulaTraceRow
           label="Marge commerciale"
           caption="Ventes de marchandises (FC) − Achats de marchandises (FS) − Variation de stocks (FT)"
-          value={formatMoneyFr(sig.margeCommerciale)}
+          value={sig.margeCommerciale}
+          formulaKey="margeCommerciale"
+          fiscalYearId={fiscalYearId}
+          journals={journals}
         />
         <Row
           label="+ Production de l'exercice"
@@ -293,11 +381,22 @@ function SigSection({ sig }: { sig: SigCascade }) {
           value={formatMoneyFr(sig.consommationsEnProvenanceDesTiers)}
           muted
         />
-        <TotalRow label="= Valeur ajoutée" value={formatMoneyFr(sig.valeurAjoutee)} />
-        <Row
+        <SigFormulaTraceRow
+          label="= Valeur ajoutée"
+          caption="Marge commerciale + Production de l'exercice − Consommations en provenance des tiers"
+          value={sig.valeurAjoutee}
+          formulaKey="valeurAjoutee"
+          fiscalYearId={fiscalYearId}
+          journals={journals}
+          emphasize
+        />
+        <SigFormulaTraceRow
           label="→ Excédent brut d'exploitation (EBE, ≈ EBITDA)"
           caption="Valeur ajoutée + subventions d'exploitation (FO) − impôts et taxes (FX) − salaires (FY) − cotisations sociales (FZ)"
-          value={formatMoneyFr(sig.ebe)}
+          value={sig.ebe}
+          formulaKey="ebe"
+          fiscalYearId={fiscalYearId}
+          journals={journals}
         />
         <Row
           label="→ Résultat d'exploitation (EBIT)"

@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Res } from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiProduces, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { CurrentCompany } from '../../common/tenant/current-company.decorator';
@@ -7,6 +7,7 @@ import { CompaniesService } from '../companies/companies.service';
 import { FiscalYearsService } from '../fiscal-years/fiscal-years.service';
 import { FinancialAnalysisService } from './financial-analysis.service';
 import { ComputeFinancialAnalysisDto } from './dto/compute-financial-analysis.dto';
+import { FinancialAnalysisTraceQueryDto } from './dto/financial-analysis-trace-query.dto';
 import { renderFinancialAnalysisPdf } from './financial-analysis-pdf';
 import { renderFinancialAnalysisExcel } from './financial-analysis-excel';
 
@@ -14,7 +15,8 @@ import { renderFinancialAnalysisExcel } from './financial-analysis-excel';
 @ApiHeader({
   name: 'x-company-id',
   required: true,
-  description: 'Tenant id — must name a company the caller (see Authorization header) is a member of.',
+  description:
+    'Tenant id — must name a company the caller (see Authorization header) is a member of.',
 })
 @Controller('financial-analysis')
 export class FinancialAnalysisController {
@@ -37,6 +39,22 @@ export class FinancialAnalysisController {
   @Post('generate')
   generate(@CurrentCompany() company: CompanyContext, @Body() dto: ComputeFinancialAnalysisDto) {
     return this.financialAnalysisService.generate(company, dto);
+  }
+
+  @ApiOperation({
+    summary:
+      "Trace un solde de la cascade SIG (marge commerciale / valeur ajoutée / EBE) jusqu'à ses " +
+      'codes CDR (Tier 4 — voir CLAUDE.md « Traceability drill-down (Tier 4) »).',
+    description:
+      "GET, auto-fetched à l'ouverture de la ligne. Chaque terme peut être retracé plus loin via le " +
+      '/liasse/cdr-line-trace déjà existant (Tier 1) — ce module ne duplique jamais cette logique.',
+  })
+  @Get('trace-formula')
+  traceFormula(
+    @CurrentCompany() company: CompanyContext,
+    @Query() dto: FinancialAnalysisTraceQueryDto,
+  ) {
+    return this.financialAnalysisService.traceFormula(company, dto);
   }
 
   @ApiOperation({ summary: 'Download the analyse financière as a PDF.' })

@@ -54,7 +54,7 @@ reordered):
 1. **Bank reconciliation — Layer 1a (local statement import + matching engine)** — SHIPPED 2026-08-25
 2. **Bank reconciliation — Layer 1b (live aggregator connectivity)** — SHIPPED 2026-08-29, with a pre-ship blocker (real Bridge sandbox verification still needed)
 3. **Batch invoice review queue** — SHIPPED 2026-08-29. No technical dependency on 1/2; reused document attachment + `InvoiceExtractionService` + `propose_ecriture`'s validation gate, all already shipped — no new backend code needed at all.
-4. **Traceability drill-down — Tiers 1, 2, AND 3 SHIPPED (all 2026-08-29).** No dependency on 1–3; already has its own detailed spec (folded in below); the "→ justificatif" extension (document attachments, shipped) is done as part of Tier 1. Tier 3 (VAT rate lines, 2058 `WJ`/`WG`, 2059-A) was the spec's last defined tier — this feature's scope is now fully closed — see the spec's own §4/§5/§6 and CLAUDE.md's "Traceability drill-down (Tier 1)"/"(Tier 2)"/"(Tier 3)" sections.
+4. **Traceability drill-down — Tiers 1, 2, 3, AND 4 SHIPPED (1–3 on 2026-08-29, Tier 4 on 2026-10-31).** No dependency on 1–3; already has its own detailed spec (folded in below); the "→ justificatif" extension (document attachments, shipped) is done as part of Tier 1. Tier 3 (VAT rate lines, 2058 `WJ`/`WG`, 2059-A) was the spec's last NUMBERED tier; Tier 4 (cash flow / analyse financière's own "formula trace" shape, explicitly deferred to "its own follow-up conversation" in the spec) is now built too, as a deliberately bounded first increment — see the spec's own §4/§5/§6 and CLAUDE.md's "Traceability drill-down (Tier 1)"/"(Tier 2)"/"(Tier 3)"/"(Tier 4)" sections. Tier 4's own CLAUDE.md section records which cash-flow/financial-analysis lines are covered and which are deliberately, honestly refused — this was never meant to be exhaustive.
 5. **Invoicing / facturation — Phase A SHIPPED (backend only), 2026-08-30.** Moved up from "noted, not planned" — a key feature, not a nice-to-have. See §4 below, `specs/invoicing-plan.md` (regulatory research + phased plan) and `specs/invoicing-phase-a-implementation-spec.md` (the design-then-verify pass, now implemented and verified live). Monaco is architecturally wired (one jurisdiction-parameterized engine) but its rule content is an explicit pending stub, not guessed. Phase B (PA/e-transmission) remains a later, likely separate initiative.
 6. **Anomaly surfacing** — benefits from bank-rec (lettrage/matching data) and drill-down (to explain *why* something's flagged) existing first, though not hard-blocked by either.
 7. **Recurring entries / templates** — SHIPPED 2026-09-05. Was genuinely independent, no dependency on anything above — picked as the lower-risk quick win over Anomaly surfacing.
@@ -330,16 +330,20 @@ here.
 
 ## 3. Traceability drill-down
 
-**Classification: GATED. Tiers 1, 2, AND 3 SHIPPED (all 2026-08-29)** —
-see the spec's own §4/§5/§6 and CLAUDE.md's "Traceability drill-down
-(Tier 1)"/"(Tier 2)"/"(Tier 3)" sections for the verification records.
-Reverse computation (line → accounts → écritures) sitting on top of
-several independently-forward-verified computations — a wrong reverse
-mapping is a wrong compliance artifact, not a cosmetic bug. Tier 3 was
-the spec's own last defined tier (item 4 below, "Cash flow / Analyse
-financière," was explicitly deferred to its own follow-up conversation,
-never numbered as part of this feature's tiers) — this feature's scope
-is now fully closed.
+**Classification: GATED. Tiers 1, 2, 3, AND 4 SHIPPED (1–3 on
+2026-08-29, Tier 4 on 2026-10-31)** — see the spec's own §4/§5/§6 and
+CLAUDE.md's "Traceability drill-down (Tier 1)"/"(Tier 2)"/"(Tier 3)"/
+"(Tier 4)" sections for the verification records. Reverse computation
+(line → accounts → écritures, or — for Tier 4 — line → formula terms →
+accounts) sitting on top of several independently-forward-verified
+computations — a wrong reverse mapping is a wrong compliance artifact,
+not a cosmetic bug. Tier 3 was the spec's own last NUMBERED tier; item
+4 below ("Cash flow / Analyse financière") was explicitly deferred to
+its own follow-up conversation rather than numbered as part of this
+feature's original tiers — that follow-up conversation happened
+(2026-10-31) and shipped it as a deliberately bounded first increment,
+not an exhaustive one — see CLAUDE.md "Traceability drill-down (Tier
+4)" for exactly which lines are covered and which are refused.
 
 **Already fully scoped** in
 `specs/liasse-drilldown-traceability-implementation-spec.md` — that
@@ -375,11 +379,28 @@ design pass starts.
      account+date+amount) was closed first via a new nullable
      `FixedAsset.cessionEcritureId` field, chosen over the alternatives
      through `AskUserQuestion` before any Tier 3 code was written.
-  4. **Cash flow / Analyse financière** — explicitly deferred in the
-     spec itself to its own follow-up conversation; most of its lines
-     are deltas-between-fiscal-years or arithmetic-over-other-lines, a
+  4. **Cash flow / Analyse financière (Tier 4, SHIPPED 2026-10-31)** —
+     explicitly deferred in the spec itself to its own follow-up
+     conversation, which happened; most of its lines ARE
+     deltas-between-fiscal-years or arithmetic-over-other-lines, a
      genuinely different "formula trace" UI shape from "here is a list
-     of écritures," not just a harder version of tiers 1–3.
+     of écritures," confirmed true while building it, not just assumed.
+     Shipped as a deliberately bounded increment, not exhaustive
+     coverage of every line in `cash-flow-statement.ts`/
+     `financial-analysis.ts`: the CAF formula, the SIG cascade's first
+     three soldes (margeCommerciale/valeurAjoutee/ebe), and six "clean
+     bilan-line delta" BFR/financing lines, each reusing Tier 1's
+     `traceLine()`/`/liasse/cdr-line-trace`/`/liasse/bilan-line-trace`
+     as a sub-step rather than re-deriving per-account classification —
+     see CLAUDE.md "Traceability drill-down (Tier 4)" for the full list
+     of what's covered vs. deliberately refused, and why (several lines
+     are a single raw account's own Δ with no "bilan line" to
+     reverse-map against at all — the honest bottom, not a gap). Built
+     and verified entirely within an isolated git worktree with no
+     running dev server/database available — verified via hand-traced
+     pure-function oracle tests only, no live curl/browser pass this
+     time, an explicitly stated limitation in CLAUDE.md's own Tier 4
+     section.
 - **New extension beyond the existing spec, worth folding in explicitly
   at this feature's own design pass**: now that document attachments
   ship, the natural end of a drill-down chain is "→ the attached
@@ -396,8 +417,14 @@ design pass starts.
   — worth deciding explicitly rather than assuming it's bundled.
 - **Effort/complexity**: tiers 1–3 are honestly described in the
   existing spec as mechanical/low-risk given the reusable primitives;
-  tier 4 (2059-A) needs a schema decision first; cash flow/analyse
-  financière is explicitly out of scope for now.
+  2059-A (shipped as part of Tier 3, not a separate numbered tier)
+  needed a schema decision first (`FixedAsset.cessionEcritureId`,
+  added before that tier's code was written). Tier 4 (cash flow/
+  analyse financière) is now shipped too — see item 4 above and
+  CLAUDE.md "Traceability drill-down (Tier 4)" — as a bounded first
+  increment; extending it to more lines (e.g. the rest of the SIG
+  cascade past EBE) is a mechanical follow-up reusing the same
+  technique, not a new design question.
 
 ---
 

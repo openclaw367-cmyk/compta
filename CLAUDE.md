@@ -3266,6 +3266,155 @@ one written just for tracing.
   fiscal-year resolver enabling CA3's own "→ écritures" hop) is a new,
   separately-scoped feature, not a continuation of this one.
 
+## Traceability drill-down (Tier 4) — cash flow / financial analysis "formula trace"
+
+`backend/src/modules/cash-flow/cash-flow-trace.ts` and
+`backend/src/modules/financial-analysis/financial-analysis-trace.ts`
+(2026-10-31) are the follow-up Tier 3's own closing bullet above
+anticipated ("Any further drill-down work... is a new,
+separately-scoped feature, not a continuation of this one") — see
+`specs/roadmap.md`'s own "Traceability drill-down" entry for the
+framing: most cash-flow/financial-analysis lines are either a FORMULA
+over several already-computed figures or a DELTA between two bilan
+snapshots, never "a list of underlying écritures" the way Tiers 1–3
+are, so this tier needed a genuinely different trace shape, not a
+harder version of the same one. Built as a deliberately bounded first
+increment — **covering every single line in `cash-flow-statement.ts`/
+`financial-analysis.ts` was explicitly NOT the goal**; a solid, honest,
+well-tested slice was.
+
+- **Two new "trace" shapes, both reusing Tier 1 as a sub-step, never
+  re-deriving Tier 1's own per-account classification logic.**
+  - **"Formula trace"** (`CashFlowFormulaTraceResult`/
+    `FinancialAnalysisFormulaTraceResult`, sharing one
+    `CashFlowFormulaTerm`/`CashFlowFormulaCode` shape so one frontend
+    component, `FormulaTraceDrilldown`, renders both): a line that's a
+    sum/difference of several already-computed figures decomposes into
+    named terms, each either a sum of real `CDR_RULES` codes (each
+    independently re-traced via Tier 1's own `traceLine()` — a
+    genuinely separate derivation from reading
+    `CompteResultat2052_2053.lignes` directly, which is what makes the
+    oracle below mean anything) or a genuine non-drillable derived
+    subtotal (CAF's own `resultatNet`/HN — the SAME category as
+    bilan's own DI, which Tier 1 already refuses to decompose). Covers
+    **CAF** (`capacité d'autofinancement`, cash-flow) and
+    **margeCommerciale/valeurAjoutee/ebe** (the first three soldes of
+    the SIG cascade, financial-analysis) — each code further
+    expandable via the EXISTING `/liasse/cdr-line-trace` (Tier 1),
+    reused verbatim, never duplicated.
+  - **"Delta line trace"** (`CashFlowDeltaLineTraceResult`): a BFR/
+    financing line that's a Δ(closing bilan line(s), opening bilan
+    line(s)) decomposes into its OPENING and CLOSING sides
+    independently, each a sum of one or more literal
+    `ACTIF_RULES`/`PASSIF_RULES` codes with no raw-account carve-out
+    involved. Covers **variationCreancesClients** (BX),
+    **variationStocks** (5 codes), **variationDettesExploitation**
+    (DX+DY), **variationDettesSurImmobilisations** (DZ),
+    **variationEmprunts** (DS+DT+DU+DV), **variationCapital** (DA) —
+    six lines through ONE generic function + a config table, since the
+    technique is identical for each.
+- **The CLOSING side of a delta line reuses the EXISTING
+  `/liasse/bilan-line-trace` directly — no backend duplication at
+  all.** `cash-flow-statement.ts`'s own bilan is always computed via
+  the 2050-series engine regardless of `Company.regime` (a
+  pre-existing fact of that module, unrelated to this tier), so
+  `regime=REEL_NORMAL` is always the correct, hardcoded choice when
+  the frontend calls that endpoint from here — confirmed by reading
+  `CashFlowService.buildContext()` directly, not assumed. The OPENING
+  side has no existing equivalent (Tier 1's bilan trace only ever sees
+  the full year's ledger) — `CashFlowService.traceOpeningBilanLine()` /
+  `GET /cash-flow/trace-opening-bilan-line` is the one genuinely new
+  "→ accounts" hop this tier adds, a thin wrapper reusing Tier 1's own
+  `traceLine()` verbatim, just fed `context.openingBilanAccounts`
+  instead of the full year's. Its own further "→ écritures" hop uses
+  `AccountLedgerDrilldown` with `periodStart`/`periodEnd` BOTH set to
+  the fiscal year's own `startDate` (the à-nouveau écriture's real
+  date, confirmed structural invariant already documented above under
+  "Tableau des flux de trésorerie") — scoping it to exactly the opening
+  line, never the whole year's movements on that account.
+- **`CashFlowContext` gained one new field, `closingCdrAccounts`**
+  (the raw pcgClass 6–7 trial balance `buildContext()` already computed
+  locally but never exposed) — purely additive, confirmed
+  zero-behavior-change by the full pre-existing cash-flow/
+  financial-analysis test suites passing unmodified.
+- **The oracle, same non-negotiable discipline as Tiers 1–3**: every
+  trace function independently re-derives its own total (via
+  `traceLine()` on raw accounts) and asserts it equals the
+  already-computed `CashFlowStatement`/`SigCascade` figure to the
+  centime — `ConflictException` on mismatch, never the same call
+  checked against itself.
+- **Deliberately refused this pass, not attempted — documented in
+  `cash-flow-trace.ts`'s own doc comment, not left implicit**:
+  - `variationTvaDeductibleAutres`/`variationTvaDeductibleImmobilisations`/
+    `variationCreancesSurCessions`/`variationComptesCourantsAssocies`
+    — each a Δ of a single RAW account (445660/445662/462/455) carved
+    out of the bilan's own genuinely-commingled BZ/EA lines. There is
+    no "bilan line" for Tier 1's engine to reverse-map against, only
+    one already-identified account — the "stop at the honest bottom"
+    precedent Tier 2's own 2054 "début" column already established,
+    not a new kind of gap.
+  - `acquisitionsImmobilisations`/`cessionsImmobilisations` — asset-
+    level `FixedAsset` sums, not ledger-line aggregations. These are
+    ALREADY traceable, in MORE useful per-asset detail, via the
+    existing Tier 2 2054 acquisitions/cessions columns and the Tier 3
+    2059-A trace — a new Tier 4 trace here would only duplicate those,
+    worse.
+  - `distributions` (always "0.00", no mechanism exists to trace) and
+    the top-level `tresorerieOuverture`/`tresorerieCloture`/
+    `variationTresorerie` figures (already the subject of
+    `ReconciliationBanner`, which this tier doesn't restate).
+  - Every SIG solde AFTER `ebe` (résultat d'exploitation onward) —
+    extending the list further is a mechanical follow-up reusing the
+    exact same technique `margeCommerciale`/`valeurAjoutee`/`ebe`
+    already demonstrate, left out to keep this pass bounded rather
+    than exhaustive, not because it's harder.
+  - BFR/FR/trésorerie-nette/endettement/ratios in financial-analysis —
+    BFR reuses the SAME accounts `cash-flow-trace.ts` already covers
+    (no new technique), and ratios are dimensionless, not a ledger
+    aggregation to trace at all.
+- **Frontend**: `FormulaTraceDrilldown` (new,
+  `components/ledger/FormulaTraceDrilldown.tsx`) is the one shared
+  component for both the CAF row and the three SIG rows, each code
+  sub-row expanding into the UNMODIFIED Tier-1 `LineTraceDrilldown
+  family="cdr"`. `CashFlowDeltaLineDrilldown` (new,
+  `components/ledger/CashFlowDeltaLineDrilldown.tsx`) renders the six
+  delta lines' ouverture/clôture sides side by side — clôture reuses
+  `LineTraceDrilldown family="bilan"` directly, ouverture's own
+  `OpeningCodeRow` hits the new endpoint then expands into the
+  UNMODIFIED `AccountLedgerDrilldown`. `CashFlowPage.tsx`'s
+  `CafTraceRow`/`DeltaTraceRow` and `FinancialAnalysisPage.tsx`'s
+  `SigFormulaTraceRow` follow the exact same inline click-to-expand
+  idiom `LiassePage.tsx`'s own `ActifRow`/`PassifRow` already
+  established (a second `<tr>` holding the drill-down in a `colSpan`
+  cell) — no new visual language. Lines NOT covered this pass simply
+  keep their existing plain, non-clickable `Row` rendering — a
+  deliberate choice over adding a dead `▸`/explicit "non traçable"
+  state to every uncovered line, documented here rather than in the UI
+  itself, since the uncovered set is large enough that labeling each
+  one individually would add more noise than it resolves.
+- **Verified two ways — but ONE of the usual two is an accepted,
+  explicitly-stated gap this pass, not silently skipped.** Pure-function
+  hand-traced oracle tests only: `cash-flow-trace.spec.ts` (CAF against
+  the SAME shared `liasse-oracle-fixture.ts` dataset Tier 1 itself uses,
+  all six delta lines against a small dedicated opening/closing
+  fixture, the unknown-key and mismatch-throws cases) and
+  `financial-analysis-trace.spec.ts` (margeCommerciale/valeurAjoutee/
+  ebe against a dedicated CDR fixture, cross-checked against the real
+  `computeCompteResultat2052_2053()` output for the same fixture, plus
+  the unknown-key/mismatch cases) — 195 tests across
+  `src/modules/{cash-flow,financial-analysis,liasse}` passing, full
+  backend suite (960 tests) passing unmodified. `tsc`/`eslint` clean
+  both sides, frontend `vite build` clean. **No live curl/browser
+  verification this pass** — this task was built and verified entirely
+  within an isolated git worktree with no running dev server/database
+  available, unlike every other trace tier's own live-verification
+  pass recorded above. Relies entirely on the pure-function oracle
+  tests the same way this codebase's OWN "no I/O" compute functions
+  are always verified first — a real, honestly-stated limitation
+  (not a gap to apologize for), worth a live click-through in a future
+  session the way Tier 3's own 2059-A frontend gap already got flagged
+  above.
+
 ## Bank reconciliation — Layer 1a (statement import + matching + review)
 
 `src/modules/bank-accounts/` + `src/modules/bank-reconciliation/`

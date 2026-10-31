@@ -13,6 +13,10 @@ import type {
   Ca3LineTraceResult,
   Ca3TraceColumn,
   CabinetCompanySummary,
+  CashFlowDeltaLineKey,
+  CashFlowDeltaLineTraceResult,
+  CashFlowFormulaTraceResult,
+  CashFlowOpeningLineTraceResponse,
   CashFlowStatement,
   CessionResult,
   ChatMessage,
@@ -31,6 +35,8 @@ import type {
   EcritureDocumentAuditEntry,
   EcritureWriteResult,
   ExtractedInvoiceFacts,
+  FinancialAnalysisFormulaKey,
+  FinancialAnalysisFormulaTraceResult,
   FinancialAnalysisResult,
   FecImportPreviewResponse,
   FiscalYear,
@@ -353,6 +359,59 @@ export function useDownloadCashFlowExcel() {
 }
 
 /**
+ * Traceability drill-down, Tier 4 — see CLAUDE.md "Traceability
+ * drill-down (Tier 4)". GET, auto-fetched when the CAF row is expanded —
+ * never a triggered action, same discipline as every other trace hook
+ * in this file. `enabled` requires a fiscal year so a collapsed row
+ * never fires a request.
+ */
+export function useTraceCashFlowCaf(fiscalYearId: string | null) {
+  return useQuery({
+    queryKey: ['cash-flow-trace-caf', fiscalYearId],
+    queryFn: () =>
+      api.get<CashFlowFormulaTraceResult>(
+        `/cash-flow/trace-caf?fiscalYearId=${encodeURIComponent(fiscalYearId!)}`,
+      ),
+    enabled: Boolean(fiscalYearId),
+  });
+}
+
+/** Traceability drill-down, Tier 4 — one of the six "clean bilan-line delta" flux lines. */
+export function useTraceCashFlowDeltaLine(
+  fiscalYearId: string | null,
+  key: CashFlowDeltaLineKey | null,
+) {
+  return useQuery({
+    queryKey: ['cash-flow-trace-delta-line', fiscalYearId, key],
+    queryFn: () =>
+      api.get<CashFlowDeltaLineTraceResult>(
+        `/cash-flow/trace-delta-line?fiscalYearId=${encodeURIComponent(fiscalYearId!)}&key=${encodeURIComponent(key!)}`,
+      ),
+    enabled: Boolean(fiscalYearId && key),
+  });
+}
+
+/**
+ * Traceability drill-down, Tier 4 — the OPENING (à-nouveau) side of a
+ * delta line, one level further, down to its own contributing accounts.
+ * The CLOSING side of the same line code reuses the EXISTING
+ * `useTraceBilanLine` directly — no equivalent hook needed here.
+ */
+export function useTraceCashFlowOpeningBilanLine(
+  fiscalYearId: string | null,
+  lineCode: string | null,
+) {
+  return useQuery({
+    queryKey: ['cash-flow-trace-opening-bilan-line', fiscalYearId, lineCode],
+    queryFn: () =>
+      api.get<CashFlowOpeningLineTraceResponse>(
+        `/cash-flow/trace-opening-bilan-line?fiscalYearId=${encodeURIComponent(fiscalYearId!)}&lineCode=${encodeURIComponent(lineCode!)}`,
+      ),
+    enabled: Boolean(fiscalYearId && lineCode),
+  });
+}
+
+/**
  * Computes the retraitement analytique (SIG, BFR/FR/trésorerie, ratios) for
  * a fiscal year — read-only, never writes to the ledger. See
  * FinancialAnalysisService.generate on the backend: refuses (409) if any
@@ -388,6 +447,25 @@ export function useDownloadFinancialAnalysisExcel() {
       );
       downloadBlob(filename, blob);
     },
+  });
+}
+
+/**
+ * Traceability drill-down, Tier 4 — SIG cascade "formula trace"
+ * (margeCommerciale/valeurAjoutee/ebe). See CLAUDE.md "Traceability
+ * drill-down (Tier 4)". GET, auto-fetched when a SIG row is expanded.
+ */
+export function useTraceFinancialAnalysisFormula(
+  fiscalYearId: string | null,
+  key: FinancialAnalysisFormulaKey | null,
+) {
+  return useQuery({
+    queryKey: ['financial-analysis-trace-formula', fiscalYearId, key],
+    queryFn: () =>
+      api.get<FinancialAnalysisFormulaTraceResult>(
+        `/financial-analysis/trace-formula?fiscalYearId=${encodeURIComponent(fiscalYearId!)}&key=${encodeURIComponent(key!)}`,
+      ),
+    enabled: Boolean(fiscalYearId && key),
   });
 }
 
