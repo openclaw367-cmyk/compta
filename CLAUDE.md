@@ -5633,7 +5633,9 @@ ever forcing a surprise re-login.
   an explicit, deferred future addition (`MAILER_PROVIDER=console` in
   `.env.example`, matching the `LOCAL_MODEL_PROVIDER` pattern) — not
   built half-verified with no real provider credentials to test
-  against.
+  against. **A real adapter is now built — see "Mailer — SMTP adapter"
+  below** — but, same reasoning as the Bridge adapter, it is NOT
+  verified against a real SMTP account yet.
 - **`MembershipsService`** (company-scoped for free via the existing
   `CompanyContextMiddleware`) — invite-by-email-with-role, list
   members + pending invites, change role, remove — each mutating
@@ -5716,8 +5718,9 @@ ever forcing a surprise re-login.
   regardless, this is a UX nicety, not the real access control.
 - **Out of scope this phase, stated explicitly**: fine-grained
   per-module permissions and OAuth/SSO (the user's own choices, not
-  gaps); a real (non-console) mailer adapter; email-verification
-  enforcement (deliberately not blocking first login/use, to keep
+  gaps); a real (non-console) mailer adapter (now built, see "Mailer —
+  SMTP adapter" below — but not yet verified against a real SMTP
+  account); email-verification enforcement (deliberately not blocking first login/use, to keep
   onboarding frictionless); 2FA/MFA; billing/seat limits; a "remember
   me" toggle (one flat 30-day refresh-token TTL, no UI for it);
   retroactively attributing "who" to the existing document-attachment/
@@ -6842,6 +6845,82 @@ relationship, none of them surfaced together before this, one of them
   confirmed via `POST /liasse/generate` that the ledger returned to its
   exact known baseline (`39 495,00 = 39 495,00`). Full backend suite
   re-run afterward as a final sanity check: 928/928 passing, unchanged.
+
+## Mailer — SMTP adapter
+
+`backend/src/modules/mailer/smtp-mailer.adapter.ts` (2026-10-31) is a
+second, real `MailerPort` implementation alongside `ConsoleMailerAdapter`
+— see "Multi-user / roles & permissions" above for the port itself and
+why `MAILER_PROVIDER` existed as a switch before this adapter did.
+
+- **⚠️ NOT VERIFIED AGAINST A REAL SMTP ACCOUNT — read this before relying
+  on it.** No email has ever actually been delivered through this
+  adapter. This is NOT as unverified as `BridgeAggregatorAdapter`'s own
+  "paper design" (see CLAUDE.md "Bank reconciliation — Layer 1b") — the
+  message construction and `nodemailer`'s own documented, installed API
+  shape ARE unit-tested here, against a mocked transport
+  (`smtp-mailer.adapter.spec.ts`, 13 tests) — but nothing below has ever
+  been exercised against a real SMTP server. **Before this is relied on
+  in production**: set `MAILER_PROVIDER=smtp` plus the `SMTP_*` env vars
+  in `backend/.env` against a real account (a Gmail app password, a
+  self-hosted Postfix/Exim relay, SendGrid's/Mailgun's own SMTP relay,
+  ...) and confirm with a real test send — both `sendPasswordResetEmail`
+  and `sendCompanyInviteEmail` go through the exact same `send()` method,
+  so one successful real send of either exercises the whole path.
+- **`nodemailer` was chosen over any vendor-specific HTTP API because
+  it's provider-agnostic** — this app's own BYO-credentials,
+  self-hosted-first deployment model (see "Multi-tenant data model"
+  above and `CredentialEncryptionService`'s own threat model) means the
+  operator brings whatever SMTP relay they already have, not a specific
+  vendor SDK this codebase would have to pick for them. `nodemailer@10`
+  ships both an ESM and a CJS build (`exports.require` points at
+  `dist/cjs/nodemailer.js`), confirmed directly against the installed
+  package before writing any code — unlike `@stafyniaksacha/facturx`/
+  `libxml2-wasm`/`@nestjs/jwt` (all ESM-only, needing either the
+  `esm-interop.ts` workaround or a CJS-native alternative library — see
+  "Invoicing — Factur-X rendering" and "Multi-user / roles &
+  permissions" above), `import * as nodemailer from 'nodemailer'`
+  resolves cleanly under this backend's CommonJS Jest/`tsc` setup with
+  no interop workaround needed.
+- **SMTP config is read LAZILY, inside `send()`, and never cached** —
+  mirrors `CredentialEncryptionService.getKey()`'s own lazy-read
+  discipline exactly: a `MAILER_PROVIDER=console` install (the default)
+  must never even touch `SMTP_HOST`/`SMTP_USER`/etc., let alone fail to
+  boot over a missing one. A fresh `nodemailer.Transporter` is
+  constructed on every single send (no cached instance field) rather
+  than once — the same reasoning `CredentialEncryptionService` re-reads
+  its key on every call instead of caching it: a transport object is
+  cheap to construct (it doesn't open a socket until `sendMail()` runs),
+  and config can legitimately change between calls. A missing required
+  env var (`SMTP_HOST`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`) throws a
+  clear, named `InternalServerErrorException` — it never silently falls
+  back to console-logging the email instead, which would be a
+  surprising, hard-to-notice behavior change for whoever set
+  `MAILER_PROVIDER=smtp` expecting a real email to actually go out.
+  `SMTP_PORT` defaults to `587`; `SMTP_SECURE` is inferred from the port
+  (`465` → `true`) per `nodemailer`'s own documented convention, unless
+  explicitly overridden.
+- **`mailer.module.ts` is now a `useFactory` provider**, switching on
+  `MAILER_PROVIDER` (`'console'` default, `'smtp'` real) to construct
+  the matching adapter — exactly the branch its own doc comment
+  anticipated before this adapter existed ("the one place that would
+  switch on a MAILER_PROVIDER env var once a second (real) adapter
+  exists"). `MailerPort`'s own interface (`sendPasswordResetEmail`/
+  `sendCompanyInviteEmail`) is completely unchanged — `SmtpMailerAdapter`
+  reuses the exact same French subject lines/body text
+  `ConsoleMailerAdapter` already has, just delivered via `nodemailer`
+  instead of `Logger`.
+- **Verified by unit test only, explicitly not live.** 13 tests in
+  `smtp-mailer.adapter.spec.ts` (transport constructed from the right
+  env vars; both methods' exact subject/body against a mocked
+  `sendMail`; port/secure defaulting and override; the non-numeric-port
+  guard; each of the four required env vars missing, individually,
+  throwing a named error and never calling `sendMail`; a real
+  `sendMail` rejection propagating rather than being swallowed) — 955
+  backend tests passing overall (up from 942 immediately before this
+  pass); `tsc`/`eslint` clean. **No real SMTP send was attempted** —
+  this worktree has no real SMTP account available; see the warning
+  above.
 
 ## Known scope boundaries
 
