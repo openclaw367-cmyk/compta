@@ -3734,6 +3734,25 @@ fiscal year** when none already covers the file's own date range.
   is already taken. No DB-level non-overlap constraint exists between a
   company's own `FiscalYear` rows (only `@@unique([companyId, label])`)
   — this is an application-level guard specific to this import path.
+- **A multi-year file is refused outright, not silently turned into a
+  multi-year "fiscal year" (2026-10-31, closing the roadmap's own
+  "Onboarding/migration path" gap).** `resolveFiscalYearPlan()` computes
+  `spanMonths` from the same `[min, max]` range BEFORE ever querying
+  existing fiscal years (`MAX_FEC_IMPORT_SPAN_MONTHS = 13` — not 12, to
+  tolerate a real, if unusual, slightly-longer-than-a-year first
+  exercice) and returns the same `{error}` shape the partial-overlap
+  case already uses, naming both dates and the exact span in months. A
+  real FEC export is legally one-file-per-exercice (Article A47 A-1 du
+  LPF §100); a file spanning several years (a contrôle fiscal's own
+  historical request, for one) previously fell straight into case (3)
+  above and silently created one accounting-nonsensical multi-year
+  fiscal year — this guard closes that, by refusing rather than
+  guessing where one exercice should end and the next begin (splitting
+  automatically would mean guessing a boundary this app's own "never
+  guess, fail loud" discipline rejects). Reached from BOTH `preview()`
+  and `confirmImport()` for free, since both already route through this
+  one shared method — `preview()` surfaces it as `fileErrors[0]`,
+  `confirmImport()` throws the identical message as a `ConflictException`.
 - **All-or-nothing, same discipline as Excel/CSV-bank import**: an
   unbalanced group, an unparseable date/amount, a required-field gap, an
   unclassifiable account number, an aux-parent identity conflict, or a
@@ -3810,6 +3829,20 @@ fiscal year** when none already covers the file's own date range.
   temporary script; confirmed via follow-up `GET
   /fiscal-years`/`GET /journals` on both companies that every list
   returned to its exact original contents.
+- **The multi-year-span guard (2026-10-31) verified two ways.** 2 new
+  unit tests in `fec-import.service.spec.ts` (a 15-month file refused,
+  naming the exact span, with `prisma.fiscalYear.findMany` provably
+  never called — the guard fires before any DB query; a file spanning
+  exactly the 13-month threshold still accepted) — 924 backend tests
+  passing overall (up from 922); `tsc`/`eslint` clean, `vite build`
+  clean. **Live, against the FR demo company, via curl**: a real 39-
+  month file (2023-01-15 → 2026-03-20) correctly refused on BOTH
+  `POST /fec-import/preview` (`fileErrors[0]` naming the exact span,
+  "s'étend sur 39 mois") and `POST /fec-import/confirm` (identical
+  message as a `409`) — nothing was ever persisted either way, so no
+  cleanup was needed; a real single-year file previewed and correctly
+  reused the existing "2026" fiscal year immediately afterward,
+  confirming no regression.
 - **Not verified live this pass**: the `.xlsx` FEC variant (covered by
   2 dedicated unit tests against a real `exceljs`-written workbook, but
   not round-tripped through a live curl call against a running

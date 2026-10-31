@@ -1497,24 +1497,28 @@ client at scale:
     validated by a concurrent request) doesn't silently skip or
     corrupt the rest — it reports exactly which ids succeeded and which
     didn't, never a partial silent success.
-- **A FEC file spanning multiple calendar years creates ONE fiscal year
-  spanning that whole range** — traced `resolveFiscalYearPlan()`
-  directly. Not a bug against normal usage (a real FEC export is
-  legally one-file-per-exercice), but a multi-year file (which does
-  happen — a contrôle fiscal's own historical request, for one) would
-  silently create an accounting-nonsensical multi-year "fiscal year"
-  rather than refusing or offering to split it.
-  - **What**: detect a file whose date range spans more than ~13 months
-    and refuse with a clear message naming the span, rather than
-    silently creating a wrong-shaped fiscal year — a narrow, cheap
-    guard, not a new splitting feature (splitting a multi-year file by
-    date automatically would mean GUESSING where one exercice ends and
-    the next begins, which this app's own "never guess, fail loud"
-    discipline should reject in favor of asking the user to split the
-    file themselves).
+- **Multi-year-FEC-file guard — SHIPPED (2026-10-31).** A file whose
+  own `[min, max]` date range spans more than 13 months (`MAX_FEC_
+  IMPORT_SPAN_MONTHS` in `fec-import.service.ts`) is now refused
+  outright, naming both dates and the exact span, rather than being
+  silently turned into one accounting-nonsensical multi-year fiscal
+  year — see CLAUDE.md "FEC file import" for the full record. Reached
+  from both `preview()` and `confirmImport()` for free, since both
+  already route through the one shared `resolveFiscalYearPlan()`.
+  - **What it replaced**: a FEC file spanning multiple calendar years
+    created ONE fiscal year spanning that whole range — traced
+    `resolveFiscalYearPlan()` directly. Not a bug against normal usage
+    (a real FEC export is legally one-file-per-exercice), but a
+    multi-year file (which does happen — a contrôle fiscal's own
+    historical request, for one) would silently create an
+    accounting-nonsensical multi-year "fiscal year" rather than
+    refusing or offering to split it.
   - **Classification: GATED** (it changes what `resolveFiscalYearPlan()`
-    accepts) but trivial — a single boundary check, verified by a
-    straightforward unit test asserting the exact span threshold.
+    accepts) but trivial — a single boundary check, verified by unit
+    tests at both the exact threshold and well past it, plus a live
+    curl check against the FR demo company (a real 39-month file
+    refused on both `preview()` and `confirmImport()`, naming the
+    exact span; a normal single-year file unaffected).
 
 ### Multi-client / cabinet management — the data model is ready; there's no UI for it
 
@@ -1559,21 +1563,21 @@ into that company; there's no cross-company rollup.
 ### Sequencing note for this section
 
 Severity-ordered, not dependency-ordered, since none of these five
-block each other. **Backup/recovery, clôture archival, AND bulk-validate
-are all now SHIPPED** (2026-10-18, same day — see their own entries
-above and CLAUDE.md) — backup/recovery and archival picked first and
-second precisely because they carried the two most severe,
-currently-unmitigated consequences (unbounded data loss; a silent
-compliance-archival gap in an otherwise well-flagged codebase);
-bulk-validate picked up next, same day, as the next-most-severe item,
-small and cheap as scoped. The multi-year-FEC guard is the one
-remaining item from this pair, still open, and could be picked up any
-time, including bundled into whichever FEC-import-adjacent work
-happens next. Cabinet UX items 1-2 are also cheap and a reasonable
-pairing with Multi-user/roles work if that's ever revisited; item 3
-(batch cross-company actions) is the only genuinely large piece here
-and should wait until there's a real multi-client user to design it
-against.
+block each other. **Backup/recovery, clôture archival, bulk-validate,
+AND the multi-year-FEC guard are all now SHIPPED** (backup/recovery,
+archival, and bulk-validate on 2026-10-18; the multi-year-FEC guard on
+2026-10-31 — see their own entries above and CLAUDE.md) — backup/
+recovery and archival picked first and second precisely because they
+carried the two most severe, currently-unmitigated consequences
+(unbounded data loss; a silent compliance-archival gap in an otherwise
+well-flagged codebase); bulk-validate and the multi-year-FEC guard
+followed as the next-most-severe items, both small and cheap as
+scoped. **Every item in this "Onboarding/migration path" subsection is
+now closed.** Cabinet UX items 1-2 are the next cheapest remaining work
+here, and a reasonable pairing with Multi-user/roles work if that's
+ever revisited; item 3 (batch cross-company actions) is the only
+genuinely large piece left in this whole section and should wait until
+there's a real multi-client user to design it against.
 
 ---
 
