@@ -9,6 +9,8 @@ import type {
   BankAggregatorLinkSummary,
   BankStatementImport,
   BankStatementLine,
+  Budget,
+  BudgetVarianceReport,
   Ca3Declaration,
   Ca3LineTraceResult,
   Ca3TraceColumn,
@@ -82,6 +84,7 @@ import type {
   CessionFixedAssetDto,
   ComputeResultatFiscalDto,
   CreateAccountDto,
+  CreateBudgetDto,
   CreateBankAccountDto,
   CreateCompanyDto,
   CreateEcritureDto,
@@ -1961,6 +1964,66 @@ export function useMarkTemplateApplied() {
     mutationFn: (id: string) =>
       api.post<RecurringEntryTemplate>(`/recurring-entries/templates/${id}/mark-applied`, {}),
     onSuccess: () => invalidateRecurringTemplates(queryClient),
+  });
+}
+
+/**
+ * Budgeting / forecasting vs. actuals — roadmap item 2c, see CLAUDE.md
+ * "Budgeting / forecasting". A Budget is pure metadata (see
+ * useDeleteBudget() below) — the variance report is a separate,
+ * independent query (useBudgetVariance()), never folded into the
+ * budget's own useBudget(id) fetch, same "independent HTTP calls"
+ * discipline as useGenerateLiasseSecondary().
+ */
+function invalidateBudgets(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: ['budgets'] });
+}
+
+export function useBudgets() {
+  return useQuery({
+    queryKey: ['budgets'],
+    queryFn: () => api.get<Budget[]>('/budgets'),
+  });
+}
+
+export function useBudget(id: string | null) {
+  return useQuery({
+    queryKey: ['budgets', id],
+    queryFn: () => api.get<Budget>(`/budgets/${id}`),
+    enabled: id !== null,
+  });
+}
+
+export function useCreateBudget() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: CreateBudgetDto) => api.post<Budget>('/budgets', dto),
+    onSuccess: () => invalidateBudgets(queryClient),
+  });
+}
+
+export function useUpdateBudget() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: CreateBudgetDto }) =>
+      api.put<Budget>(`/budgets/${id}`, dto),
+    onSuccess: () => invalidateBudgets(queryClient),
+  });
+}
+
+export function useDeleteBudget() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/budgets/${id}`),
+    onSuccess: () => invalidateBudgets(queryClient),
+  });
+}
+
+export function useBudgetVariance(id: string | null) {
+  return useQuery({
+    queryKey: ['budgets', id, 'variance'],
+    queryFn: () => api.get<BudgetVarianceReport>(`/budgets/${id}/variance`),
+    enabled: id !== null,
   });
 }
 

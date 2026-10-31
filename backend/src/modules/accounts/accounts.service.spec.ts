@@ -25,6 +25,7 @@ function makePrismaMock() {
     invoice: { count: jest.fn().mockResolvedValue(0) },
     invoiceLine: { count: jest.fn().mockResolvedValue(0) },
     recurringEntryTemplateLine: { count: jest.fn().mockResolvedValue(0) },
+    budgetLine: { count: jest.fn().mockResolvedValue(0) },
     $transaction: jest.fn(),
   };
   prisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(prisma));
@@ -324,6 +325,13 @@ describe('AccountsService', () => {
     it('refuses to delete an account still referenced by a recurring-entry template line', async () => {
       prisma.account.findFirst.mockResolvedValueOnce(collectif401);
       prisma.recurringEntryTemplateLine.count.mockResolvedValueOnce(1);
+      await expect(service.remove(company, 'acc-401')).rejects.toThrow(ConflictException);
+      expect(prisma.account.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses to delete an account still referenced by a budget line', async () => {
+      prisma.account.findFirst.mockResolvedValueOnce(collectif401);
+      prisma.budgetLine.count.mockResolvedValueOnce(1);
       await expect(service.remove(company, 'acc-401')).rejects.toThrow(ConflictException);
       expect(prisma.account.delete).not.toHaveBeenCalled();
     });

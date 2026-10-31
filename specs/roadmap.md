@@ -1265,31 +1265,32 @@ cash-flow reconciliation), reused for a genuinely new class of question.
   tagged X) has no ambiguity — "management accounting" doesn't
   automatically mean "unverifiable," only budgeting (next) does.
 
-#### 2c. Budgeting / forecasting vs. actuals
+#### 2c. Budgeting / forecasting vs. actuals — SHIPPED (2026-10-31)
 
-- **What**: a `Budget`/`BudgetLine` entity (a planned figure per
-  account or cost-center, per period) and a report comparing it to the
-  real trial balance for the same scope, reusing `trial-balance-
-  engine.ts` verbatim for the "actual" column — no new ledger
-  aggregation logic, only new input capture and variance arithmetic
-  (actual − budget, %).
-- **Classification: PRESENTATION.** A budget number never touches the
-  ledger.
-- **Depends on**: `trial-balance-engine.ts` (exists, reused read-only);
-  benefits from but doesn't strictly require 2b (cost-center
-  budgeting is a natural pairing, not a hard dependency).
-- **Verification — the first genuinely different case in this
-  document, stated plainly**: the VARIANCE ARITHMETIC is trivial to
-  verify (subtraction and a percentage), and the ACTUAL column is a
-  pure regression check against the already-verified trial-balance
-  engine (not a new oracle). But **the budget number itself has no
-  correctness standard to verify against** — it's a business input, not
-  a derived accounting fact, so "verified" here can only ever mean "the
-  tool computed the comparison correctly against whatever figures a
-  human entered," never "the budget is right." Worth saying this
-  explicitly in the eventual design pass too, the same way the résultat
-  fiscal module's own honesty banner states plainly what its own
-  arithmetic-tie-out does and doesn't prove.
+See CLAUDE.md "Budgeting / forecasting" for the full record. Built as
+a `Budget`/`BudgetLine` entity (a planned figure per ACCOUNT, per
+fiscal year — scoped this narrowly since 2b, below, is still unbuilt)
+plus a variance report. **One deliberate deviation from this section's
+own original sketch**: "actual" reuses `LedgerService.trialBalance()`
+(already returns exactly the needed per-account shape, already tested,
+already has its own endpoint), not `trial-balance-engine.ts`'s
+`buildTrialBalance()` — that function is purpose-built for the
+LIASSE module's own classification job and silently drops any account
+that nets to exactly zero, which would be the wrong default here (a
+budgeted account with zero activity so far is real information, not a
+row to omit). The honesty-boundary language this section originally
+called for is now the live `HonestyBanner` on `BudgetVarianceView`,
+quoted near-verbatim. Verified two ways: a pure-function oracle
+(`budgeting.spec.ts`, 9 tests, zero Prisma/DB) and a mocked-Prisma
+service test (`budgeting.service.spec.ts`, 11 tests) confirming the
+real `trialBalance()` actuals feed correctly into the pure variance
+compute; 963 backend tests passing overall; `tsc`/`eslint`/`vite
+build` clean both sides. Frontend: `/budget` (nav item "Budget",
+"Déclarations & pilotage" group).
+- **Depends on**: `LedgerService.trialBalance()` (existed, reused
+  read-only); still benefits from but doesn't require 2b (cost-center
+  budgeting, unbuilt — a natural pairing once it exists, not a hard
+  dependency today).
 
 ---
 

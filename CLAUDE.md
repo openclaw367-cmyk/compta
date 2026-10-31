@@ -5589,6 +5589,132 @@ always producing an editable draft** — never auto-posted on a schedule.
   Both test draft écritures and the test template deleted afterward,
   confirmed via a follow-up read that no residual state remained.
 
+## Budgeting / forecasting
+
+`src/modules/budgeting/` (2026-10-31) is roadmap item 2c — a
+`Budget`/`BudgetLine` entity (a planned figure per ACCOUNT, per fiscal
+year — scoped this narrowly because this app has no cost-center/
+analytical-dimension concept yet, roadmap item 2b, confirmed absent
+from the schema; the roadmap itself says account-level budgeting is
+fine without it) plus a report comparing it to the real ledger for the
+same scope. Migration `20261031205512_add_budget`.
+
+- **The honesty boundary — the actual point of this feature, stated as
+  prominently as the résultat fiscal module's own banner.** Quoting
+  the roadmap's own verification section directly: "the budget number
+  itself has no correctness standard to verify against — it's a
+  business input, not a derived accounting fact, so 'verified' here
+  can only ever mean the tool computed the comparison correctly against
+  whatever figures a human entered, never that the budget is right."
+  `BudgetVarianceView`'s own `HonestyBanner` (amber, never green — this
+  isn't a reconciliation success state, same styling discipline as
+  `ResultatFiscalPage`'s own banner) states this on every variance
+  report, not buried in a tooltip.
+- **Which existing primitive "actual" reuses — a deliberate deviation
+  from the roadmap's own first sketch, documented per this app's own
+  established discipline for recording such a deviation (see CLAUDE.md
+  "Invoicing — related écritures" for the precedent of HOW to document
+  one, not for its content).** The roadmap text said "reusing
+  `trial-balance-engine.ts` verbatim for the actual column." Reading
+  both before committing: `trial-balance-engine.ts`'s
+  `buildTrialBalance()` is a lower-level pure function purpose-built for
+  `LiasseService` to classify validated-only ledger lines into exactly
+  one compliance line (bilan/CDR) — a different job, and it silently
+  DROPS any account that nets to exactly zero (correct for liasse
+  line-mapping, wrong here: a budgeted account with zero actual
+  activity so far is real, useful "0,00 so far" information, not a row
+  to omit). `LedgerService.trialBalance()` already returns exactly the
+  shape this report needs — `{accountId, accountNumber, accountLabel,
+  totalDebit, totalCredit, balance}` per account, scoped by fiscal
+  year — already has its own controller endpoint, already tested, and
+  (like every other report in this app) includes draft écritures
+  alongside validated ones, the right default for a day-to-day
+  tracking tool, not a compliance artifact. `BudgetingService`
+  therefore reuses `LedgerService.trialBalance()` directly.
+- **Sign convention — magnitudes, never a per-PCG-class guess.**
+  `plannedAmount` is captured as a non-negative magnitude via the SAME
+  `@IsMoneyString()` validator every other money DTO field in this app
+  already uses (no new, signed-money variant introduced), in the
+  account's own natural reporting direction. Rather than hand-coding
+  which PCG classes are debit-normal vs. credit-normal (class 4/5 are
+  genuinely dual-nature — see `liasse-line-rules.ts`'s own
+  `DualNatureRule`s — so a blanket per-class flip would risk silently
+  guessing wrong for exactly the accounts hardest to get right),
+  `actualAmount` is the ABSOLUTE VALUE of `LedgerService.trialBalance()`'s
+  own signed `balance` (debit − credit) — needs no PCG-class knowledge
+  at all, and in ordinary operation lines up naturally with a plain
+  non-negative planned figure either way (a charge account nets
+  debit-heavy/positive, a produit account nets credit-heavy/negative,
+  `|balance|` captures "how much activity" for both). **Stated
+  limitation, not a silent gap**: this compares MAGNITUDES, not signed
+  values — an account that unusually nets to its "wrong" side this
+  period would still report as ordinary activity without flagging that
+  the direction itself was wrong. Documented in `budgeting.ts`'s own
+  doc comment and nowhere silently assumed.
+- **Account reference — by `accountId` (a real FK), NOT by NUMBER the
+  way `RecurringEntryTemplateLine` does, and this is a considered
+  departure from that precedent, not an oversight.**
+  `RecurringEntryTemplateLine`'s own number-based choice was justified
+  at the time (2026-09-05) by `Account.number` being "equally stable"
+  to `id`, since `AccountsService.rename()` then only ever changed
+  `label`. That premise no longer holds: the very next day (see "Plan
+  Comptable — full CRUD and Excel bulk import" above), `rename()`
+  gained the ability to change `number` too (recomputing `pcgClass`).
+  A Budget built today would go stale on an ordinary renumber if it
+  stored numbers — `accountId` stays valid across a rename, and is
+  also simply the dominant pattern this app already uses for an
+  account reference (`EcritureLigne.compteId`, `FixedAsset.accountId`,
+  `BankAccount.compteId`, `Invoice.clientAccountId`). `AccountsService.remove()`'s
+  existing reference-check sweep gained a `budgetLineCount` entry
+  alongside its other FK-backed checks (`fixedAsset`/`bankAccount`/
+  `invoice`) for exactly this reason — a real FK means a clean, named
+  error instead of a raw DB foreign-key-violation.
+- **Scope — one `FiscalYear`, not an arbitrary date range** — consistent
+  with how `LedgerService.trialBalance()`/`LiasseService`/
+  `CashFlowService` already scope every other report in this app.
+  `compareToActual()` reads the WHOLE fiscal year (no
+  periodStart/periodEnd).
+- **Pure metadata, safe to hard-delete** — same reasoning CLAUDE.md
+  already gives for `RecurringEntryTemplate`: "a template never itself
+  becomes part of the ledger," so unlike Journal/Account/VatRate/
+  FiscalYear, `BudgetingService.remove()` is a real, unconditional
+  delete, no reference-blocking (lines cascade via `onDelete: Cascade`).
+- **Verified two ways.** `budgeting.spec.ts` (9 tests) is the pure-function
+  oracle — zero Prisma/DB — hand-traced for a debit-normal overspend, a
+  credit-normal account read via `|balance|` of a negative ledger
+  balance, the no-matching-actual-reports-"0.00" case, the
+  `plannedAmount === "0.00"` → `variancePercent: null` guard (same
+  convention as `financial-analysis.ts`'s own cost-of-debt guard:
+  "money is discretized to the centime in this app, so there is no
+  meaningful near-zero-but-not-exactly-zero case to guard separately"),
+  and the totals aggregation (summed independently per column, never
+  re-derived from a line). `budgeting.service.spec.ts` (11 tests,
+  mocked Prisma + mocked `LedgerService`) confirms the service feeds
+  `LedgerService.trialBalance()`'s own per-account actuals into
+  `computeBudgetVariance()` correctly, scoped to the budget's own
+  fiscal year with no period filter, plus the full CRUD matrix (create
+  validation, duplicate-account-in-one-budget rejection, findAll/
+  findOne, hard delete). 963 backend tests passing overall, including
+  a new `budgetLineCount` regression test added to
+  `accounts.service.spec.ts` (confirming the new reference check
+  actually blocks a delete); `tsc`/`eslint` clean both sides, `vite
+  build` clean.
+- **Frontend**: `BudgetPage` (route `/budget`, nav item "Budget" under
+  "Déclarations & pilotage" — a REPORT, planned vs. real figures, the
+  same shape as every other pilotage screen, not an admin screen under
+  Paramètres the way Modèles récurrents/Comptes & journaux are).
+  `BudgetEditor` is a lighter `EcritureEditor`, same "metadata, not a
+  real écriture" reasoning `TemplateEditor` already established (no
+  debit/credit pair, just one `plannedAmount` per account, reusing
+  `AccountCombobox`). Clicking a budget row toggles an inline, auto-
+  fetched `BudgetVarianceView` (never a triggered action — same
+  GET-auto-fetched-on-expand discipline as the traceability drill-downs)
+  showing the honesty banner, the per-account variance table, and a
+  totals row.
+- **Not built this pass**: cost-center budgeting (depends on roadmap
+  item 2b, confirmed absent from the schema — a natural pairing once
+  2b exists, not a hard dependency today).
+
 ## Anomaly surfacing
 
 `src/modules/anomalies/` (2026-09-05) is the roadmap's last unstarted

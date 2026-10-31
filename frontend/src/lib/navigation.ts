@@ -16,6 +16,7 @@ import {
   IconPercent,
   IconScale,
   IconSettings,
+  IconTrendUp,
   IconUpload,
   IconUsers,
   IconWallet,
@@ -68,6 +69,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/resultat-fiscal', label: 'Résultat fiscal', Icon: IconScale },
       { to: '/flux-tresorerie', label: 'Flux de trésorerie', Icon: IconFlow },
       { to: '/analyse-financiere', label: 'Analyse financière', Icon: IconGauge },
+      { to: '/budget', label: 'Budget', Icon: IconTrendUp },
     ],
   },
 ];

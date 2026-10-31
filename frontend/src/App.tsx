@@ -35,6 +35,7 @@ import { LiassePage } from './pages/LiassePage';
 import { CashFlowPage } from './pages/CashFlowPage';
 import { FinancialAnalysisPage } from './pages/FinancialAnalysisPage';
 import { ResultatFiscalPage } from './pages/ResultatFiscalPage';
+import { BudgetPage } from './pages/BudgetPage';
 import { AssistantPage } from './pages/AssistantPage';
 import { AssistantSettingsPage } from './pages/AssistantSettingsPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -100,6 +101,7 @@ export default function App() {
                         <Route path="/flux-tresorerie" element={<CashFlowPage />} />
                         <Route path="/analyse-financiere" element={<FinancialAnalysisPage />} />
                         <Route path="/resultat-fiscal" element={<ResultatFiscalPage />} />
+                        <Route path="/budget" element={<BudgetPage />} />
                         <Route path="/assistant" element={<AssistantPage />} />
                         <Route path="/assistant/parametres" element={<AssistantSettingsPage />} />
                         <Route path="/parametres" element={<SettingsPage />} />
