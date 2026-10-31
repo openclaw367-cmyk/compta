@@ -1534,17 +1534,25 @@ invites — all real, already built) only renders once you've switched
 into that company; there's no cross-company rollup.
 
 - **What, phased from cheapest to most work**:
-  1. Replace the flat `<select>` with a searchable combobox (reusing
-     the SAME combobox pattern `AccountCombobox` already established)
-     — pure UI, zero backend change.
-  2. A cabinet-level landing view: one row per company the caller has
-     a `Membership` in, each showing the SAME signals
+  1. **SHIPPED (2026-10-31).** Replaced the flat `<select>` with a
+     searchable combobox (`CompanySwitcher.tsx`, reusing the SAME
+     combobox pattern `AccountCombobox` already established) — pure UI,
+     zero backend change. See CLAUDE.md "Multi-client / cabinet
+     management (items 1–2)".
+  2. **SHIPPED (2026-10-31), same pass.** A cabinet-level landing view
+     (`CabinetPage.tsx`, route `/cabinet`): one row per company the
+     caller has a `Membership` in, each showing the SAME signals
      `NeedsAttentionPanel` already computes per-company (draft count,
      anomaly count, pending invites) — a fan-out of `N` already-existing,
-     already-tested per-company queries, not a new aggregation engine.
+     already-tested per-company queries (`useCabinetSummaries()`), not a
+     new aggregation engine. Needed one small, additive seam:
+     `api.getForCompany()`, a GET scoped to a company other than the
+     ambient current one — the ambient convention every other hook uses
+     is completely unchanged. See CLAUDE.md for the full record.
   3. Batch operations across companies (e.g. "export FEC for every
      client with a fiscal year closing this month") — the largest part
-     of this item, genuinely new orchestration logic, sequenced last.
+     of this item, genuinely new orchestration logic, sequenced last,
+     still open.
 - **Classification: PRESENTATION for 1 and 2** (pure read-side
   aggregation of already-correct per-company data) — **item 3 is GATED
   per-action** (each underlying action, e.g. an FEC export, is already
@@ -1564,20 +1572,20 @@ into that company; there's no cross-company rollup.
 
 Severity-ordered, not dependency-ordered, since none of these five
 block each other. **Backup/recovery, clôture archival, bulk-validate,
-AND the multi-year-FEC guard are all now SHIPPED** (backup/recovery,
-archival, and bulk-validate on 2026-10-18; the multi-year-FEC guard on
-2026-10-31 — see their own entries above and CLAUDE.md) — backup/
-recovery and archival picked first and second precisely because they
-carried the two most severe, currently-unmitigated consequences
-(unbounded data loss; a silent compliance-archival gap in an otherwise
-well-flagged codebase); bulk-validate and the multi-year-FEC guard
-followed as the next-most-severe items, both small and cheap as
-scoped. **Every item in this "Onboarding/migration path" subsection is
-now closed.** Cabinet UX items 1-2 are the next cheapest remaining work
-here, and a reasonable pairing with Multi-user/roles work if that's
-ever revisited; item 3 (batch cross-company actions) is the only
-genuinely large piece left in this whole section and should wait until
-there's a real multi-client user to design it against.
+the multi-year-FEC guard, AND Cabinet UX items 1-2 are all now SHIPPED**
+(backup/recovery, archival, and bulk-validate on 2026-10-18; the
+multi-year-FEC guard and Cabinet UX items 1-2 on 2026-10-31 — see their
+own entries above and CLAUDE.md) — backup/recovery and archival picked
+first and second precisely because they carried the two most severe,
+currently-unmitigated consequences (unbounded data loss; a silent
+compliance-archival gap in an otherwise well-flagged codebase);
+bulk-validate, the multi-year-FEC guard, and Cabinet UX items 1-2
+followed in severity order, each small and cheap as scoped. **Item 3
+(batch cross-company actions) is the only item left anywhere in this
+whole "Operational readiness" section** — the only genuinely large
+piece here, and should wait until there's a real multi-client user to
+design it against, per its own classification above (GATED per-action,
+needs its own partial-failure-reporting design).
 
 ---
 

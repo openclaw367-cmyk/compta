@@ -112,6 +112,23 @@ export interface MembershipsList {
   pendingInvites: PendingInvite[];
 }
 
+/**
+ * One row of the cabinet landing view (CabinetPage) — see CLAUDE.md
+ * "Multi-client / cabinet management". Computed entirely frontend-side
+ * by fanning out existing per-company endpoints (fiscal years, entries,
+ * memberships, anomalies) via `api.getForCompany()`; no new backend
+ * aggregation endpoint exists for this. `fiscalYearLabel: null` means
+ * the company has no fiscal year at all yet — every count then reads
+ * `0`, honestly, not an error.
+ */
+export interface CabinetCompanySummary {
+  companyId: string;
+  fiscalYearLabel: string | null;
+  draftCount: number;
+  anomalyCount: number;
+  pendingInviteCount: number;
+}
+
 export interface AuthUser {
   id: string;
   email: string;

@@ -4,7 +4,8 @@ import { useAuth } from '../../context/authContextStore';
 import { usePreferences, type ThemePreference } from '../../context/preferencesStore';
 import { labelForPath } from '../../lib/navigation';
 import { CommandPalette } from '../command/CommandPalette';
-import { IconLogout, IconMonitor, IconMoon, IconPlus, IconSidebar, IconSun } from './icons';
+import { CompanySwitcher } from './CompanySwitcher';
+import { IconBuilding, IconLogout, IconMonitor, IconMoon, IconPlus, IconSidebar, IconSun } from './icons';
 
 const THEME_OPTIONS: { value: ThemePreference; label: string; Icon: typeof IconSun }[] = [
   { value: 'light', label: 'Thème clair', Icon: IconSun },
@@ -22,11 +23,13 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; Icon: typeof IconS
  * app was multi-tenant/multi-year from day one but had no way to
  * actually reach a second company or year before this.
  *
- * The company control only renders as a real `<select>` once a second
- * company actually exists — with exactly one (the common case today),
- * showing a picker with nothing to pick would just be noise; a plain
- * label still names the company so it's never ambiguous which dossier
- * is active.
+ * The company control only renders as a real `CompanySwitcher` (a
+ * type-to-filter combobox — see CLAUDE.md "Multi-client / cabinet
+ * management") once a second company actually exists — with exactly
+ * one (the common case today), showing a picker with nothing to pick
+ * would just be noise; a plain label still names the company so it's
+ * never ambiguous which dossier is active. The "Cabinet" link next to
+ * it (same gating) opens the cross-company landing view, CabinetPage.
  */
 export function TopBar() {
   const {
@@ -81,20 +84,7 @@ export function TopBar() {
       )}
 
       {companies.length > 1 ? (
-        <label className="flex shrink-0 items-center gap-2 text-[12.5px] text-ink-muted">
-          Société
-          <select
-            value={companyId ?? ''}
-            onChange={(e) => setCompanyId(e.target.value)}
-            className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent"
-          >
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <CompanySwitcher companies={companies} value={companyId} onSelect={setCompanyId} />
       ) : (
         currentCompany && (
           <span className="shrink-0 text-[13px] font-medium text-ink">{currentCompany.name}</span>
@@ -102,6 +92,17 @@ export function TopBar() {
       )}
 
       <CommandPalette />
+
+      {companies.length > 1 && (
+        <Link
+          to="/cabinet"
+          title="Cabinet — toutes les sociétés"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border bg-bg text-ink-faint transition-colors hover:border-accent hover:text-accent"
+        >
+          <IconBuilding width={13} height={13} />
+          <span className="sr-only">Cabinet — toutes les sociétés</span>
+        </Link>
+      )}
 
       <Link
         to="/parametres/nouvelle-societe"
