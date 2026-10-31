@@ -4,6 +4,7 @@ import { ApiError } from '../../api/client';
 import { formatMoneyFr } from '../../lib/money';
 import { useState } from 'react';
 import { useToast } from '../../context/toastStore';
+import { RelatedEcrituresSection } from './RelatedEcrituresSection';
 
 /**
  * A FINALIZED invoice, read-only — its content can never change (a
@@ -217,6 +218,13 @@ export function InvoiceDetailView({
         <p>{mentions.latePaymentPenaltyNotice}</p>
         <p>{mentions.forfeitIndemnityNotice}</p>
         <p>{mentions.escompteNotice}</p>
+      </div>
+
+      <div className="flex flex-col gap-2 border-t border-border pt-3">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-ink-faint">
+          Écritures liées
+        </span>
+        <RelatedEcrituresSection invoiceId={invoice.id} />
       </div>
     </div>
   );

@@ -115,7 +115,8 @@ function makePrismaMock() {
       delete: jest.fn(),
     },
     invoiceLine: { deleteMany: jest.fn() },
-    ecriture: { findFirst: jest.fn() },
+    ecriture: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+    ecritureLigne: { findMany: jest.fn().mockResolvedValue([]) },
     $transaction: jest.fn(),
   };
   prisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(prisma));
@@ -586,5 +587,184 @@ describe('InvoicingService.getMentions', () => {
     await expect(
       service(prisma, makeEntriesServiceMock()).getMentions(company, 'invoice-1'),
     ).rejects.toThrow(ConflictException);
+  });
+});
+
+describe('InvoicingService.getRelatedEcritures', () => {
+  function makeEcriture(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'ecriture-1',
+      journalId: 'journal-ve',
+      journal: { code: 'VE' },
+      ecritureNum: '1',
+      ecritureDate: new Date('2026-08-30'),
+      libelle: 'Facture 1',
+      ...overrides,
+    };
+  }
+
+  it('returns just POSTED when nothing else links to this invoice', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue({
+      ...DRAFT_INVOICE,
+      postedEcritureId: 'ecriture-1',
+    });
+    prisma.invoice.findMany.mockResolvedValue([]); // no credit notes correcting this invoice
+    prisma.ecriture.findFirst.mockResolvedValue({
+      id: 'ecriture-1',
+      lignes: [{ compteId: CLIENT_ACCOUNT.id, lettrage: null }],
+    });
+    prisma.ecriture.findMany.mockResolvedValue([makeEcriture()]);
+
+    const result = await service(prisma, makeEntriesServiceMock()).getRelatedEcritures(
+      company,
+      'invoice-1',
+    );
+    expect(result).toEqual([
+      expect.objectContaining({ kind: 'POSTED', ecritureId: 'ecriture-1', journalCode: 'VE' }),
+    ]);
+    expect(prisma.ecritureLigne.findMany).not.toHaveBeenCalled();
+  });
+
+  it('is empty for a DRAFT invoice — nothing posted, nothing to look up', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue(DRAFT_INVOICE);
+    prisma.invoice.findMany.mockResolvedValue([]);
+
+    const result = await service(prisma, makeEntriesServiceMock()).getRelatedEcritures(
+      company,
+      'invoice-1',
+    );
+    expect(result).toEqual([]);
+    expect(prisma.ecriture.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('includes a PAYMENT entry found via shared lettrage, excluding the posted écriture itself', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue({
+      ...DRAFT_INVOICE,
+      postedEcritureId: 'ecriture-1',
+    });
+    prisma.invoice.findMany.mockResolvedValue([]);
+    prisma.ecriture.findFirst.mockResolvedValue({
+      id: 'ecriture-1',
+      lignes: [{ compteId: CLIENT_ACCOUNT.id, lettrage: 'T1' }],
+    });
+    prisma.ecritureLigne.findMany.mockResolvedValue([
+      { ecritureId: 'ecriture-2', compteId: CLIENT_ACCOUNT.id, lettrage: 'T1' },
+    ]);
+    prisma.ecriture.findMany.mockResolvedValue([
+      makeEcriture(),
+      makeEcriture({ id: 'ecriture-2', journal: { code: 'BQ' }, libelle: 'Règlement client' }),
+    ]);
+
+    const result = await service(prisma, makeEntriesServiceMock()).getRelatedEcritures(
+      company,
+      'invoice-1',
+    );
+    expect(prisma.ecritureLigne.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ lettrage: 'T1', ecritureId: { not: 'ecriture-1' } }),
+      }),
+    );
+    expect(result.map((r) => r.kind)).toEqual(['POSTED', 'PAYMENT']);
+    expect(result[1]).toEqual(
+      expect.objectContaining({ ecritureId: 'ecriture-2', journalCode: 'BQ' }),
+    );
+  });
+
+  it('includes ENCAISSEMENT when the invoice has one', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue({
+      ...DRAFT_INVOICE,
+      postedEcritureId: 'ecriture-1',
+      encaissementEcritureId: 'ecriture-3',
+    });
+    prisma.invoice.findMany.mockResolvedValue([]);
+    prisma.ecriture.findFirst.mockResolvedValue({
+      id: 'ecriture-1',
+      lignes: [{ compteId: CLIENT_ACCOUNT.id, lettrage: null }],
+    });
+    prisma.ecriture.findMany.mockResolvedValue([
+      makeEcriture(),
+      makeEcriture({ id: 'ecriture-3', journal: { code: 'OD' }, libelle: 'TVA sur encaissements' }),
+    ]);
+
+    const result = await service(prisma, makeEntriesServiceMock()).getRelatedEcritures(
+      company,
+      'invoice-1',
+    );
+    expect(result.map((r) => r.kind)).toEqual(['POSTED', 'ENCAISSEMENT']);
+  });
+
+  it('a CREDIT_NOTE includes CORRECTS, naming the original invoice it rectifies', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValueOnce({
+      ...DRAFT_INVOICE,
+      type: InvoiceType.CREDIT_NOTE,
+      postedEcritureId: 'ecriture-2',
+      correctsInvoiceId: 'invoice-0',
+    });
+    prisma.invoice.findFirst.mockResolvedValueOnce({
+      id: 'invoice-0',
+      invoiceNumber: '1',
+      postedEcritureId: 'ecriture-1',
+    });
+    prisma.invoice.findMany.mockResolvedValue([]);
+    prisma.ecriture.findFirst.mockResolvedValue({
+      id: 'ecriture-2',
+      lignes: [{ compteId: CLIENT_ACCOUNT.id, lettrage: null }],
+    });
+    prisma.ecriture.findMany.mockResolvedValue([
+      makeEcriture({ id: 'ecriture-2', libelle: 'Avoir 2' }),
+      makeEcriture({ id: 'ecriture-1', libelle: 'Facture 1' }),
+    ]);
+
+    const result = await service(prisma, makeEntriesServiceMock()).getRelatedEcritures(
+      company,
+      'invoice-1',
+    );
+    expect(result).toEqual([
+      expect.objectContaining({ kind: 'POSTED', ecritureId: 'ecriture-2' }),
+      expect.objectContaining({
+        kind: 'CORRECTS',
+        ecritureId: 'ecriture-1',
+        relatedInvoiceId: 'invoice-0',
+        relatedInvoiceNumber: '1',
+      }),
+    ]);
+  });
+
+  it('a SALE invoice includes CORRECTED_BY for each credit note that corrects it', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue({
+      ...DRAFT_INVOICE,
+      postedEcritureId: 'ecriture-1',
+    });
+    prisma.invoice.findMany.mockResolvedValue([
+      { id: 'invoice-2', invoiceNumber: '2', postedEcritureId: 'ecriture-2' },
+    ]);
+    prisma.ecriture.findFirst.mockResolvedValue({
+      id: 'ecriture-1',
+      lignes: [{ compteId: CLIENT_ACCOUNT.id, lettrage: null }],
+    });
+    prisma.ecriture.findMany.mockResolvedValue([
+      makeEcriture(),
+      makeEcriture({ id: 'ecriture-2', libelle: 'Avoir 2' }),
+    ]);
+
+    const result = await service(prisma, makeEntriesServiceMock()).getRelatedEcritures(
+      company,
+      'invoice-1',
+    );
+    expect(result).toEqual([
+      expect.objectContaining({ kind: 'POSTED' }),
+      expect.objectContaining({
+        kind: 'CORRECTED_BY',
+        ecritureId: 'ecriture-2',
+        relatedInvoiceId: 'invoice-2',
+        relatedInvoiceNumber: '2',
+      }),
+    ]);
   });
 });

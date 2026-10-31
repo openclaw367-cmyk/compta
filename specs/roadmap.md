@@ -1043,7 +1043,22 @@ pattern in this app rather than inventing a new one:
   external, already-certified source, the same trust boundary this
   app already accepts for a bank statement import).
 
-#### 1e. Invoice → all related écritures — close a real, confirmed gap
+#### 1e. Invoice → all related écritures — SHIPPED (2026-10-31)
+
+`GET /invoicing/invoices/:id/related-ecritures` closes the gap, exactly
+as scoped below — see CLAUDE.md "Invoicing — related écritures" for the
+full record, including a deliberate deviation from this item's own
+original sketch: `AccountLedgerDrilldown` turned out to be the WRONG
+reuse (it shows a whole account's ledger, too broad AND still missing
+the `ENCAISSEMENT` entry, a different account entirely) — the
+`/ecritures?journal=&ecriture=` deep-link idiom (already established by
+`DashboardPage.tsx`'s recent-entries widget and the command palette)
+was used instead, a correct, already-proven reuse under a different
+component than originally sketched. Verified live both directions
+(an original invoice correctly showing `CORRECTED_BY` naming its
+avoir, and the avoir correctly showing `CORRECTS` naming the original)
+plus a real browser click-through confirming the deep link actually
+opens the right écriture, not just renders a row.
 
 **Added 2026-09-06, from a direct audit of `InvoiceDetailView.tsx` and
 `Invoice`'s own schema** (not a theoretical item — the user asked
@@ -1305,14 +1320,19 @@ Not re-litigating the GATED/PRESENTATION-driven priority order that got
 when picked up, not assumed to slot in ahead of anything. A few honest
 observations to inform that future conversation:
 
-- **1a (Quote/Order), 1b (invoice payment status), and 1e (invoice →
-  all related écritures) are the cheapest real wins here** — all three
-  extend an already-mature module (Invoicing) rather than building new
-  ledger-adjacent machinery from scratch; 1b and 1e in particular are
-  close to "expose an existing computation/relation from a new call
-  site," confirmed directly against a real, specific user complaint
-  ("I can't see all the entries related to an invoice"), not a
-  hypothetical gap.
+- **1a (Quote/Order), 1b (invoice payment status, SHIPPED), and 1e
+  (invoice → all related écritures, SHIPPED) were the cheapest real
+  wins here** — all three extend an already-mature module (Invoicing)
+  rather than building new ledger-adjacent machinery from scratch; 1b
+  and 1e in particular were close to "expose an existing
+  computation/relation from a new call site," confirmed directly
+  against a real, specific user complaint ("I can't see all the
+  entries related to an invoice"), not a hypothetical gap — both now
+  shipped, see their own entries above and CLAUDE.md. **1a (Quote/Order)
+  is the one item left from this group**, and genuinely different in
+  shape from the other two (new persisted entities + a state machine,
+  not "expose an existing read"), so it's the natural next pick but not
+  as cheap as 1b/1e turned out to be.
 - **1f (prepayments) is the one Tier-1 item confirmed as a COMPLETE
   gap, not a partial one** — every other Tier-1 item extends something
   real; prepayments today have no entity, no action, and no link at

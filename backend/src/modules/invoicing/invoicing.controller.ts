@@ -25,7 +25,8 @@ import { renderInvoicePdf } from './factur-x-pdf';
 @ApiHeader({
   name: 'x-company-id',
   required: true,
-  description: 'Tenant id — must name a company the caller (see Authorization header) is a member of.',
+  description:
+    'Tenant id — must name a company the caller (see Authorization header) is a member of.',
 })
 @Controller('invoicing/invoices')
 export class InvoicingController {
@@ -99,6 +100,18 @@ export class InvoicingController {
   @Get(':id/mentions')
   getMentions(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
     return this.invoicingService.getMentions(company, id);
+  }
+
+  @ApiOperation({
+    summary:
+      'All écritures related to this invoice — posted, cash-basis-VAT reclassification, credit ' +
+      'notes it corrects/that correct it, and any lettered payment — see CLAUDE.md "Invoicing — ' +
+      'related écritures".',
+  })
+  @ApiParam({ name: 'id' })
+  @Get(':id/related-ecritures')
+  getRelatedEcritures(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
+    return this.invoicingService.getRelatedEcritures(company, id);
   }
 
   @ApiOperation({

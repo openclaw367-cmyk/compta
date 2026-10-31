@@ -4,7 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Company, Invoice, InvoiceLine, InvoiceType, JournalType } from '@prisma/client';
+import {
+  Company,
+  EcritureLigne,
+  Invoice,
+  InvoiceLine,
+  InvoiceType,
+  JournalType,
+} from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 import { Money } from '../../common/decimal';
@@ -30,6 +37,29 @@ const TVA_ENCAISSEMENTS_ACCOUNT_NUMBER = '445800';
 const SERVICES_REVENUE_ACCOUNT_PREFIX = '706';
 
 export type InvoiceWithLines = Invoice & { lines: InvoiceLine[] };
+
+/**
+ * One row of `GET /invoicing/invoices/:id/related-ecritures` — see
+ * CLAUDE.md "Invoicing — related écritures" / roadmap item 1e.
+ * `relatedInvoiceId`/`relatedInvoiceNumber` are only set for
+ * CORRECTS/CORRECTED_BY (a different invoice than the one queried),
+ * never for POSTED/ENCAISSEMENT/PAYMENT (which are always about the
+ * queried invoice itself).
+ */
+export type RelatedEcritureKind =
+  'POSTED' | 'ENCAISSEMENT' | 'PAYMENT' | 'CORRECTS' | 'CORRECTED_BY';
+export interface RelatedEcritureEntry {
+  kind: RelatedEcritureKind;
+  ecritureId: string;
+  journalId: string;
+  journalCode: string;
+  ecritureNum: string | null;
+  /** YYYY-MM-DD */
+  ecritureDate: string;
+  libelle: string;
+  relatedInvoiceId?: string;
+  relatedInvoiceNumber?: string | null;
+}
 
 /**
  * Invoicing — Phase A. See specs/invoicing-plan.md and
@@ -155,6 +185,131 @@ export class InvoicingService {
       throw new NotFoundException(`Invoice ${id} not found`);
     }
     return invoice;
+  }
+
+  /**
+   * All four kinds of écriture relationship this Invoice carries,
+   * together — see CLAUDE.md "Invoicing — related écritures" / roadmap
+   * item 1e. Three are read directly off real FKs (postedEcritureId,
+   * encaissementEcritureId, correctsInvoiceId/correctedBy — traversed
+   * to THAT invoice's own postedEcritureId, not just linked by id); the
+   * fourth has no FK at all — every validated `EcritureLigne` on this
+   * invoice's own `clientAccountId` sharing a lettrage code with its
+   * own posted client ligne, the exact query shape
+   * `AnomaliesService.detectPaymentAnomalies()` already runs. Pure
+   * read-only aggregation — no new ledger write, no new computation to
+   * hand-trace.
+   */
+  async getRelatedEcritures(company: CompanyContext, id: string): Promise<RelatedEcritureEntry[]> {
+    const invoice = await this.findOne(company, id);
+
+    const idsByKind = new Map<string, RelatedEcritureKind>();
+    if (invoice.postedEcritureId) idsByKind.set(invoice.postedEcritureId, 'POSTED');
+    if (invoice.encaissementEcritureId)
+      idsByKind.set(invoice.encaissementEcritureId, 'ENCAISSEMENT');
+
+    let corrects: Invoice | null = null;
+    if (invoice.type === InvoiceType.CREDIT_NOTE && invoice.correctsInvoiceId) {
+      corrects = await this.prisma.invoice.findFirst({
+        where: { id: invoice.correctsInvoiceId, companyId: company.companyId },
+      });
+      if (corrects?.postedEcritureId) idsByKind.set(corrects.postedEcritureId, 'CORRECTS');
+    }
+
+    const correctedBy = await this.prisma.invoice.findMany({
+      where: {
+        correctsInvoiceId: id,
+        companyId: company.companyId,
+        postedEcritureId: { not: null },
+      },
+    });
+    for (const creditNote of correctedBy) {
+      if (creditNote.postedEcritureId) idsByKind.set(creditNote.postedEcritureId, 'CORRECTED_BY');
+    }
+
+    // Payment-via-lettrage — only when the invoice's own posted client ligne is itself lettered
+    // (nothing to find otherwise). Excludes the posted écriture itself (already tagged POSTED
+    // above, and it necessarily shares its own lettrage code with itself).
+    let paymentLines: EcritureLigne[] = [];
+    if (invoice.postedEcritureId) {
+      const postedEcriture = await this.prisma.ecriture.findFirst({
+        where: { id: invoice.postedEcritureId, companyId: company.companyId },
+        include: { lignes: true },
+      });
+      const clientLigne = postedEcriture?.lignes.find(
+        (l) => l.compteId === invoice.clientAccountId,
+      );
+      if (clientLigne?.lettrage) {
+        paymentLines = await this.prisma.ecritureLigne.findMany({
+          where: {
+            companyId: company.companyId,
+            compteId: invoice.clientAccountId,
+            lettrage: clientLigne.lettrage,
+            ecritureId: { not: invoice.postedEcritureId },
+            ecriture: { validatedAt: { not: null } },
+          },
+        });
+      }
+    }
+
+    const ecritures = await this.prisma.ecriture.findMany({
+      where: { id: { in: [...idsByKind.keys(), ...paymentLines.map((l) => l.ecritureId)] } },
+      include: { journal: true },
+    });
+    const ecrituresById = new Map(ecritures.map((e) => [e.id, e]));
+
+    const results: RelatedEcritureEntry[] = [];
+    for (const [ecritureId, kind] of idsByKind) {
+      const ecriture = ecrituresById.get(ecritureId);
+      if (!ecriture) continue;
+      results.push({
+        kind,
+        ecritureId: ecriture.id,
+        journalId: ecriture.journalId,
+        journalCode: ecriture.journal.code,
+        ecritureNum: ecriture.ecritureNum,
+        ecritureDate: ecriture.ecritureDate.toISOString().slice(0, 10),
+        libelle: ecriture.libelle,
+        ...(kind === 'CORRECTS' && corrects
+          ? { relatedInvoiceId: corrects.id, relatedInvoiceNumber: corrects.invoiceNumber }
+          : {}),
+        ...(kind === 'CORRECTED_BY'
+          ? (() => {
+              const creditNote = correctedBy.find((c) => c.postedEcritureId === ecritureId)!;
+              return {
+                relatedInvoiceId: creditNote.id,
+                relatedInvoiceNumber: creditNote.invoiceNumber,
+              };
+            })()
+          : {}),
+      });
+    }
+    // One row per distinct écriture even if two of this invoice's own lignes share the same
+    // lettrage code — a PAYMENT écriture that's ALSO already tagged another kind is never listed twice.
+    const paymentEcritureIds = new Set(paymentLines.map((l) => l.ecritureId));
+    for (const ecritureId of paymentEcritureIds) {
+      if (idsByKind.has(ecritureId)) continue;
+      const ecriture = ecrituresById.get(ecritureId);
+      if (!ecriture) continue;
+      results.push({
+        kind: 'PAYMENT',
+        ecritureId: ecriture.id,
+        journalId: ecriture.journalId,
+        journalCode: ecriture.journal.code,
+        ecritureNum: ecriture.ecritureNum,
+        ecritureDate: ecriture.ecritureDate.toISOString().slice(0, 10),
+        libelle: ecriture.libelle,
+      });
+    }
+
+    const KIND_ORDER: RelatedEcritureKind[] = [
+      'POSTED',
+      'PAYMENT',
+      'ENCAISSEMENT',
+      'CORRECTS',
+      'CORRECTED_BY',
+    ];
+    return results.sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
   }
 
   async remove(company: CompanyContext, id: string): Promise<void> {

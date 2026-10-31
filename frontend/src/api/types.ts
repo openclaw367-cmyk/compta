@@ -1644,6 +1644,24 @@ export interface FinalizeInvoiceResult {
   mentions: InvoiceMentions;
 }
 
+/** See CLAUDE.md "Invoicing — related écritures". */
+export type InvoiceRelatedEcritureKind = 'POSTED' | 'ENCAISSEMENT' | 'PAYMENT' | 'CORRECTS' | 'CORRECTED_BY';
+
+/** One row of GET /invoicing/invoices/:id/related-ecritures. */
+export interface InvoiceRelatedEcriture {
+  kind: InvoiceRelatedEcritureKind;
+  ecritureId: string;
+  journalId: string;
+  journalCode: string;
+  ecritureNum: string | null;
+  /** YYYY-MM-DD */
+  ecritureDate: string;
+  libelle: string;
+  /** Only set for CORRECTS/CORRECTED_BY — a different invoice than the one being viewed. */
+  relatedInvoiceId?: string;
+  relatedInvoiceNumber?: string | null;
+}
+
 export interface InvoiceMentionsAddress {
   addressLine: string | null;
   postalCode: string | null;
