@@ -1253,6 +1253,61 @@ export interface RecurringEntryTemplate {
 }
 
 /**
+ * Budgeting / forecasting vs. actuals — roadmap item 2c, see CLAUDE.md
+ * "Budgeting / forecasting". A Budget is pure metadata (never touches the
+ * ledger) scoped to one FiscalYear; each line references an account by
+ * its real `id` (a true FK), not by its NUMBER the way
+ * RecurringEntryTemplateLine does — see the backend's own budgeting.ts
+ * doc comment for why.
+ */
+export interface BudgetLine {
+  id: string;
+  budgetId: string;
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  /** Money string, non-negative. See budgeting.ts's own doc comment for the sign convention. */
+  plannedAmount: string;
+}
+
+export interface Budget {
+  id: string;
+  companyId: string;
+  fiscalYearId: string;
+  label: string;
+  createdAt: string;
+  updatedAt: string;
+  lines: BudgetLine[];
+}
+
+export interface BudgetVarianceLine {
+  accountId: string;
+  accountNumber: string;
+  accountLabel: string;
+  plannedAmount: string;
+  /** |ledger balance| for this account over the budget's own fiscal year — a magnitude, not
+   *  a PCG-class-signed value. See budgeting.ts's own doc comment. */
+  actualAmount: string;
+  /** actual - budget. */
+  variance: string;
+  /** null ("n/a") when plannedAmount is exactly "0.00". */
+  variancePercent: string | null;
+}
+
+export interface BudgetVarianceReport {
+  budgetId: string;
+  budgetLabel: string;
+  fiscalYearId: string;
+  lines: BudgetVarianceLine[];
+  totals: {
+    plannedAmount: string;
+    actualAmount: string;
+    variance: string;
+    variancePercent: string | null;
+  };
+}
+
+/**
  * The response of POST .../preview — resolved but UNPERSISTED, same
  * "never persists" discipline as ProposedEcriture above. `dto` is saved
  * via the ordinary POST /entries (useCreateEcriture()), never a

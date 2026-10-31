@@ -63,6 +63,8 @@ import { RecurringEntriesModule } from './modules/recurring-entries/recurring-en
 import { RecurringEntriesController } from './modules/recurring-entries/recurring-entries.controller';
 import { AnomaliesModule } from './modules/anomalies/anomalies.module';
 import { AnomaliesController } from './modules/anomalies/anomalies.controller';
+import { BudgetingModule } from './modules/budgeting/budgeting.module';
+import { BudgetingController } from './modules/budgeting/budgeting.controller';
 import { ActivityModule } from './modules/activity/activity.module';
 import { ActivityController } from './modules/activity/activity.controller';
 import { DevModule } from './modules/dev/dev.module';
@@ -106,6 +108,7 @@ const companyScopedControllers = [
   InvoicingController,
   RecurringEntriesController,
   AnomaliesController,
+  BudgetingController,
   MembershipsController,
   ActivityController,
   ...(isProduction ? [] : [DevController]),
@@ -145,6 +148,7 @@ const companyScopedControllers = [
     InvoicingModule,
     RecurringEntriesModule,
     AnomaliesModule,
+    BudgetingModule,
     ActivityModule,
     BackupModule,
     ...(isProduction ? [] : [DevModule]),

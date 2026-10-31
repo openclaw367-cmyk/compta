@@ -40,3 +40,5 @@ export type { DevisRequestDto } from '../../../backend/src/modules/invoicing/dto
 export type { CreateRecurringEntryTemplateDto } from '../../../backend/src/modules/recurring-entries/dto/create-recurring-entry-template.dto';
 export type { RecurringEntryTemplateLineDto } from '../../../backend/src/modules/recurring-entries/dto/recurring-entry-template-line.dto';
 export type { PreviewRecurringEntryTemplateDto } from '../../../backend/src/modules/recurring-entries/dto/preview-recurring-entry-template.dto';
+export type { CreateBudgetDto } from '../../../backend/src/modules/budgeting/dto/create-budget.dto';
+export type { BudgetLineDto } from '../../../backend/src/modules/budgeting/dto/budget-line.dto';

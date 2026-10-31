@@ -214,6 +214,7 @@ export class AccountsService {
       invoiceAsClientCount,
       invoiceLineAsRevenueCount,
       recurringLineCount,
+      budgetLineCount,
     ] = await Promise.all([
       this.prisma.account.count({ where: { parentId: id } }),
       this.prisma.ecritureLigne.count({ where: { compteId: id } }),
@@ -232,6 +233,12 @@ export class AccountsService {
           OR: [{ accountNumber: account.number }, { auxAccountNumber: account.number }],
         },
       }),
+      // BudgetLine references the account by a real FK (accountId, not NUMBER — see
+      // budgeting.ts's own doc comment for why), so this check is as safe to rely on as
+      // the fixedAsset/bankAccount/invoice ones above, unlike recurringLineCount's own
+      // number-based lookup — included anyway for a clear, named error instead of a raw
+      // DB foreign-key-violation surfacing to the caller.
+      this.prisma.budgetLine.count({ where: { accountId: id } }),
     ]);
 
     const blockers: string[] = [];
@@ -244,6 +251,7 @@ export class AccountsService {
     if (invoiceLineAsRevenueCount > 0)
       blockers.push(`${invoiceLineAsRevenueCount} ligne(s) de facture`);
     if (recurringLineCount > 0) blockers.push(`${recurringLineCount} ligne(s) de modèle récurrent`);
+    if (budgetLineCount > 0) blockers.push(`${budgetLineCount} ligne(s) de budget`);
 
     if (blockers.length > 0) {
       throw new ConflictException(

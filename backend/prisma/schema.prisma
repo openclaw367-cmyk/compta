@@ -233,6 +233,8 @@ model Company {
   companyInvites        CompanyInvite[]
   activityEvents        ActivityEvent[]
   archivedExports       ArchivedExport[]
+  budgets               Budget[]
+  budgetLines           BudgetLine[]
 }
 
 /// Exercice comptable. Ecritures are validated (locked) relative to a
@@ -252,6 +254,7 @@ model FiscalYear {
   depreciationEntries DepreciationEntry[]
   invoices            Invoice[]
   archivedExports     ArchivedExport[]
+  budgets             Budget[]
 
   @@unique([companyId, label])
   @@index([companyId])
@@ -313,6 +316,8 @@ model Account {
 
   invoicesAsClient      Invoice[]
   invoiceLinesAsRevenue InvoiceLine[]
+
+  budgetLines BudgetLine[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1336,5 +1341,71 @@ model ArchivedExport {
   generatedAt DateTime @default(now())
 
   @@unique([companyId, fiscalYearId, kind])
+  @@index([companyId])
+}
+
+/// A planned figure PER ACCOUNT, per fiscal year — roadmap item 2c
+/// ("Budgeting / forecasting vs. actuals"). Scoped to ONE Account per
+/// line, not a cost-center/analytical dimension — this app has no
+/// cost-center concept yet (roadmap item 2b), and the roadmap itself
+/// says account-level budgeting is fine without it. Tied to a
+/// FiscalYear (not an arbitrary date range) for consistency with how
+/// every other report in this app already scopes a period —
+/// LedgerService.trialBalance()/LiasseService/CashFlowService all key
+/// off a FiscalYear, never a free-floating start/end pair. Pure
+/// metadata, never written to the ledger (no écriture, no posting) —
+/// safe to hard-delete, exactly the same reasoning CLAUDE.md
+/// "Recurring entries / templates" already gives for
+/// RecurringEntryTemplate: "a template never itself becomes part of
+/// the ledger," so unlike Journal/Account/VatRate/FiscalYear this is a
+/// real, unconditional delete with no reference-blocking.
+model Budget {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  fiscalYearId String
+  fiscalYear   FiscalYear @relation(fields: [fiscalYearId], references: [id])
+
+  label String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines BudgetLine[]
+
+  @@unique([companyId, fiscalYearId, label])
+  @@index([companyId])
+}
+
+/// One account's planned amount within a Budget. References the account
+/// by its real `id` (a true FK), NOT by its NUMBER the way
+/// RecurringEntryTemplateLine does — see budgeting.service.ts's own
+/// doc comment for why that precedent's own justification (an account's
+/// `number` being "equally stable" to its `id`) no longer holds now
+/// that the Plan Comptable module lets `number` be edited. `companyId`
+/// is denormalized here too (not just reached via `budget.companyId`)
+/// per CLAUDE.md "Multi-tenant data model" — "there is no domain table
+/// that is implicitly global."
+model BudgetLine {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  budgetId String
+  budget   Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id])
+
+  /// Positive = planned net debit (e.g. a class-6 charge account).
+  /// Negative = planned net credit (e.g. a class-7 produit account) —
+  /// see budgeting.ts's own doc comment: this uses the SAME
+  /// debit-minus-credit sign convention LedgerService.trialBalance()'s
+  /// own `balance` field already uses, deliberately not re-signed per
+  /// PCG class.
+  plannedAmount Decimal @db.Decimal(15, 2)
+
+  @@unique([budgetId, accountId])
   @@index([companyId])
 }
