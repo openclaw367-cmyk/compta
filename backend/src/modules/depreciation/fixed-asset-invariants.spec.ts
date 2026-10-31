@@ -77,7 +77,10 @@ describe('assertValidAccountTriplet', () => {
 
   it('rejects a depreciation account not prefixed 28', () => {
     expect(() =>
-      assertValidAccountTriplet({ ...validTriplet, depreciation: { number: '218300', pcgClass: 2 } }),
+      assertValidAccountTriplet({
+        ...validTriplet,
+        depreciation: { number: '218300', pcgClass: 2 },
+      }),
     ).toThrow(BadRequestException);
   });
 

@@ -1,5 +1,9 @@
 import { BadRequestException, NotImplementedException } from '@nestjs/common';
-import { resolveCessionNature, assertValidCompteReglement, CESSION_ACCOUNTS } from './cession-invariants';
+import {
+  resolveCessionNature,
+  assertValidCompteReglement,
+  CESSION_ACCOUNTS,
+} from './cession-invariants';
 
 describe('resolveCessionNature', () => {
   it('routes 20x accounts (frais établissement, concessions/brevets, fonds commercial) to INCORPORELLE', () => {

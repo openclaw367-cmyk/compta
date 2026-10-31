@@ -10,7 +10,8 @@ import { CessionFixedAssetDto } from './dto/cession-fixed-asset.dto';
 @ApiHeader({
   name: 'x-company-id',
   required: true,
-  description: 'Tenant id — must name a company the caller (see Authorization header) is a member of.',
+  description:
+    'Tenant id — must name a company the caller (see Authorization header) is a member of.',
 })
 @Controller('depreciation/fixed-assets')
 export class DepreciationController {
@@ -28,7 +29,9 @@ export class DepreciationController {
     return this.depreciationService.findAll(company);
   }
 
-  @ApiOperation({ summary: 'Get one fixed asset by id, with valeurBrute/amortissementsCumules/vnc.' })
+  @ApiOperation({
+    summary: 'Get one fixed asset by id, with valeurBrute/amortissementsCumules/vnc.',
+  })
   @ApiParam({ name: 'id' })
   @Get(':id')
   findOne(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
@@ -43,8 +46,10 @@ export class DepreciationController {
   }
 
   @ApiOperation({
-    summary: 'Compute and persist the straight-line depreciation schedule.',
-    description: 'DECLINING method assets are rejected — not implemented yet (see CLAUDE.md).',
+    summary: "Compute and persist the asset's depreciation schedule (LINEAR or DECLINING).",
+    description:
+      "Branches on the asset's own method. Mid-year acquisition proration is not yet " +
+      'supported for either method (see CLAUDE.md).',
   })
   @ApiParam({ name: 'id' })
   @Post(':id/schedule')
@@ -66,12 +71,13 @@ export class DepreciationController {
   }
 
   @ApiOperation({
-    summary: 'Dispose of (céder) a fixed asset — posts the disposal écriture(s) as real, validated entries.',
+    summary:
+      'Dispose of (céder) a fixed asset — posts the disposal écriture(s) as real, validated entries.',
     description:
       'Posts a prorated final dotation first if the disposal year is mid-year (30E/360 day-count from ' +
       "the fiscal year's start or serviceStartDate, whichever is later), then the disposal écriture " +
-      "itself (débit amortissements cumulés + débit VNC = crédit valeur brute; débit compte de " +
-      "règlement = crédit produit de cession). All through EntriesService.create()/validate(). " +
+      'itself (débit amortissements cumulés + débit VNC = crédit valeur brute; débit compte de ' +
+      'règlement = crédit produit de cession). All through EntriesService.create()/validate(). ' +
       "Refuses if already disposed, if a prior fiscal year's dotation isn't posted, or if the " +
       'disposal year was already posted at the wrong (full-year) amount.',
   })

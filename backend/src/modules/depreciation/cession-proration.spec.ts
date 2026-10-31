@@ -25,9 +25,7 @@ describe('daysBetween360', () => {
   });
 
   it('throws if end is before start', () => {
-    expect(() => daysBetween360(d(2026, 6, 1), d(2026, 1, 1))).toThrow(
-      /end .* is before start/,
-    );
+    expect(() => daysBetween360(d(2026, 6, 1), d(2026, 1, 1))).toThrow(/end .* is before start/);
   });
 });
 
@@ -43,7 +41,7 @@ describe('computeFinalPeriodDotation', () => {
     expect(amount.toApiString()).toBe('100.00');
   });
 
-  it('reproduces the full annual amount for a disposal on the fiscal year\'s own last day', () => {
+  it("reproduces the full annual amount for a disposal on the fiscal year's own last day", () => {
     const amount = computeFinalPeriodDotation(asset, d(2026, 1, 1), d(2026, 12, 31));
     expect(amount.toApiString()).toBe('200.00');
   });

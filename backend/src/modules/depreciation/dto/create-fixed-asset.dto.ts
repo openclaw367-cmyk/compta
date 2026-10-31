@@ -45,7 +45,9 @@ export class CreateFixedAssetDto {
 
   @ApiPropertyOptional({
     enum: DepreciationMethod,
-    description: 'Only LINEAR is implemented — DECLINING is not (see CLAUDE.md).',
+    description:
+      'LINEAR (linéaire) or DECLINING (dégressif, CGI art. 39 A) — both implemented. ' +
+      'Mid-year acquisition proration is not yet supported for either (see CLAUDE.md).',
     default: DepreciationMethod.LINEAR,
   })
   @IsOptional()

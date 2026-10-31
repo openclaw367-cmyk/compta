@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, NotFoundException, NotImplementedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+  NotImplementedException,
+} from '@nestjs/common';
 import { DepreciationMethod, Prisma } from '@prisma/client';
 import { DepreciationService } from './depreciation.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -116,7 +121,8 @@ function makeFiscalYearFindMany() {
     const { startDate, endDate } = args.where;
     return Promise.resolve(
       FISCAL_YEARS.filter(
-        (fy) => (!startDate || fy.startDate >= startDate.gte) && (!endDate || fy.endDate < endDate.lt),
+        (fy) =>
+          (!startDate || fy.startDate >= startDate.gte) && (!endDate || fy.endDate < endDate.lt),
       ),
     );
   });
@@ -128,7 +134,9 @@ function makeDepreciationEntryMock(initialEntries: MockEntry[]) {
   let autoId = 0;
 
   const findFirst = jest.fn(
-    (args: { where: { id?: string; fixedAssetId?: string; fiscalYearId?: string; companyId?: string } }) => {
+    (args: {
+      where: { id?: string; fixedAssetId?: string; fiscalYearId?: string; companyId?: string };
+    }) => {
       const { id, fixedAssetId, fiscalYearId } = args.where;
       const entry = id
         ? entries.find((e) => e.id === id)
@@ -137,7 +145,11 @@ function makeDepreciationEntryMock(initialEntries: MockEntry[]) {
         return Promise.resolve(null);
       }
       // Mirrors postDotation's `include: { fixedAsset: true, fiscalYear: true }`.
-      return Promise.resolve({ ...entry, fixedAsset: ASSET, fiscalYear: fiscalYearsById.get(entry.fiscalYearId) });
+      return Promise.resolve({
+        ...entry,
+        fixedAsset: ASSET,
+        fiscalYear: fiscalYearsById.get(entry.fiscalYearId),
+      });
     },
   );
 
@@ -166,12 +178,20 @@ function makeDepreciationEntryMock(initialEntries: MockEntry[]) {
       update: { amount: Prisma.Decimal };
     }) => {
       const { fixedAssetId, fiscalYearId } = args.where.fixedAssetId_fiscalYearId;
-      let entry = entries.find((e) => e.fixedAssetId === fixedAssetId && e.fiscalYearId === fiscalYearId);
+      let entry = entries.find(
+        (e) => e.fixedAssetId === fixedAssetId && e.fiscalYearId === fiscalYearId,
+      );
       if (entry) {
         entry.amount = args.update.amount;
       } else {
         autoId += 1;
-        entry = { id: `entry-auto-${autoId}`, fixedAssetId, fiscalYearId, amount: args.create.amount, postedEcritureId: null };
+        entry = {
+          id: `entry-auto-${autoId}`,
+          fixedAssetId,
+          fiscalYearId,
+          amount: args.create.amount,
+          postedEcritureId: null,
+        };
         entries.push(entry);
       }
       return Promise.resolve({ ...entry });
@@ -190,20 +210,29 @@ function makeDepreciationEntryMock(initialEntries: MockEntry[]) {
 }
 
 function makePrismaMock(overrides: { postedEntries?: MockEntry[] } = {}) {
-  const postedEntries =
-    overrides.postedEntries ?? [
-      { id: 'entry-2025', fixedAssetId: ASSET.id, fiscalYearId: FY_2025.id, amount: new Prisma.Decimal('3000.00'), postedEcritureId: 'ecriture-2025' },
-    ];
+  const postedEntries = overrides.postedEntries ?? [
+    {
+      id: 'entry-2025',
+      fixedAssetId: ASSET.id,
+      fiscalYearId: FY_2025.id,
+      amount: new Prisma.Decimal('3000.00'),
+      postedEcritureId: 'ecriture-2025',
+    },
+  ];
   return {
     fixedAsset: {
       findFirst: jest.fn().mockResolvedValue(ASSET),
-      update: jest.fn((args: { data: unknown }) => Promise.resolve({ ...ASSET, ...(args.data as object) })),
+      update: jest.fn((args: { data: unknown }) =>
+        Promise.resolve({ ...ASSET, ...(args.data as object) }),
+      ),
     },
     account: { findFirst: makeAccountFindFirst(ALL_ACCOUNTS) },
     fiscalYear: { findFirst: makeFiscalYearFindFirst(), findMany: makeFiscalYearFindMany() },
     depreciationEntry: makeDepreciationEntryMock(postedEntries),
     journal: {
-      findFirst: jest.fn().mockResolvedValue({ id: 'journal-od', code: 'OD', type: 'OPERATIONS_DIVERSES' }),
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ id: 'journal-od', code: 'OD', type: 'OPERATIONS_DIVERSES' }),
     },
     ecriture: { findMany: jest.fn().mockResolvedValue([]) },
   };
@@ -217,7 +246,11 @@ function makeEntriesServiceMock() {
       return Promise.resolve({ id: `draft-${counter}`, validatedAt: null });
     }),
     validate: jest.fn().mockImplementation((_company: unknown, id: string) =>
-      Promise.resolve({ id, ecritureNum: id === 'draft-1' ? '10' : '11', validatedAt: new Date() }),
+      Promise.resolve({
+        id,
+        ecritureNum: id === 'draft-1' ? '10' : '11',
+        validatedAt: new Date(),
+      }),
     ),
   };
 }
@@ -291,7 +324,11 @@ describe('DepreciationService.disposeFixedAsset', () => {
   });
 
   it('posts a moins-value correctly when cessionPrice is below VNC', async () => {
-    const result = await service.disposeFixedAsset(company, ASSET.id, cessionDto({ cessionPrice: '5000.00' }));
+    const result = await service.disposeFixedAsset(
+      company,
+      ASSET.id,
+      cessionDto({ cessionPrice: '5000.00' }),
+    );
     expect(result.plusOuMoinsValue).toBe('-2491.67'); // 5000.00 - 7491.67
   });
 
@@ -327,7 +364,11 @@ describe('DepreciationService.disposeFixedAsset', () => {
 
   it('rejects a caller-supplied compteReglementId that is neither 462 nor class 5', async () => {
     await expect(
-      service.disposeFixedAsset(company, ASSET.id, cessionDto({ compteReglementId: COMPTE_411.id })),
+      service.disposeFixedAsset(
+        company,
+        ASSET.id,
+        cessionDto({ compteReglementId: COMPTE_411.id }),
+      ),
     ).rejects.toThrow(BadRequestException);
     expect(entriesService.create).not.toHaveBeenCalled();
   });
@@ -380,8 +421,20 @@ describe('DepreciationService.disposeFixedAsset', () => {
   it('refuses when the disposal year was already posted at the wrong (full-year) amount', async () => {
     prisma = makePrismaMock({
       postedEntries: [
-        { id: 'entry-2025', fixedAssetId: ASSET.id, fiscalYearId: FY_2025.id, amount: new Prisma.Decimal('3000.00'), postedEcritureId: 'ecriture-2025' },
-        { id: 'entry-2026-full', fixedAssetId: ASSET.id, fiscalYearId: FY_2026.id, amount: new Prisma.Decimal('3000.00'), postedEcritureId: 'ecriture-wrong' },
+        {
+          id: 'entry-2025',
+          fixedAssetId: ASSET.id,
+          fiscalYearId: FY_2025.id,
+          amount: new Prisma.Decimal('3000.00'),
+          postedEcritureId: 'ecriture-2025',
+        },
+        {
+          id: 'entry-2026-full',
+          fixedAssetId: ASSET.id,
+          fiscalYearId: FY_2026.id,
+          amount: new Prisma.Decimal('3000.00'),
+          postedEcritureId: 'ecriture-wrong',
+        },
       ],
     });
     service = new DepreciationService(
@@ -407,7 +460,9 @@ describe('DepreciationService.disposeFixedAsset', () => {
   });
 
   it('requires the 675x/775x accounts to already exist — never auto-creates them', async () => {
-    prisma.account.findFirst = makeAccountFindFirst(ALL_ACCOUNTS.filter((a) => a.number !== '675200'));
+    prisma.account.findFirst = makeAccountFindFirst(
+      ALL_ACCOUNTS.filter((a) => a.number !== '675200'),
+    );
     await expect(service.disposeFixedAsset(company, ASSET.id, cessionDto())).rejects.toThrow(
       NotFoundException,
     );

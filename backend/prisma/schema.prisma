@@ -73,9 +73,10 @@ enum InvoiceStatus {
 
 enum DepreciationMethod {
   LINEAR
-  // Declining-balance (dégressif) coefficients are not yet implemented —
-  // see CLAUDE.md and depreciation.service.ts. Do not select this value
-  // from application code until the calculation is implemented.
+  // Declining-balance (dégressif, CGI art. 39 A) — implemented, see
+  // depreciation-schedule.ts's computeDecliningSchedule(). Same
+  // "fully-contained fiscal years only" restriction as LINEAR — mid-year
+  // acquisition proration is not yet supported for either method.
   DECLINING
 }
 

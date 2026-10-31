@@ -715,6 +715,94 @@ text itself, not the DGFiP commentary).
   the already-disposed Entrepôt C fixture asset rather than posting a
   new disposal into the fixture.
 
+## Immobilisations / dégressif depreciation
+
+`DepreciationService.generateSchedule()` (2026-10-31) now computes a real
+declining-balance (dégressif) schedule for a `DepreciationMethod.DECLINING`
+asset — closing the gap `specs/project-map.md`'s own parallelization
+analysis named as the Batch 1 GATED anchor. `DepreciationMethod.DECLINING`
+already existed in the schema/enum (added pre-emptively, same precedent as
+`FixedAsset.cessionDate`/`cessionPrice` existing before cession itself was
+built) — this pass is pure service/compute logic, **zero migration**.
+
+- **Coefficient table: CGI art. 39 A / Annexe III, the post-2001-reform
+  table** (`resolveDecliningCoefficient()`, `depreciation-schedule.ts`) —
+  1,25 (3-4 ans), 1,75 (5-6 ans), 2,25 (plus de 6 ans). Deliberately NOT
+  the older 1,5/2/2,5 table some pre-2001 sources still cite. Below 3
+  years, dégressif doesn't apply under French law at all — thrown rather
+  than guessed, same "never silently approximate" discipline as
+  everywhere else in this module.
+- **The recurrence**: each year's dotation is `max(VNC restante × taux
+  dégressif, VNC restante ÷ années restantes)` — the second term is the
+  textbook switch-to-linéaire rule. Taking the max fresh every year
+  (rather than tracking a "have we switched" flag) is provably correct,
+  not just simpler: once the linéaire-restant term exceeds the dégressif
+  term for one year, it stays ahead for every year after, since VNC and
+  années restantes shrink in lockstep. Each candidate is rounded to 2
+  decimals BEFORE the comparison (matching NUMERIC(15,2) storage), same
+  reasoning as `computeAnnualDotationAmount()`'s own immediate rounding —
+  confirmed empirically against this app's actual Decimal runtime (not
+  assumed): `291.665` rounds to `291.67` (round-half-up), which is what
+  makes the hand-traced oracle below exact. The last covered fiscal year
+  absorbs whatever rounding remainder is left, same as linéaire.
+- **Same restriction as linéaire, deliberately not widened this pass**:
+  only fiscal years fully contained in the asset's depreciation window
+  are handled (`assertFullyContainedFiscalYears()`, extracted and shared
+  between both schedule functions, zero behavior change to the existing
+  linéaire path — its own pre-existing tests pass unmodified). Mid-year
+  acquisition proration remains open for BOTH methods. Dégressif's own
+  real-world first-year proration additionally uses a MONTH count (not
+  cession's day-count convention) — a genuinely different rule that
+  would need its own citation before being added, deliberately not
+  conflated with the linéaire proration gap. **Per the batch's own
+  explicit instruction, acquisition-year proration was NOT started this
+  pass** — same file (`depreciation-schedule.ts`) as this change, a
+  same-file collision flagged in the project map, sequenced as a
+  separate pass.
+- **A real, pre-existing code-quality gap fixed as part of this
+  pass, per the project map's own finding**: `computeAnnualDotationAmount()`/
+  `computeLinearSchedule()`'s boundary guards used plain `throw new
+  Error(...)`, not a NestJS exception class — contradicting this app's
+  own "always throw a real NestJS exception" discipline (applied to VAT's
+  guards, never retrofitted here). Fixed: both now throw
+  `BadRequestException`, and the new declining-schedule guards follow the
+  same convention from the start. Zero behavior change for callers that
+  only check `.message` (as the existing tests do); `NotImplementedException`
+  — the guard this pass actually removes (`generateSchedule()` no longer
+  rejects `DECLINING` outright) — is gone from both
+  `depreciation.service.ts` and its own spec file, confirmed unused and
+  removed from both import lists.
+- **Verified two ways.** Two hand-traced oracle tests in
+  `depreciation-schedule.spec.ts`: the standard textbook example
+  (10 000,00 €, 5 years, coefficient 1,75 → 3 500,00 / 2 275,00 / 1 478,75 /
+  1 373,13 / 1 373,12, switching to linéaire exactly in year 4) and a
+  second example (1 000,00 €, 3 years, coefficient 1,25 → 416,67 / 291,67 /
+  291,66, switching in year 2) — both independently verified by hand
+  before writing the code, not fitted to whatever the code produced.
+  Plus coefficient-boundary tests (3/4→1,25, 5/6→1,75, 7/10→2,25, <3
+  throws), a residual-value test, the shared mid-year-acquisition throw,
+  and the depreciable-base guard. `depreciation.service.spec.ts`'s own
+  former "rejects DECLINING assets outright" test is replaced with a
+  real end-to-end `generateSchedule()` test reproducing the 1 000,00 €/
+  3-year/416,67-291,67-291,66 example through the full service path
+  (upsert + the post-upsert re-fetch `findSchedule()` does internally).
+  950 backend tests passing overall (up from 942); `tsc`/`eslint` clean
+  both sides, `vite build` clean. **Frontend**: `ImmobilisationsPage.tsx`'s
+  "Mode" selector — previously hardcoded, disabled, labeled "Dégressif
+  (non implémenté)" — is now a real, enabled choice wired into the
+  create-asset draft state, submitted as the DTO's own `method` field.
+  Not independently live-verified against a running server this pass
+  (no browser session available) — the oracle tests above are the actual
+  correctness proof; a human click-through creating a real DECLINING
+  asset is worth a quick confirmation in a future session.
+- **Not touched this pass, deliberately**: acquisition-year (mid-year)
+  proration for either method (see above); dégressif's own month-based
+  first-year proration; 2055's Cadre B (amortissements dérogatoires) —
+  still N/A, since this app only ever posts ONE method per asset, so book
+  and tax amortization still never diverge even with dégressif available
+  (Cadre B requires a book/tax DIVERGENCE on the SAME asset, which isn't
+  this app's model).
+
 ## Liasse fiscale / bilan & compte de résultat
 
 `src/modules/liasse/` computes the two foundational forms of the régime
@@ -6925,19 +7013,17 @@ assume they're covered either:
   the FEC section above has been verified against
   `specs/LEGIARTI000027804775_Article_A47_A-1_LPF.md`; §VIII specifically
   has not.
-- **Immobilisations: cession is now built (as of 2026-08-15); dégressif
-  remains deferred.** See "Immobilisations / cession" above for the full
-  écriture design, the prorata-temporis convention, and the two real
-  bugs its own build surfaced and fixed (the bare-775000 chart gap, and
-  `buildVncByLine`'s tie-out never excluding disposed-this-year assets).
-  `DepreciationMethod.DECLINING` (dégressif) still throws
-  `NotImplementedException` in `generateSchedule()`; only linéaire is
-  computed — which is also why 2055's Cadre B (amortissements
-  dérogatoires) isn't represented at all: it only exists when the tax
-  method diverges from the book method, which can't happen here.
-  Acquisition-year proration (as opposed to cession's disposal-year
-  proration, now built) also remains unbuilt —
-  `computeLinearSchedule()` still throws on a partially-overlapping
+- **Immobilisations: cession (2026-08-15) and dégressif (2026-10-31) are
+  both now built.** See "Immobilisations / cession" and "Immobilisations
+  / dégressif depreciation" above for the full écriture design and
+  schedule math respectively, and the real bugs each build surfaced and
+  fixed. 2055's Cadre B (amortissements dérogatoires) still isn't
+  represented — it only exists when the tax method diverges from the
+  book method on the SAME asset, which can't happen in this app's model
+  (one method per asset, chosen once). Acquisition-year proration (as
+  opposed to cession's disposal-year proration, already built) remains
+  unbuilt for BOTH methods — `computeLinearSchedule()`/
+  `computeDecliningSchedule()` both still throw on a partially-overlapping
   fiscal year. `DepreciationService.postDotation()` posts a period's
   dotation (débit compte 681x / crédit compte 28x) through the normal
   `EntriesService.create()`/`validate()` layer — no privileged write
@@ -7040,8 +7126,9 @@ fixture, and the "Céder l'immobilisation" action on
 "orphaned immobilisation" gap is also closed (same day, later pass) —
 `EntriesService.create()`/`update()` now warn (non-blocking) when a
 line debits a class-2 account with no linked `FixedAsset`, see "Known
-scope boundaries" above. What's still deferred: dégressif,
-acquisition-year proration.
+scope boundaries" above. **Dégressif depreciation is also now built**
+(2026-10-31) — see "Immobilisations / dégressif depreciation" above.
+What's still deferred: acquisition-year proration (both methods).
 
 **VAT (TVA)** — `computeDeclaration()` is no longer a stub: it computes
 and now also *displays* a real CA3 for the basic French case (`VatPage`'s
