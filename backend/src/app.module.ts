@@ -182,12 +182,14 @@ export class AppModule implements NestModule {
     // from the caller's own Memberships (CompaniesService.findAllForUser)
     // inside CabinetBatchService — see CLAUDE.md "Multi-client /
     // cabinet management (item 3)".
-    consumer.apply(AuthMiddleware).forRoutes(
-      CompaniesController,
-      BackupController,
-      CabinetBatchController,
-      ...companyScopedControllers,
-    );
+    consumer
+      .apply(AuthMiddleware)
+      .forRoutes(
+        CompaniesController,
+        BackupController,
+        CabinetBatchController,
+        ...companyScopedControllers,
+      );
 
     consumer
       .apply(CompanyContextMiddleware)

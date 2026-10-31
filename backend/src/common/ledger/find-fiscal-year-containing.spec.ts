@@ -10,7 +10,11 @@ describe('findFiscalYearContaining', () => {
     const prisma = { fiscalYear: { findFirst: jest.fn().mockResolvedValue(fiscalYear) } };
     const date = new Date('2026-06-15');
 
-    const result = await findFiscalYearContaining(prisma as unknown as PrismaService, company, date);
+    const result = await findFiscalYearContaining(
+      prisma as unknown as PrismaService,
+      company,
+      date,
+    );
 
     expect(result).toBe(fiscalYear);
     expect(prisma.fiscalYear.findFirst).toHaveBeenCalledWith({

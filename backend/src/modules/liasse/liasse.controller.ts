@@ -19,7 +19,8 @@ import { renderLiasseExcel } from './liasse-excel';
 @ApiHeader({
   name: 'x-company-id',
   required: true,
-  description: 'Tenant id — must name a company the caller (see Authorization header) is a member of.',
+  description:
+    'Tenant id — must name a company the caller (see Authorization header) is a member of.',
 })
 @Controller('liasse')
 export class LiasseController {

@@ -8,7 +8,8 @@ import { ANouveauService } from './a-nouveau.service';
 @ApiHeader({
   name: 'x-company-id',
   required: true,
-  description: 'Tenant id — must name a company the caller (see Authorization header) is a member of.',
+  description:
+    'Tenant id — must name a company the caller (see Authorization header) is a member of.',
 })
 @Controller('fiscal-years/:fiscalYearId/a-nouveau')
 export class ANouveauController {
@@ -16,7 +17,7 @@ export class ANouveauController {
 
   @ApiOperation({
     summary:
-      "Generate the à-nouveau (opening balance carry-forward) écriture for a fiscal year " +
+      'Generate the à-nouveau (opening balance carry-forward) écriture for a fiscal year ' +
       'from its closed predecessor. Validated immediately; refuses if the predecessor is not ' +
       'closed or à-nouveau entries already exist for this year.',
   })

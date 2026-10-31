@@ -84,7 +84,16 @@ function makePrismaMock() {
 
 function createdLignes(prisma: ReturnType<typeof makePrismaMock>) {
   const call = prisma.ecriture.create.mock.calls[0][0] as {
-    data: { lignes: { create: { compteId: string; compteAuxId?: string; debit: Prisma.Decimal; credit: Prisma.Decimal }[] } };
+    data: {
+      lignes: {
+        create: {
+          compteId: string;
+          compteAuxId?: string;
+          debit: Prisma.Decimal;
+          credit: Prisma.Decimal;
+        }[];
+      };
+    };
   };
   return call.data.lignes.create
     .map((l) => ({
@@ -114,7 +123,12 @@ describe('ANouveauService', () => {
       [
         { compteId: 'account-101', compteAuxId: null, debit: '0.00', credit: '100000.00' },
         { compteId: 'account-512', compteAuxId: null, debit: '130000.00', credit: '0.00' },
-        { compteId: 'account-401', compteAuxId: 'account-401001', debit: '0.00', credit: '20000.00' },
+        {
+          compteId: 'account-401',
+          compteAuxId: 'account-401001',
+          debit: '0.00',
+          credit: '20000.00',
+        },
         { compteId: 'account-120', compteAuxId: null, debit: '0.00', credit: '10000.00' },
       ].sort((a, b) => (a.compteId + a.compteAuxId).localeCompare(b.compteId + b.compteAuxId)),
     );
@@ -204,8 +218,12 @@ describe('ANouveauService', () => {
   it('surfaces loudly, as an internal error, if the carried block would not balance', async () => {
     // A single unbalanced line simulates a corrupted prior-year ledger —
     // the à-nouveau block must never be silently posted unbalanced.
-    prisma.ecritureLigne.findMany.mockResolvedValue([ligne('account-512', null, 5, '100.00', '0.00')]);
-    await expect(service.generate(company, TARGET.id)).rejects.toThrow(InternalServerErrorException);
+    prisma.ecritureLigne.findMany.mockResolvedValue([
+      ligne('account-512', null, 5, '100.00', '0.00'),
+    ]);
+    await expect(service.generate(company, TARGET.id)).rejects.toThrow(
+      InternalServerErrorException,
+    );
     expect(prisma.ecriture.create).not.toHaveBeenCalled();
   });
 });

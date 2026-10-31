@@ -50,18 +50,18 @@ describe('BridgeAggregatorAdapter', () => {
 
     it('throws when BRIDGE_CLIENT_ID/SECRET are not configured — before any network call', async () => {
       const adapter = new BridgeAggregatorAdapter(makeConfig({ BRIDGE_CLIENT_ID: undefined }));
-      await expect(adapter.createConnectSession({ companyId: 'company-1', role: 'OWNER' })).rejects.toThrow(
-        InternalServerErrorException,
-      );
+      await expect(
+        adapter.createConnectSession({ companyId: 'company-1', role: 'OWNER' }),
+      ).rejects.toThrow(InternalServerErrorException);
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('throws a clear error when the response has no url field', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({}));
       const adapter = new BridgeAggregatorAdapter(makeConfig());
-      await expect(adapter.createConnectSession({ companyId: 'company-1', role: 'OWNER' })).rejects.toThrow(
-        InternalServerErrorException,
-      );
+      await expect(
+        adapter.createConnectSession({ companyId: 'company-1', role: 'OWNER' }),
+      ).rejects.toThrow(InternalServerErrorException);
     });
 
     it("requests the read-only (AIS) scope, never a payment/PIS scope — the code-level half of the read-only design intent (unconfirmed parameter name, see the adapter's own doc comment)", async () => {
@@ -79,7 +79,9 @@ describe('BridgeAggregatorAdapter', () => {
     it('throws on a non-2xx HTTP response, naming the status', async () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'nope' }, false, 401));
       const adapter = new BridgeAggregatorAdapter(makeConfig());
-      await expect(adapter.createConnectSession({ companyId: 'company-1', role: 'OWNER' })).rejects.toThrow(/401/);
+      await expect(
+        adapter.createConnectSession({ companyId: 'company-1', role: 'OWNER' }),
+      ).rejects.toThrow(/401/);
     });
   });
 
