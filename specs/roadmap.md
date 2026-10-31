@@ -1572,43 +1572,67 @@ into that company; there's no cross-company rollup.
      `api.getForCompany()`, a GET scoped to a company other than the
      ambient current one — the ambient convention every other hook uses
      is completely unchanged. See CLAUDE.md for the full record.
-  3. Batch operations across companies (e.g. "export FEC for every
-     client with a fiscal year closing this month") — the largest part
-     of this item, genuinely new orchestration logic, sequenced last,
-     still open.
+  3. **SHIPPED (2026-10-31), a later pass.** Batch operations across
+     companies — exactly the example this section always used: "export
+     FEC for every client with a fiscal year closing this month"
+     (`POST /cabinet/batch/export-fec-closing?month=YYYY-MM`, new
+     `src/modules/cabinet/`). Never a generic "any action" framework —
+     the one hand-written action this section's own example named, with
+     a second batch action (if ever wanted) following the same pattern.
+     Reuses `FecExportService.generate()` verbatim per matching
+     (company, fiscal year) — never a duplicated or privileged export
+     path — looping only over companies resolved from the CALLER's own
+     `CompaniesService.findAllForUser()`, never a client-supplied
+     company-id list. Authorization is modeled directly on
+     `BackupController`'s own shape (needs `AuthMiddleware`, never
+     `CompanyContextMiddleware`, since it spans every company the
+     caller belongs to). See CLAUDE.md "Multi-client / cabinet
+     management (item 3)" for the full record.
 - **Classification: PRESENTATION for 1 and 2** (pure read-side
   aggregation of already-correct per-company data) — **item 3 is GATED
   per-action** (each underlying action, e.g. an FEC export, is already
   gated; running several in sequence needs its own partial-failure
   handling — "17 of 20 succeeded, here are the 3 that didn't and why,"
-  never a silent partial batch).
+  never a silent partial batch) — confirmed true by construction: the
+  partial-failure result shape is modeled on
+  `EntriesService.validateBatch()`'s own precedent, and one company's
+  failure never aborts the loop for the others.
 - **Verification**: 1 and 2 need no accounting oracle at all — they're
   UI/aggregation correctness, verified by confirming the cabinet view's
   per-company numbers match what that company's own dashboard already
   shows (a regression/consistency check, not a hand-traced oracle, the
   same honest distinction this document already draws for Tier-1/2's
-  own presentation-layer items). Item 3's verification is per-underlying-
-  action (already has its own oracle) plus a new test specifically for
-  the partial-failure reporting path.
+  own presentation-layer items). **Item 3's verification is exactly
+  what this bullet predicted**: `FecExportService.generate()` already
+  has its own oracle (unchanged, untouched by this item), plus a new,
+  dedicated 7-test suite specifically for the orchestration/
+  partial-failure-reporting path itself (a failing company never
+  aborting a succeeding one, the authorization-scoping check, the
+  month-boundary inclusivity check) — see CLAUDE.md for the full list.
 
 ### Sequencing note for this section
 
 Severity-ordered, not dependency-ordered, since none of these five
-block each other. **Backup/recovery, clôture archival, bulk-validate,
-the multi-year-FEC guard, AND Cabinet UX items 1-2 are all now SHIPPED**
-(backup/recovery, archival, and bulk-validate on 2026-10-18; the
-multi-year-FEC guard and Cabinet UX items 1-2 on 2026-10-31 — see their
-own entries above and CLAUDE.md) — backup/recovery and archival picked
-first and second precisely because they carried the two most severe,
-currently-unmitigated consequences (unbounded data loss; a silent
+block each other. **Every item in this whole "Operational readiness"
+section is now SHIPPED** — backup/recovery, clôture archival, and
+bulk-validate on 2026-10-18; the multi-year-FEC guard and Cabinet UX
+items 1-2 on 2026-10-31; Cabinet UX item 3 (batch cross-company
+actions) in a later pass the same day — see their own entries above
+and CLAUDE.md. Backup/recovery and archival picked first and second
+precisely because they carried the two most severe, currently-
+unmitigated consequences (unbounded data loss; a silent
 compliance-archival gap in an otherwise well-flagged codebase);
 bulk-validate, the multi-year-FEC guard, and Cabinet UX items 1-2
-followed in severity order, each small and cheap as scoped. **Item 3
-(batch cross-company actions) is the only item left anywhere in this
-whole "Operational readiness" section** — the only genuinely large
-piece here, and should wait until there's a real multi-client user to
-design it against, per its own classification above (GATED per-action,
-needs its own partial-failure-reporting design).
+followed in severity order, each small and cheap as scoped. Item 3
+(batch cross-company actions) — flagged earlier in this document as
+"the only genuinely large piece here" and "should wait until there's a
+real multi-client user to design it against" — was ultimately built
+against exactly the one concrete example every document discussing
+this feature had already converged on (export FEC for every client
+closing this month), scoped narrowly enough (one hand-written action,
+reusing an already-gated per-company method verbatim, no new generic
+framework) that it didn't need a real multi-client user in hand to
+design safely.
 
 ---
 
