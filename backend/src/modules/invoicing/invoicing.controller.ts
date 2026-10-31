@@ -25,7 +25,8 @@ import { renderInvoicePdf } from './factur-x-pdf';
 @ApiHeader({
   name: 'x-company-id',
   required: true,
-  description: 'Tenant id — must name a company the caller (see Authorization header) is a member of.',
+  description:
+    'Tenant id — must name a company the caller (see Authorization header) is a member of.',
 })
 @Controller('invoicing/invoices')
 export class InvoicingController {
@@ -42,17 +43,25 @@ export class InvoicingController {
     return this.invoicingService.create(company, dto);
   }
 
-  @ApiOperation({ summary: "List the company's invoices." })
+  @ApiOperation({
+    summary:
+      "List the company's invoices, each with its own computed paymentStatus — see CLAUDE.md " +
+      '"Invoicing — payment status".',
+  })
   @Get()
   findAll(@CurrentCompany() company: CompanyContext) {
-    return this.invoicingService.findAll(company);
+    return this.invoicingService.findAllWithPaymentStatus(company);
   }
 
-  @ApiOperation({ summary: 'Get one invoice by id, with lines.' })
+  @ApiOperation({
+    summary:
+      'Get one invoice by id, with lines and its own computed paymentStatus (null unless ' +
+      'FINALIZED SALE).',
+  })
   @ApiParam({ name: 'id' })
   @Get(':id')
   findOne(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
-    return this.invoicingService.findOne(company, id);
+    return this.invoicingService.findOneWithPaymentStatus(company, id);
   }
 
   @ApiOperation({ summary: 'Full replace of a DRAFT invoice. Rejects a FINALIZED invoice.' })

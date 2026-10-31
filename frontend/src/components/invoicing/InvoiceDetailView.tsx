@@ -4,6 +4,7 @@ import { ApiError } from '../../api/client';
 import { formatMoneyFr } from '../../lib/money';
 import { useState } from 'react';
 import { useToast } from '../../context/toastStore';
+import { PaymentStatusBadge } from './PaymentStatusBadge';
 
 /**
  * A FINALIZED invoice, read-only — its content can never change (a
@@ -83,9 +84,12 @@ export function InvoiceDetailView({
     <div className="flex flex-col gap-5 rounded-lg border border-border bg-surface p-5 shadow-card">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-[15px] font-semibold text-ink">
-            {mentions.isCreditNote ? 'Avoir' : 'Facture'} n° {mentions.invoiceNumber}
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-[15px] font-semibold text-ink">
+              {mentions.isCreditNote ? 'Avoir' : 'Facture'} n° {mentions.invoiceNumber}
+            </h2>
+            {!mentions.isCreditNote && <PaymentStatusBadge status={invoice.paymentStatus} />}
+          </div>
           <p className="mt-0.5 text-[13px] text-ink-muted">
             {mentions.invoiceDate}
             {mentions.isCreditNote && mentions.correctsInvoiceNumber && (

@@ -930,30 +930,33 @@ already do. No new posting primitive anywhere in this tier.
   of this app's own oracle discipline — stated plainly, not glossed
   over.
 
-#### 1b. Invoice payment status — promote the anomaly engine's own logic
+#### 1b. Invoice payment status — SHIPPED (2026-10-31)
 
-- **What**: a first-class, COMPUTED (never stored) payment status per
-  `Invoice` — paid / partially paid / open / overdue — derived from
-  `EcritureLigne.lettrage` on the invoice's own posted client-account
-  line, extending exactly the logic `computePaymentAnomalies()` already
-  has, just promoted from "an anomaly-detection side effect" to "a
-  queryable invoice property" (`GET /invoicing/invoices/:id` gains the
-  field; the invoice list/detail screens surface it).
-- **Classification: PRESENTATION.** No new ledger write, no new
-  aggregation logic beyond what already exists and is already tested —
-  this is almost entirely "expose an existing computation from a second
-  call site."
-- **Depends on**: Invoicing (exists), bank reconciliation's `lettrage`
-  (exists), the anomaly engine's own payment-matching logic (exists,
-  gets extracted into a shared, reusable function rather than
-  duplicated).
-- **Verification**: the underlying logic is ALREADY hand-oracle-tested
-  (`invoice-anomaly-engine.spec.ts`) — the only new surface is exposing
-  it on a second endpoint, verified by a regression test asserting both
-  call sites agree, plus a live check that the invoice screen shows the
-  same status the anomalies screen already flags. Low risk, small,
-  arguably the cheapest genuinely-valuable item in this whole section —
-  a good first pick.
+A first-class, COMPUTED (never stored) `paymentStatus` per `Invoice` —
+`PAID` / `OPEN` / `OVERDUE` (see CLAUDE.md "Invoicing — payment status"
+for exactly why `PARTIALLY_PAID` was deliberately dropped: `lettrage`
+has no amount-netting anywhere in this app, so a partial payment isn't
+honestly distinguishable from no payment without roadmap item 1f) —
+derived from `EcritureLigne.lettrage` on the invoice's own posted
+client-account line, extending `classifyInvoicePaymentStatus()`
+(extracted from `computePaymentAnomalies()`'s own logic, not
+duplicated). `GET /invoicing/invoices` / `GET /invoicing/invoices/:id`
+both carry the field now; `InvoicesList.tsx` gained a "Paiement"
+column and `InvoiceDetailView.tsx` shows it next to the invoice title.
+
+- **Classification: PRESENTATION**, confirmed correct in practice — no
+  new ledger write, no new aggregation logic beyond what already
+  existed and was already tested.
+- **Verified two ways.** 15 new backend tests; 934 backend tests
+  passing overall (up from 922). Live against the FR demo company:
+  every existing overdue invoice correctly showed `OVERDUE`; manually
+  lettering a real posted écriture's client ligne flipped it to `PAID`
+  live, reverted afterward; confirmed in a real browser on both
+  `/factures` (list) and the invoice detail view. A real, found-while-
+  building gap was also closed: `useConfirmMatch()`/`useClearMatch()`
+  (bank reconciliation) weren't invalidating the invoices list query at
+  all, so a payment-status badge could go stale after reconciling a
+  bank line — fixed in the shared `invalidateReconciliation()` helper.
 
 #### 1c. Procure-to-pay — Purchase Order, Goods Receipt, Supplier Bill
 
@@ -1305,14 +1308,16 @@ Not re-litigating the GATED/PRESENTATION-driven priority order that got
 when picked up, not assumed to slot in ahead of anything. A few honest
 observations to inform that future conversation:
 
-- **1a (Quote/Order), 1b (invoice payment status), and 1e (invoice →
-  all related écritures) are the cheapest real wins here** — all three
-  extend an already-mature module (Invoicing) rather than building new
-  ledger-adjacent machinery from scratch; 1b and 1e in particular are
-  close to "expose an existing computation/relation from a new call
-  site," confirmed directly against a real, specific user complaint
-  ("I can't see all the entries related to an invoice"), not a
-  hypothetical gap.
+- **1a (Quote/Order), 1b (invoice payment status, now SHIPPED — see
+  above), and 1e (invoice → all related écritures) are the cheapest real
+  wins here** — all three extend an already-mature module (Invoicing)
+  rather than building new ledger-adjacent machinery from scratch; 1b
+  and 1e in particular are close to "expose an existing
+  computation/relation from a new call site," confirmed directly
+  against a real, specific user complaint ("I can't see all the entries
+  related to an invoice"), not a hypothetical gap. **1e is the natural
+  next pick** — same shape as 1b, and the one still-open item tied
+  directly to that original user complaint.
 - **1f (prepayments) is the one Tier-1 item confirmed as a COMPLETE
   gap, not a partial one** — every other Tier-1 item extends something
   real; prepayments today have no entity, no action, and no link at

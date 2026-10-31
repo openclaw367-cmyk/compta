@@ -6564,6 +6564,98 @@ time through the ordinary journal-grid "Valider" button.
   known baseline (`39 495,00 = 39 495,00`). Full backend suite re-run
   afterward as a final sanity check: 922/922 passing, unchanged.
 
+## Invoicing — payment status
+
+`POST /invoicing/invoices` and `GET /invoicing/invoices/:id` now carry a
+computed `paymentStatus` field (2026-10-31) — the roadmap's own
+Business-operations §1b, flagged there as "arguably the cheapest
+genuinely-valuable item" in that whole section. Promotes the anomaly
+engine's own payment-matching logic from "an anomaly-detection side
+effect" to a queryable `Invoice` property, exactly as scoped.
+
+- **Three states, not four — `PARTIALLY_PAID` deliberately dropped,
+  not an oversight.** `classifyInvoicePaymentStatus()` (new,
+  `invoice-anomaly-engine.ts`, exported alongside the pre-existing
+  `computePaymentAnomalies()` which now reuses the same exported
+  `signedDaysBetween()`/`OVERDUE_GRACE_DAYS` rather than a second
+  derivation) returns `PAID` | `OPEN` | `OVERDUE`. `lettrage` in this
+  app is a single per-ligne flag with no amount-netting computed
+  anywhere (confirmed — grepped every `lettrage` reference in
+  `src/modules`, nothing sums a lettrage group's own balance), so a
+  genuine partial payment can't be honestly distinguished from "not
+  paid at all" without a real netting mechanism this app doesn't have
+  yet (roadmap item 1f, prepayments, or a future lettrage-group-balance
+  feature) — flagged as a stated scope boundary, same "flag, don't
+  fake" discipline as 2059-A's own court-terme/long-terme qualification
+  staying null.
+- **`PAID`** = the posted écriture's own client ligne is lettered
+  (any code, trusting the human/bank-rec flow that set it, same trust
+  boundary `setLettrage()` already established). **`OPEN`**/**`OVERDUE`**
+  split on the exact same `OVERDUE_GRACE_DAYS` (30) threshold
+  `computePaymentAnomalies()` already used. **`null`** for anything
+  that isn't a FINALIZED SALE invoice — a DRAFT has nothing posted yet,
+  a CREDIT_NOTE isn't something a client "pays" (matches
+  `detectPaymentAnomalies()`'s own SALE-only scoping).
+- **`InvoicingService.findOne()`/`findAll()` themselves stay
+  byte-identical** — every internal caller (`update()`, `finalize()`,
+  `getMentions()`, `markAsEncaisse()`, `remove()`, 6+ call sites) needs
+  only the base `InvoiceWithLines` shape and would pay for an unneeded
+  query otherwise. Two new wrapper methods,
+  `findAllWithPaymentStatus()`/`findOneWithPaymentStatus()`, are what
+  the controller's GET routes call instead — reusing the unchanged
+  base methods, then a shared private `attachPaymentStatus()` that
+  batches every eligible invoice's own posted écriture into ONE
+  `ecriture.findMany()` call (never N+1, same batching shape
+  `AnomaliesService.detectPaymentAnomalies()` already uses).
+- **`finalize()`'s own response ALSO carries the field, with zero extra
+  query** — a freshly-posted écriture is never lettered yet (lettrage
+  is never set at creation time anywhere in this app), so
+  `classifyInvoicePaymentStatus(false, invoiceDate, now)` is called
+  directly, deterministically, no DB read needed. `null` for a
+  CREDIT_NOTE finalize, same SALE-only scoping as everywhere else in
+  this feature.
+- **Advisory, never a reason a read fails** — a posted écriture or its
+  own client ligne that can't be found degrades `paymentStatus` to
+  `null` rather than throwing, inside `attachPaymentStatus()`. This
+  field must never be the reason viewing an otherwise-fine invoice or
+  invoice list breaks.
+- **Frontend**: a shared `PaymentStatusBadge` component (new,
+  `components/invoicing/PaymentStatusBadge.tsx` — extracted up front,
+  not duplicated, since both `InvoicesList.tsx` (a new "Paiement"
+  column) and `InvoiceDetailView.tsx` (next to the "Facture n° X"
+  title, SALE invoices only) needed the identical badge). `useConfirmMatch()`/
+  `useClearMatch()`'s own shared `invalidateReconciliation()` helper
+  (`api/queries.ts`) gained `invalidateQueries({queryKey: ['invoices']})`
+  alongside its pre-existing `['ecritures']` invalidation — a real,
+  found-while-building gap: confirming/clearing a bank match toggles
+  the exact lettrage this feature reads, but nothing previously told
+  the invoices list to refetch, so a payment-status badge could go
+  stale after reconciling until some unrelated refetch happened to
+  occur.
+- **Verified two ways.** 15 new backend unit tests (4 in
+  `invoice-anomaly-engine.spec.ts` for `classifyInvoicePaymentStatus()`
+  — PAID regardless of date, OPEN within grace, OVERDUE exactly AT the
+  30-day boundary, OVERDUE well past it; 11 in
+  `invoicing.service.spec.ts` — PAID/OPEN/OVERDUE/null-for-DRAFT/
+  null-for-CREDIT_NOTE/degrades-to-null-on-missing-écriture for
+  `findOneWithPaymentStatus()`, the batched single-`ecriture.findMany()`
+  call for `findAllWithPaymentStatus()`, and `finalize()`'s own
+  zero-query field for both SALE and CREDIT_NOTE) — 934 backend tests
+  passing overall (up from 922); `tsc`/`eslint` clean both sides,
+  `vite build` clean. **Live, against the FR demo company, via curl AND
+  a real browser**: every existing FINALIZED invoice (posted earlier in
+  this session, now well past the grace period) correctly showed
+  `OVERDUE`; temporarily setting `lettrage` on a real posted écriture's
+  client ligne via `PATCH /entries/lignes/:id/lettrage` flipped that
+  same invoice to `PAID` live, confirmed by re-fetching it, then
+  reverted (cleared back to `null`) and confirmed it returned to
+  `OVERDUE` — proving the computation reads real, current ledger state,
+  not a cached value. In the real browser, `/factures` rendered the new
+  "Paiement" column with correct "En retard" badges on every finalized
+  invoice and a plain "—" on the draft; opening "Facture n° 16" showed
+  the same "En retard" badge rendered next to its title in
+  `InvoiceDetailView`.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't

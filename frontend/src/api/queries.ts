@@ -1439,6 +1439,11 @@ function invalidateReconciliation(
   void queryClient.invalidateQueries({ queryKey: ['bank-statement-lines', bankAccountId] });
   void queryClient.invalidateQueries({ queryKey: ['bank-reconciliation-proposals', bankAccountId] });
   void queryClient.invalidateQueries({ queryKey: ['ecritures'] });
+  // A confirm/clear-match toggles lettrage on an invoice's own posted client
+  // ligne — see CLAUDE.md "Invoicing — payment status" — so the invoice
+  // list/detail's own computed paymentStatus must refetch too, not just
+  // the journal grid.
+  void queryClient.invalidateQueries({ queryKey: ['invoices'] });
 }
 
 /** The real commit — re-submits the same file previewed a moment earlier. */

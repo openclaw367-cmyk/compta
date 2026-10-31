@@ -21,6 +21,10 @@ import {
   InvoiceMentions,
   InvoiceMentionsCompanyInput,
 } from './invoice-mentions';
+import {
+  classifyInvoicePaymentStatus,
+  InvoicePaymentStatus,
+} from '../anomalies/invoice-anomaly-engine';
 
 const TVA_COLLECTEE_ACCOUNT_NUMBER = '445710';
 /** TVA sur les encaissements suspense account (CGI art. 269) — see invoice-posting.ts. */
@@ -30,6 +34,9 @@ const TVA_ENCAISSEMENTS_ACCOUNT_NUMBER = '445800';
 const SERVICES_REVENUE_ACCOUNT_PREFIX = '706';
 
 export type InvoiceWithLines = Invoice & { lines: InvoiceLine[] };
+export type InvoiceWithPaymentStatus = InvoiceWithLines & {
+  paymentStatus: InvoicePaymentStatus | null;
+};
 
 /**
  * Invoicing — Phase A. See specs/invoicing-plan.md and
@@ -157,6 +164,90 @@ export class InvoicingService {
     return invoice;
   }
 
+  /**
+   * findAll()/findOne() themselves stay byte-identical (every internal
+   * caller — update(), finalize(), getMentions(), etc. — needs only the
+   * base shape and would pay for an unneeded query otherwise); these two
+   * wrappers are what the controller's own GET routes call, adding
+   * `paymentStatus` — see roadmap item 1b / CLAUDE.md "Invoicing —
+   * payment status".
+   */
+  async findAllWithPaymentStatus(company: CompanyContext): Promise<InvoiceWithPaymentStatus[]> {
+    return this.attachPaymentStatus(company, await this.findAll(company));
+  }
+
+  async findOneWithPaymentStatus(
+    company: CompanyContext,
+    id: string,
+  ): Promise<InvoiceWithPaymentStatus> {
+    const [withStatus] = await this.attachPaymentStatus(company, [await this.findOne(company, id)]);
+    return withStatus;
+  }
+
+  /**
+   * Scoped to FINALIZED SALE invoices only (a DRAFT has nothing posted
+   * yet; a CREDIT_NOTE isn't something a client "pays," the same
+   * scoping `detectPaymentAnomalies()` already uses) — every other
+   * invoice gets `paymentStatus: null`, honestly, never a guessed state.
+   * One batched ecriture fetch for every eligible invoice at once (same
+   * shape as `AnomaliesService.detectPaymentAnomalies()`'s own batch
+   * query), never N+1. A posted écriture or its own client ligne that
+   * can't be found degrades to `null` rather than throwing — this field
+   * is advisory, and must never be the reason viewing an otherwise-fine
+   * invoice list fails.
+   */
+  private async attachPaymentStatus(
+    company: CompanyContext,
+    invoices: InvoiceWithLines[],
+  ): Promise<InvoiceWithPaymentStatus[]> {
+    const eligible = invoices.filter(
+      (inv): inv is InvoiceWithLines & { postedEcritureId: string; invoiceDate: Date } =>
+        inv.status === 'FINALIZED' &&
+        inv.type === InvoiceType.SALE &&
+        inv.postedEcritureId !== null &&
+        inv.invoiceDate !== null,
+    );
+    const ecrituresById = new Map(
+      eligible.length === 0
+        ? []
+        : (
+            await this.prisma.ecriture.findMany({
+              where: {
+                id: { in: eligible.map((inv) => inv.postedEcritureId) },
+                companyId: company.companyId,
+              },
+              include: { lignes: true },
+            })
+          ).map((e) => [e.id, e] as const),
+    );
+    const today = new Date();
+
+    return invoices.map((invoice) => {
+      if (
+        invoice.status !== 'FINALIZED' ||
+        invoice.type !== InvoiceType.SALE ||
+        !invoice.postedEcritureId ||
+        !invoice.invoiceDate
+      ) {
+        return { ...invoice, paymentStatus: null };
+      }
+      const clientLigne = ecrituresById
+        .get(invoice.postedEcritureId)
+        ?.lignes.find((l) => l.compteId === invoice.clientAccountId);
+      if (!clientLigne) {
+        return { ...invoice, paymentStatus: null };
+      }
+      return {
+        ...invoice,
+        paymentStatus: classifyInvoicePaymentStatus(
+          clientLigne.lettrage !== null,
+          invoice.invoiceDate,
+          today,
+        ),
+      };
+    });
+  }
+
   async remove(company: CompanyContext, id: string): Promise<void> {
     const invoice = await this.findOne(company, id);
     if (invoice.status !== 'DRAFT') {
@@ -178,7 +269,7 @@ export class InvoicingService {
     company: CompanyContext,
     id: string,
     dto: FinalizeInvoiceDto,
-  ): Promise<{ invoice: Invoice; mentions: InvoiceMentions }> {
+  ): Promise<{ invoice: Invoice & { paymentStatus: InvoicePaymentStatus | null }; mentions: InvoiceMentions }> {
     const invoice = await this.findOne(company, id);
     if (invoice.status !== 'DRAFT') {
       throw new ConflictException('This invoice is already finalized.');
@@ -357,7 +448,14 @@ export class InvoicingService {
       });
     });
 
-    return { invoice: finalized, mentions };
+    // A fresh écriture never has lettrage set on it yet — classified directly, no query needed,
+    // same reasoning as this method's own guard-first design (cheap, deterministic, by construction).
+    const paymentStatus =
+      invoice.type === InvoiceType.SALE
+        ? classifyInvoicePaymentStatus(false, new Date(dto.invoiceDate), new Date())
+        : null;
+
+    return { invoice: { ...finalized, paymentStatus }, mentions };
   }
 
   /**

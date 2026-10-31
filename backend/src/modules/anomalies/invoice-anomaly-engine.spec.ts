@@ -1,5 +1,6 @@
 import { Money } from '../../common/decimal';
 import {
+  classifyInvoicePaymentStatus,
   computePaymentAnomalies,
   type OpenInvoiceInput,
   type UnmatchedStatementLineInput,
@@ -110,5 +111,27 @@ describe('computePaymentAnomalies', () => {
       TODAY,
     );
     expect(result.map((r) => r.invoiceId)).toEqual(['recent-high', 'old-no-match']);
+  });
+});
+
+describe('classifyInvoicePaymentStatus', () => {
+  it('is PAID when lettered, regardless of how overdue the date would otherwise be', () => {
+    expect(classifyInvoicePaymentStatus(true, new Date('2020-01-01'), TODAY)).toBe('PAID');
+  });
+
+  it('is OPEN when unlettered and within the grace period', () => {
+    const recent = new Date(TODAY);
+    recent.setDate(recent.getDate() - 29); // just under the 30-day grace period
+    expect(classifyInvoicePaymentStatus(false, recent, TODAY)).toBe('OPEN');
+  });
+
+  it('is OVERDUE when unlettered and exactly at the grace-period boundary', () => {
+    const atBoundary = new Date(TODAY);
+    atBoundary.setDate(atBoundary.getDate() - 30);
+    expect(classifyInvoicePaymentStatus(false, atBoundary, TODAY)).toBe('OVERDUE');
+  });
+
+  it('is OVERDUE when unlettered and well past the grace period', () => {
+    expect(classifyInvoicePaymentStatus(false, new Date('2026-07-01'), TODAY)).toBe('OVERDUE');
   });
 });
