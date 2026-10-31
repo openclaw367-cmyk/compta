@@ -45,6 +45,7 @@ import type {
   FinalizeInvoiceResult,
   Invoice,
   InvoiceMentions,
+  InvoiceRelatedEcriture,
   Journal,
   LiasseAnyResult,
   LineTraceResult,
@@ -1712,6 +1713,16 @@ export function useInvoiceMentions(invoiceId: string | null) {
   return useQuery({
     queryKey: ['invoice-mentions', invoiceId],
     queryFn: () => api.get<InvoiceMentions>(`/invoicing/invoices/${invoiceId}/mentions`),
+    enabled: Boolean(invoiceId),
+  });
+}
+
+/** See CLAUDE.md "Invoicing — related écritures". */
+export function useRelatedEcritures(invoiceId: string | null) {
+  return useQuery({
+    queryKey: ['invoice-related-ecritures', invoiceId],
+    queryFn: () =>
+      api.get<InvoiceRelatedEcriture[]>(`/invoicing/invoices/${invoiceId}/related-ecritures`),
     enabled: Boolean(invoiceId),
   });
 }

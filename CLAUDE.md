@@ -6767,6 +6767,82 @@ effect" to a queryable `Invoice` property, exactly as scoped.
   the same "En retard" badge rendered next to its title in
   `InvoiceDetailView`.
 
+## Invoicing — related écritures
+
+`GET /invoicing/invoices/:id/related-ecritures` (2026-10-31) closes
+roadmap item 1e — the exact gap the user's own original audit request
+surfaced ("since we have invoices attached to accounting entries, I
+would need to be able to see all entries related to a specific
+invoice"). `Invoice` already carried four different kinds of écriture
+relationship, none of them surfaced together before this, one of them
+(the payment) not tracked by any field at all.
+
+- **All four kinds, read together, three off real FKs plus one real
+  lookup.** `InvoicingService.getRelatedEcritures()`: `postedEcritureId`
+  (`POSTED`) and `encaissementEcritureId` (`ENCAISSEMENT`) read
+  directly; `correctsInvoiceId`/the reverse `correctedBy` relation are
+  traversed to THAT OTHER invoice's own `postedEcritureId` (`CORRECTS`/
+  `CORRECTED_BY`, each entry naming the related invoice's id/number so
+  the frontend can say "Avoir n° 18"); `PAYMENT` has no FK at all —
+  every validated `EcritureLigne` on the invoice's own `clientAccountId`
+  sharing a lettrage code with its own posted client ligne, the exact
+  query shape `AnomaliesService.detectPaymentAnomalies()` already uses.
+  Only fires when the invoice's own posted client ligne is itself
+  lettered — nothing to find otherwise. One batched `ecriture.findMany()`
+  for every distinct id collected, never N+1.
+- **A deliberate deviation from the roadmap's own original sketch,
+  recorded so a future session doesn't "fix" it back.** The roadmap
+  text suggested reusing `AccountLedgerDrilldown` (the traceability
+  drill-down's own component) to render the result. Building it, that
+  turned out to be the wrong reuse: `AccountLedgerDrilldown` shows an
+  ACCOUNT's whole ledger over a date range, not a specific set of
+  écritures — scoping it to the invoice's `clientAccountId` would show
+  every OTHER invoice to the same client too (too broad) while still
+  MISSING the `ENCAISSEMENT` entry entirely (a different account,
+  445800/445710, never touches the client account at all) — too broad
+  AND incomplete at once. Used the deep-link idiom instead
+  (`/ecritures?journal=&ecriture=`), the SAME pattern
+  `DashboardPage.tsx`'s recent-entries widget and the command palette's
+  own écriture search already established — a correct, already-proven
+  reuse, just a different component than the one originally sketched.
+- **Classification: PRESENTATION**, confirmed correct in practice — no
+  new ledger write, no new computation to hand-trace (the three FK
+  reads are trivial; the lettrage lookup is exactly
+  `computePaymentAnomalies()`'s own shape, reused not re-derived).
+- **Frontend**: `RelatedEcrituresSection.tsx` (new), rendered inside
+  `InvoiceDetailView.tsx` under a new "Écritures liées" heading — one
+  clickable row per entry (kind label, libellé, journal/N°/date),
+  `onClick` navigates via the same deep-link pattern above.
+- **Verified two ways.** 7 new backend unit tests covering every kind
+  individually (POSTED-only, empty-for-DRAFT, PAYMENT excluding the
+  posted écriture itself, ENCAISSEMENT, CORRECTS naming the original
+  invoice, CORRECTED_BY naming the credit note) — 928 backend tests
+  passing overall (up from 921); `tsc`/`eslint` clean both sides,
+  `vite build` clean. **Live, against the FR demo company, via curl AND
+  a real browser, cleaned up afterward**: created a real SALE invoice
+  (n°17), finalized it, posted and validated a separate real bank
+  écriture crediting the same client account, lettered both lines with
+  the same code, confirmed `related-ecritures` showed exactly
+  `POSTED`+`PAYMENT`; created and finalized a real credit note (n°18)
+  against it, confirmed the ORIGINAL invoice's own `related-ecritures`
+  now ALSO showed `CORRECTED_BY` naming "n° 18", and the credit note's
+  OWN `related-ecritures` showed `CORRECTS` naming "n° 17" back — both
+  directions, both correct. In the real browser, opened "Facture n° 17"
+  and confirmed the "Écritures liées" section rendered all three rows
+  ("Écriture comptable", "Règlement", "Avoir n° 18"), then clicked
+  "Règlement" and confirmed it navigated straight to `/ecritures` with
+  journal BQ and the real écriture n°71 ("Reglement facture 17 (test)",
+  100,00 €/100,00 €, équilibrée) open in the editor — the deep link
+  genuinely works, not just renders. All test state reversed and
+  cleaned up afterward (both test invoices' postings reversed and
+  validated, the test bank écriture reversed and validated, an
+  accidental duplicate draft reversal found and deleted during cleanup,
+  the two `Invoice`/`InvoiceLine` rows removed via a temporary script —
+  no delete endpoint exists for a FINALIZED invoice, by design);
+  confirmed via `POST /liasse/generate` that the ledger returned to its
+  exact known baseline (`39 495,00 = 39 495,00`). Full backend suite
+  re-run afterward as a final sanity check: 928/928 passing, unchanged.
+
 ## Known scope boundaries
 
 Things that are deliberately incomplete right now — not bugs, but don't

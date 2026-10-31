@@ -111,6 +111,18 @@ export class InvoicingController {
   }
 
   @ApiOperation({
+    summary:
+      'All écritures related to this invoice — posted, cash-basis-VAT reclassification, credit ' +
+      'notes it corrects/that correct it, and any lettered payment — see CLAUDE.md "Invoicing — ' +
+      'related écritures".',
+  })
+  @ApiParam({ name: 'id' })
+  @Get(':id/related-ecritures')
+  getRelatedEcritures(@CurrentCompany() company: CompanyContext, @Param('id') id: string) {
+    return this.invoicingService.getRelatedEcritures(company, id);
+  }
+
+  @ApiOperation({
     summary: 'Download a devis (quote) PDF for a DRAFT invoice — never touches Factur-X/CII/XSD.',
     description:
       'Client identity is EPHEMERAL (DevisRequestDto) — nothing is saved or locked, unlike ' +
