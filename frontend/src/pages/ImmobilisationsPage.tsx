@@ -34,6 +34,7 @@ interface Draft {
   acquisitionValue: string;
   residualValue: string;
   usefulLifeYears: string;
+  method: 'LINEAR' | 'DECLINING';
 }
 
 function emptyDraft(): Draft {
@@ -47,6 +48,7 @@ function emptyDraft(): Draft {
     acquisitionValue: '',
     residualValue: '',
     usefulLifeYears: '',
+    method: 'LINEAR',
   };
 }
 
@@ -139,7 +141,7 @@ export function ImmobilisationsPage() {
       acquisitionValue: normalizedAcquisitionValue,
       residualValue: draft.residualValue === '' ? undefined : normalizedResidualValue,
       usefulLifeYears: Number(draft.usefulLifeYears),
-      method: 'LINEAR',
+      method: draft.method,
     };
     try {
       await createFixedAsset.mutateAsync(dto);
@@ -253,13 +255,15 @@ export function ImmobilisationsPage() {
             </Field>
             <Field label="Mode">
               <select
-                disabled
-                value="LINEAR"
-                title="Seul le mode linéaire est implémenté — voir CLAUDE.md."
-                className="rounded-md border border-border bg-bg px-2.5 py-1.5 text-[13px] text-ink-faint outline-none"
+                value={draft.method}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, method: e.target.value as 'LINEAR' | 'DECLINING' }))
+                }
+                title="Dégressif : coefficient CGI art. 39 A automatique selon la durée d'usage (1,25 / 1,75 / 2,25). La proration d'année d'acquisition n'est pas encore implémentée pour aucun des deux modes — voir CLAUDE.md."
+                className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent"
               >
                 <option value="LINEAR">Linéaire</option>
-                <option value="DECLINING">Dégressif (non implémenté)</option>
+                <option value="DECLINING">Dégressif</option>
               </select>
             </Field>
           </div>

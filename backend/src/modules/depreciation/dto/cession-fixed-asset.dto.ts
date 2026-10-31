@@ -8,7 +8,8 @@ export class CessionFixedAssetDto {
   cessionDate!: string;
 
   @ApiProperty({
-    description: 'Money string. Full sale proceeds — no TVA collectée line is posted (see CLAUDE.md).',
+    description:
+      'Money string. Full sale proceeds — no TVA collectée line is posted (see CLAUDE.md).',
     example: '21000.00',
   })
   @IsMoneyString()
@@ -17,7 +18,7 @@ export class CessionFixedAssetDto {
   @ApiPropertyOptional({
     description:
       'Compte de règlement id — a 462 (créance, reconciled later) or class-5 (immediate cash) ' +
-      'account. Defaults to the company\'s 462000 account if omitted.',
+      "account. Defaults to the company's 462000 account if omitted.",
   })
   @IsOptional()
   @IsString()

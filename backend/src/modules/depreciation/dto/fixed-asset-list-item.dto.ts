@@ -53,7 +53,7 @@ export class FixedAssetListItemDto {
   valeurBrute!: string;
 
   @ApiProperty({
-    description: 'Money string. Sum of this asset\'s posted dotations only (postedEcritureId set).',
+    description: "Money string. Sum of this asset's posted dotations only (postedEcritureId set).",
   })
   amortissementsCumules!: string;
 

@@ -23,6 +23,9 @@ export class DepreciationEntryDto {
   @ApiPropertyOptional({ nullable: true, description: 'Set once this dotation has been posted.' })
   postedEcritureId!: string | null;
 
-  @ApiPropertyOptional({ nullable: true, description: "The posted écriture's EcritureNum, for display." })
+  @ApiPropertyOptional({
+    nullable: true,
+    description: "The posted écriture's EcritureNum, for display.",
+  })
   postedEcritureNum!: string | null;
 }

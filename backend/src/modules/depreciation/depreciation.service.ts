@@ -3,7 +3,6 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
-  NotImplementedException,
 } from '@nestjs/common';
 import { Account, DepreciationEntry, FiscalYear, FixedAsset, JournalType } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -18,7 +17,7 @@ import { FixedAssetListItemDto } from './dto/fixed-asset-list-item.dto';
 import { DepreciationEntryDto } from './dto/depreciation-entry.dto';
 import { CessionFixedAssetDto } from './dto/cession-fixed-asset.dto';
 import { CessionResultDto } from './dto/cession-result.dto';
-import { computeLinearSchedule } from './depreciation-schedule';
+import { computeLinearSchedule, computeDecliningSchedule } from './depreciation-schedule';
 import { computeFinalPeriodDotation } from './cession-proration';
 import {
   CESSION_ACCOUNTS,
@@ -112,29 +111,29 @@ export class DepreciationService {
   }
 
   /**
-   * Computes and persists the straight-line depreciation schedule.
-   * Declining-balance assets are rejected explicitly — see
-   * depreciation-schedule.ts and CLAUDE.md. Never silently changes the
-   * amount of an already-posted entry (postedEcritureId set): a posted
-   * dotation is booked in the ledger and must stay in lockstep with it, so
-   * a regeneration that would change it throws instead — see
-   * postDotation() for what "posted" means.
+   * Computes and persists the depreciation schedule — straight-line
+   * (LINEAR) or declining-balance (DECLINING), branching on the asset's
+   * own method; see depreciation-schedule.ts for both formulas and their
+   * shared "fully-contained fiscal years only" restriction. Never
+   * silently changes the amount of an already-posted entry
+   * (postedEcritureId set): a posted dotation is booked in the ledger
+   * and must stay in lockstep with it, so a regeneration that would
+   * change it throws instead — see postDotation() for what "posted"
+   * means.
    */
   async generateSchedule(
     company: CompanyContext,
     fixedAssetId: string,
   ): Promise<DepreciationEntryDto[]> {
     const asset = await this.findOne(company, fixedAssetId);
-    if (asset.method !== 'LINEAR') {
-      throw new NotImplementedException(
-        'Declining-balance (dégressif) depreciation is not implemented yet.',
-      );
-    }
 
     const fiscalYears = await this.prisma.fiscalYear.findMany({
       where: { companyId: company.companyId },
     });
-    const schedule = computeLinearSchedule(asset, fiscalYears);
+    const schedule =
+      asset.method === 'DECLINING'
+        ? computeDecliningSchedule(asset, fiscalYears)
+        : computeLinearSchedule(asset, fiscalYears);
 
     const existingEntries = await this.prisma.depreciationEntry.findMany({
       where: { fixedAssetId: asset.id },

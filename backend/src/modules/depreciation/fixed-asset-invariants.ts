@@ -43,7 +43,9 @@ export function assertWithinDepreciableBase(
   alreadyPosted: Money,
   toPost: Money,
 ): void {
-  const base = Money.fromDecimal(asset.acquisitionValue).minus(Money.fromDecimal(asset.residualValue));
+  const base = Money.fromDecimal(asset.acquisitionValue).minus(
+    Money.fromDecimal(asset.residualValue),
+  );
   const prospective = alreadyPosted.plus(toPost);
   if (prospective.minus(base).isPositive()) {
     throw new ConflictException(

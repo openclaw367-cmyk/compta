@@ -33,12 +33,15 @@ import { computeAnnualDotationAmount } from './depreciation-schedule';
  */
 export function daysBetween360(start: Date, end: Date): number {
   if (end < start) {
-    throw new Error(`daysBetween360: end (${end.toISOString()}) is before start (${start.toISOString()}).`);
+    throw new Error(
+      `daysBetween360: end (${end.toISOString()}) is before start (${start.toISOString()}).`,
+    );
   }
   const d1 = Math.min(start.getUTCDate(), 30);
   const d2 = Math.min(end.getUTCDate(), 30);
   const months =
-    (end.getUTCFullYear() - start.getUTCFullYear()) * 12 + (end.getUTCMonth() - start.getUTCMonth());
+    (end.getUTCFullYear() - start.getUTCFullYear()) * 12 +
+    (end.getUTCMonth() - start.getUTCMonth());
   return months * 30 + (d2 - d1) + 1;
 }
 
