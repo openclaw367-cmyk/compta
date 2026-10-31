@@ -5,6 +5,8 @@ import { BankStatementImportService } from './bank-statement-import.service';
 import { BankReconciliationService } from './bank-reconciliation.service';
 import { Camt053ParserService } from './camt053-parser.service';
 import { CsvStatementParserService } from './csv-statement-parser.service';
+import { OfxStatementParserService } from './ofx-statement-parser.service';
+import { QifStatementParserService } from './qif-statement-parser.service';
 
 @Module({
   imports: [EntriesModule],
@@ -12,6 +14,8 @@ import { CsvStatementParserService } from './csv-statement-parser.service';
   providers: [
     Camt053ParserService,
     CsvStatementParserService,
+    OfxStatementParserService,
+    QifStatementParserService,
     BankStatementImportService,
     BankReconciliationService,
   ],

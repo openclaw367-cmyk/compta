@@ -83,7 +83,8 @@ function toCsvMapping(dto: CsvColumnMappingDto) {
 }
 
 /**
- * Statement import (preview-then-confirm, CAMT.053 only in v1) +
+ * Statement import (preview-then-confirm; CAMT.053/OFX/QIF are
+ * single-step, CSV is a two-step detect-columns-then-map flow) +
  * reconciliation review (propose/confirm/clear/ignore/create-écriture)
  * — see CLAUDE.md "Bank reconciliation". Nothing here auto-posts or
  * auto-reconciles: every match is proposed by GET .../proposals
@@ -130,6 +131,72 @@ export class BankReconciliationController {
   ) {
     if (!file) throw new BadRequestException('Aucun fichier reçu.');
     return this.importService.confirmImport(
+      company,
+      dto.bankAccountId,
+      file.originalname,
+      file.buffer.toString('utf-8'),
+    );
+  }
+
+  @ApiOperation({ summary: 'Parse an OFX statement — no persistence.' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(UPLOAD_BODY_SCHEMA)
+  @Post('statements/ofx/preview')
+  @UseInterceptors(FileInterceptor('file'))
+  async previewOfx(
+    @CurrentCompany() company: CompanyContext,
+    @Body() dto: ImportStatementDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Aucun fichier reçu.');
+    return this.importService.previewOfx(company, dto.bankAccountId, file.buffer.toString('utf-8'));
+  }
+
+  @ApiOperation({ summary: 'Re-parse and persist an OFX statement (all-or-nothing).' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(UPLOAD_BODY_SCHEMA)
+  @Post('statements/ofx')
+  @UseInterceptors(FileInterceptor('file'))
+  async confirmOfxImport(
+    @CurrentCompany() company: CompanyContext,
+    @Body() dto: ImportStatementDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Aucun fichier reçu.');
+    return this.importService.confirmImportOfx(
+      company,
+      dto.bankAccountId,
+      file.originalname,
+      file.buffer.toString('utf-8'),
+    );
+  }
+
+  @ApiOperation({ summary: 'Parse a QIF statement — no persistence.' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(UPLOAD_BODY_SCHEMA)
+  @Post('statements/qif/preview')
+  @UseInterceptors(FileInterceptor('file'))
+  async previewQif(
+    @CurrentCompany() company: CompanyContext,
+    @Body() dto: ImportStatementDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Aucun fichier reçu.');
+    return this.importService.previewQif(company, dto.bankAccountId, file.buffer.toString('utf-8'));
+  }
+
+  @ApiOperation({ summary: 'Re-parse and persist a QIF statement (all-or-nothing).' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(UPLOAD_BODY_SCHEMA)
+  @Post('statements/qif')
+  @UseInterceptors(FileInterceptor('file'))
+  async confirmQifImport(
+    @CurrentCompany() company: CompanyContext,
+    @Body() dto: ImportStatementDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Aucun fichier reçu.');
+    return this.importService.confirmImportQif(
       company,
       dto.bankAccountId,
       file.originalname,

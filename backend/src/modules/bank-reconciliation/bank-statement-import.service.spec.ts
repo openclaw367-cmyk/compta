@@ -4,11 +4,15 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { BankStatementImportService } from './bank-statement-import.service';
 import { Camt053ParserService } from './camt053-parser.service';
 import { CsvStatementParserService } from './csv-statement-parser.service';
+import { OfxStatementParserService } from './ofx-statement-parser.service';
+import { QifStatementParserService } from './qif-statement-parser.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CompanyContext } from '../../common/tenant/company-context';
 
 const company: CompanyContext = { companyId: 'company-1', role: 'OWNER' };
 const xml = readFileSync(join(__dirname, '__fixtures__', 'sample-camt053.xml'), 'utf-8');
+const ofx = readFileSync(join(__dirname, '__fixtures__', 'sample-statement.ofx'), 'utf-8');
+const qif = readFileSync(join(__dirname, '__fixtures__', 'sample-statement.qif'), 'utf-8');
 
 function makePrismaMock() {
   const prisma = {
@@ -33,6 +37,8 @@ describe('BankStatementImportService', () => {
       prisma as unknown as PrismaService,
       new Camt053ParserService(),
       new CsvStatementParserService(),
+      new OfxStatementParserService(),
+      new QifStatementParserService(),
     );
   });
 
@@ -121,6 +127,78 @@ describe('BankStatementImportService', () => {
       await expect(
         service.confirmImportCsv(company, 'bank-1', 'releve.csv', csv, mapping),
       ).rejects.toThrow(ConflictException);
+      expect(bankStatementLineCreateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('OFX import (previewOfx/confirmImportOfx)', () => {
+    it('previewOfx() parses without persisting, and reuses the same duplicate detection', async () => {
+      prisma.bankAccount.findFirst.mockResolvedValueOnce({ id: 'bank-1', compteId: 'acc-512' });
+      prisma.bankStatementLine.findMany.mockResolvedValueOnce([{ bankReference: 'OFX-REF002' }]);
+      const result = await service.previewOfx(company, 'bank-1', ofx);
+      expect(result.openingBalance).toBeNull();
+      expect(result.closingBalance).toBe('3050.00');
+      expect(result.lines).toHaveLength(4);
+      const flagged = result.lines.find((l) => l.bankReference === 'OFX-REF002');
+      expect(flagged?.isDuplicate).toBe(true);
+      expect(prisma.bankStatementImport.create).not.toHaveBeenCalled();
+    });
+
+    it('confirmImportOfx() persists with a null opening balance', async () => {
+      prisma.bankAccount.findFirst.mockResolvedValueOnce({ id: 'bank-1', compteId: 'acc-512' });
+      const bankStatementLineCreateMany = jest.fn();
+      (prisma as any).bankStatementLine.createMany = bankStatementLineCreateMany;
+      const result = await service.confirmImportOfx(company, 'bank-1', 'releve.ofx', ofx);
+      expect(result.fileName).toBe('releve.ofx');
+      expect((result as unknown as { openingBalance: null }).openingBalance).toBeNull();
+      expect(bankStatementLineCreateMany).toHaveBeenCalledTimes(1);
+      expect(bankStatementLineCreateMany.mock.calls[0][0].data).toHaveLength(4);
+    });
+
+    it('confirmImportOfx() refuses (all-or-nothing) on a duplicate reference', async () => {
+      prisma.bankAccount.findFirst.mockResolvedValueOnce({ id: 'bank-1', compteId: 'acc-512' });
+      prisma.bankStatementLine.findMany.mockResolvedValueOnce([{ bankReference: 'OFX-REF001' }]);
+      const bankStatementLineCreateMany = jest.fn();
+      (prisma as any).bankStatementLine.createMany = bankStatementLineCreateMany;
+      await expect(service.confirmImportOfx(company, 'bank-1', 'releve.ofx', ofx)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(bankStatementLineCreateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('QIF import (previewQif/confirmImportQif)', () => {
+    it('previewQif() parses without persisting, and reuses the same duplicate detection', async () => {
+      prisma.bankAccount.findFirst.mockResolvedValueOnce({ id: 'bank-1', compteId: 'acc-512' });
+      prisma.bankStatementLine.findMany.mockResolvedValueOnce([{ bankReference: 'QIF-REF001' }]);
+      const result = await service.previewQif(company, 'bank-1', qif);
+      expect(result.openingBalance).toBeNull();
+      expect(result.closingBalance).toBeNull();
+      expect(result.lines).toHaveLength(4);
+      const flagged = result.lines.find((l) => l.bankReference === 'QIF-REF001');
+      expect(flagged?.isDuplicate).toBe(true);
+      expect(prisma.bankStatementImport.create).not.toHaveBeenCalled();
+    });
+
+    it('confirmImportQif() persists with null balances', async () => {
+      prisma.bankAccount.findFirst.mockResolvedValueOnce({ id: 'bank-1', compteId: 'acc-512' });
+      const bankStatementLineCreateMany = jest.fn();
+      (prisma as any).bankStatementLine.createMany = bankStatementLineCreateMany;
+      const result = await service.confirmImportQif(company, 'bank-1', 'releve.qif', qif);
+      expect(result.fileName).toBe('releve.qif');
+      expect((result as unknown as { openingBalance: null }).openingBalance).toBeNull();
+      expect(bankStatementLineCreateMany).toHaveBeenCalledTimes(1);
+      expect(bankStatementLineCreateMany.mock.calls[0][0].data).toHaveLength(4);
+    });
+
+    it('confirmImportQif() refuses (all-or-nothing) on a duplicate reference', async () => {
+      prisma.bankAccount.findFirst.mockResolvedValueOnce({ id: 'bank-1', compteId: 'acc-512' });
+      prisma.bankStatementLine.findMany.mockResolvedValueOnce([{ bankReference: 'QIF-REF001' }]);
+      const bankStatementLineCreateMany = jest.fn();
+      (prisma as any).bankStatementLine.createMany = bankStatementLineCreateMany;
+      await expect(service.confirmImportQif(company, 'bank-1', 'releve.qif', qif)).rejects.toThrow(
+        ConflictException,
+      );
       expect(bankStatementLineCreateMany).not.toHaveBeenCalled();
     });
   });
