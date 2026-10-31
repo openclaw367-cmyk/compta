@@ -277,6 +277,117 @@ describe('FecImportService', () => {
       expect(result.toImport).toEqual([]);
     });
 
+    it('refuses a file whose date range spans more than 13 months, naming the span, without ever querying fiscal years', async () => {
+      // 2025-01-15 -> 2026-03-20 spans 15 months — well past a real exercice,
+      // the exact "multi-year file" case this guard exists to catch (e.g. a
+      // contrôle fiscal's own multi-year historical export).
+      const file = pipeFile([
+        fecRow({
+          JournalCode: 'AC',
+          JournalLib: 'Achats',
+          EcritureNum: '1',
+          EcritureDate: '20250115',
+          CompteNum: '607000',
+          CompteLib: 'Achats',
+          EcritureLib: 'Achat',
+          Debit: '10,00',
+          Credit: '0,00',
+        }),
+        fecRow({
+          JournalCode: 'AC',
+          JournalLib: 'Achats',
+          EcritureNum: '1',
+          EcritureDate: '20250115',
+          CompteNum: '401000',
+          CompteLib: 'Frs',
+          EcritureLib: 'Achat',
+          Debit: '0,00',
+          Credit: '10,00',
+        }),
+        fecRow({
+          JournalCode: 'AC',
+          JournalLib: 'Achats',
+          EcritureNum: '2',
+          EcritureDate: '20260320',
+          CompteNum: '607000',
+          CompteLib: 'Achats',
+          EcritureLib: 'Achat',
+          Debit: '5,00',
+          Credit: '0,00',
+        }),
+        fecRow({
+          JournalCode: 'AC',
+          JournalLib: 'Achats',
+          EcritureNum: '2',
+          EcritureDate: '20260320',
+          CompteNum: '401000',
+          CompteLib: 'Frs',
+          EcritureLib: 'Achat',
+          Debit: '0,00',
+          Credit: '5,00',
+        }),
+      ]);
+      const result = await service.preview(company, file);
+      expect(result.fileErrors[0]).toMatch(/s'étend sur 15 mois/);
+      expect(result.toImport).toEqual([]);
+      expect(prisma.fiscalYear.findMany).not.toHaveBeenCalled();
+    });
+
+    it('accepts a file spanning exactly 13 months (a real, if unusual, first fiscal year)', async () => {
+      // 2025-01-01 -> 2026-01-31 spans exactly 13 months — at the threshold,
+      // still accepted (a company's own first exercice can legitimately run
+      // a bit over 12 months).
+      const file = pipeFile([
+        fecRow({
+          JournalCode: 'AC',
+          JournalLib: 'Achats',
+          EcritureNum: '1',
+          EcritureDate: '20250101',
+          CompteNum: '607000',
+          CompteLib: 'Achats',
+          EcritureLib: 'Achat',
+          Debit: '10,00',
+          Credit: '0,00',
+        }),
+        fecRow({
+          JournalCode: 'AC',
+          JournalLib: 'Achats',
+          EcritureNum: '1',
+          EcritureDate: '20250101',
+          CompteNum: '401000',
+          CompteLib: 'Frs',
+          EcritureLib: 'Achat',
+          Debit: '0,00',
+          Credit: '10,00',
+        }),
+        fecRow({
+          JournalCode: 'AC',
+          JournalLib: 'Achats',
+          EcritureNum: '2',
+          EcritureDate: '20260131',
+          CompteNum: '607000',
+          CompteLib: 'Achats',
+          EcritureLib: 'Achat',
+          Debit: '5,00',
+          Credit: '0,00',
+        }),
+        fecRow({
+          JournalCode: 'AC',
+          JournalLib: 'Achats',
+          EcritureNum: '2',
+          EcritureDate: '20260131',
+          CompteNum: '401000',
+          CompteLib: 'Frs',
+          EcritureLib: 'Achat',
+          Debit: '0,00',
+          Credit: '5,00',
+        }),
+      ]);
+      const result = await service.preview(company, file);
+      expect(result.fileErrors).toEqual([]);
+      expect(result.fiscalYearPlan).toMatchObject({ action: 'CREATE_NEW' });
+    });
+
     it('rejects a group that does not balance, without blocking the rest', async () => {
       const file = pipeFile([
         fecRow({

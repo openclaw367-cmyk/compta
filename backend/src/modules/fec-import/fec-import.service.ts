@@ -15,6 +15,17 @@ import {
 const PREVIEW_SAMPLE_SIZE = 200;
 /** Generous — a large FEC file's nested écriture/ligne creation is many sequential inserts, not one batch. */
 const IMPORT_TRANSACTION_TIMEOUT_MS = 120_000;
+/**
+ * A real FEC export is legally one-file-per-exercice (Article A47 A-1 du
+ * LPF §100). A file whose own [min,max] date range spans more than this
+ * refuses outright — see CLAUDE.md "FEC file import" / specs/roadmap.md
+ * "Onboarding/migration path": auto-splitting by date would mean GUESSING
+ * where one exercice ends and the next begins, which this app's own
+ * "never guess, fail loud" discipline rejects in favor of asking the user
+ * to split the file themselves. 13, not 12, to tolerate a real (if
+ * unusual) slightly-longer-than-a-year first fiscal year.
+ */
+const MAX_FEC_IMPORT_SPAN_MONTHS = 13;
 
 interface ParsedFecLine {
   rowNumber: number;
@@ -556,6 +567,21 @@ export class FecImportService {
     const dates = valid.map((g) => g.ecritureDate.getTime());
     const min = new Date(Math.min(...dates));
     const max = new Date(Math.max(...dates));
+
+    const spanMonths =
+      (max.getUTCFullYear() - min.getUTCFullYear()) * 12 +
+      (max.getUTCMonth() - min.getUTCMonth()) +
+      1;
+    if (spanMonths > MAX_FEC_IMPORT_SPAN_MONTHS) {
+      return {
+        error:
+          `La période du fichier (${min.toISOString().slice(0, 10)} → ${max.toISOString().slice(0, 10)}) ` +
+          `s'étend sur ${spanMonths} mois — un fichier FEC réel correspond légalement à un seul ` +
+          `exercice (Article A47 A-1 du LPF). Import refusé plutôt que de créer un exercice ` +
+          `multi-années incohérent : scindez le fichier en plusieurs exports, un par exercice, ` +
+          `avant de réessayer.`,
+      };
+    }
 
     const fiscalYears = await this.prisma.fiscalYear.findMany({
       where: { companyId: company.companyId },
