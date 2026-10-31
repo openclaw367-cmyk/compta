@@ -1614,6 +1614,17 @@ export interface Tableau2059TraceResult {
  */
 export type InvoiceType = 'SALE' | 'CREDIT_NOTE';
 export type InvoiceStatus = 'DRAFT' | 'FINALIZED';
+/**
+ * COMPUTED, never stored — see CLAUDE.md "Invoicing — payment status".
+ * `null` for anything that isn't a FINALIZED SALE invoice (a DRAFT has
+ * nothing posted yet; a CREDIT_NOTE isn't something a client "pays").
+ * There is deliberately no `PARTIALLY_PAID` state — `lettrage` in this
+ * app is a single per-ligne flag with no amount-netting computed
+ * anywhere, so a partial payment can't be honestly distinguished from
+ * no payment at all without a real netting mechanism this app doesn't
+ * have yet (prepayments, or a lettrage-group-balance feature).
+ */
+export type InvoicePaymentStatus = 'PAID' | 'OPEN' | 'OVERDUE';
 
 export interface InvoiceLine {
   id: string;
@@ -1654,6 +1665,8 @@ export interface Invoice {
   createdAt: string;
   updatedAt: string;
   lines: InvoiceLine[];
+  /** Present on every GET /invoicing/invoices response — see InvoicePaymentStatus above. */
+  paymentStatus: InvoicePaymentStatus | null;
 }
 
 export interface FinalizeInvoiceResult {

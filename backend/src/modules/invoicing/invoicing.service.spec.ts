@@ -115,7 +115,7 @@ function makePrismaMock() {
       delete: jest.fn(),
     },
     invoiceLine: { deleteMany: jest.fn() },
-    ecriture: { findFirst: jest.fn() },
+    ecriture: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
     $transaction: jest.fn(),
   };
   prisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(prisma));
@@ -305,6 +305,51 @@ describe('InvoicingService.finalize', () => {
       }),
     );
     expect(result.mentions.totalTTC).toBe('1800.00');
+    // Never null for a freshly-finalized SALE invoice (a fresh écriture is never
+    // lettered yet) — PAID is never the first-tick value, whether OPEN or OVERDUE
+    // depends only on wall-clock distance from the fixed finalizeDto.invoiceDate.
+    expect(['OPEN', 'OVERDUE']).toContain(result.invoice.paymentStatus);
+  });
+
+  it('is null for a freshly-finalized CREDIT_NOTE — payment status is a SALE-only concept', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue({
+      ...DRAFT_INVOICE,
+      type: InvoiceType.CREDIT_NOTE,
+      correctsInvoiceId: 'invoice-0',
+    });
+    prisma.invoice.findFirst.mockResolvedValueOnce({
+      ...DRAFT_INVOICE,
+      type: InvoiceType.CREDIT_NOTE,
+      correctsInvoiceId: 'invoice-0',
+    });
+    prisma.invoice.findFirst.mockResolvedValueOnce({
+      ...DRAFT_INVOICE,
+      id: 'invoice-0',
+      status: 'FINALIZED',
+      invoiceNumber: '1',
+    });
+    prisma.company.findFirst.mockResolvedValue(COMPANY_FR);
+    prisma.vatRate.findMany.mockResolvedValue([VAT_RATE_20]);
+    prisma.account.findFirst.mockImplementation(
+      ({ where }: { where: { id?: string; number?: string } }) => {
+        if (where.number === '445710') return Promise.resolve(TVA_ACCOUNT);
+        return Promise.resolve(CLIENT_ACCOUNT);
+      },
+    );
+    prisma.invoice.update.mockResolvedValue({
+      ...DRAFT_INVOICE,
+      type: InvoiceType.CREDIT_NOTE,
+      status: 'FINALIZED',
+      invoiceNumber: '2',
+    });
+
+    const result = await service(prisma, makeEntriesServiceMock()).finalize(
+      company,
+      'invoice-1',
+      finalizeDto,
+    );
+    expect(result.invoice.paymentStatus).toBeNull();
   });
 
   it('MC: refuses with zero side effects — no écriture posted, no invoiceNumber consumed', async () => {
@@ -586,5 +631,145 @@ describe('InvoicingService.getMentions', () => {
     await expect(
       service(prisma, makeEntriesServiceMock()).getMentions(company, 'invoice-1'),
     ).rejects.toThrow(ConflictException);
+  });
+});
+
+describe('InvoicingService.findOneWithPaymentStatus / findAllWithPaymentStatus', () => {
+  const FINALIZED_SALE = {
+    ...DRAFT_INVOICE,
+    status: 'FINALIZED',
+    invoiceNumber: '1',
+    postedEcritureId: 'ecriture-1',
+  };
+
+  function ecritureWithClientLigne(lettrage: string | null) {
+    return {
+      id: 'ecriture-1',
+      lignes: [{ compteId: CLIENT_ACCOUNT.id, debit: new Prisma.Decimal('1800.00'), lettrage }],
+    };
+  }
+
+  it("is PAID when the posted écriture's client ligne is lettered, regardless of date", async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue({
+      ...FINALIZED_SALE,
+      invoiceDate: new Date('2020-01-01'), // old enough to be OVERDUE if it weren't lettered
+    });
+    prisma.ecriture.findMany.mockResolvedValue([ecritureWithClientLigne('A')]);
+
+    const result = await service(prisma, makeEntriesServiceMock()).findOneWithPaymentStatus(
+      company,
+      'invoice-1',
+    );
+    expect(result.paymentStatus).toBe('PAID');
+  });
+
+  it('is OPEN when unlettered and within the grace period', async () => {
+    const prisma = makePrismaMock();
+    const recent = new Date();
+    recent.setDate(recent.getDate() - 5);
+    prisma.invoice.findFirst.mockResolvedValue({ ...FINALIZED_SALE, invoiceDate: recent });
+    prisma.ecriture.findMany.mockResolvedValue([ecritureWithClientLigne(null)]);
+
+    const result = await service(prisma, makeEntriesServiceMock()).findOneWithPaymentStatus(
+      company,
+      'invoice-1',
+    );
+    expect(result.paymentStatus).toBe('OPEN');
+  });
+
+  it('is OVERDUE when unlettered and past the grace period', async () => {
+    const prisma = makePrismaMock();
+    const old = new Date();
+    old.setDate(old.getDate() - 45);
+    prisma.invoice.findFirst.mockResolvedValue({ ...FINALIZED_SALE, invoiceDate: old });
+    prisma.ecriture.findMany.mockResolvedValue([ecritureWithClientLigne(null)]);
+
+    const result = await service(prisma, makeEntriesServiceMock()).findOneWithPaymentStatus(
+      company,
+      'invoice-1',
+    );
+    expect(result.paymentStatus).toBe('OVERDUE');
+  });
+
+  it('is null for a DRAFT invoice — never computed, never queried', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue(DRAFT_INVOICE);
+
+    const result = await service(prisma, makeEntriesServiceMock()).findOneWithPaymentStatus(
+      company,
+      'invoice-1',
+    );
+    expect(result.paymentStatus).toBeNull();
+    expect(prisma.ecriture.findMany).not.toHaveBeenCalled();
+  });
+
+  it('is null for a FINALIZED CREDIT_NOTE — payment status is a SALE-only concept', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue({
+      ...FINALIZED_SALE,
+      type: InvoiceType.CREDIT_NOTE,
+      invoiceDate: new Date('2020-01-01'),
+    });
+
+    const result = await service(prisma, makeEntriesServiceMock()).findOneWithPaymentStatus(
+      company,
+      'invoice-1',
+    );
+    expect(result.paymentStatus).toBeNull();
+    expect(prisma.ecriture.findMany).not.toHaveBeenCalled();
+  });
+
+  it('degrades to null, never throws, when the posted écriture or its client ligne cannot be found', async () => {
+    const prisma = makePrismaMock();
+    prisma.invoice.findFirst.mockResolvedValue({
+      ...FINALIZED_SALE,
+      invoiceDate: new Date('2020-01-01'),
+    });
+    prisma.ecriture.findMany.mockResolvedValue([]); // posted écriture vanished
+
+    const result = await service(prisma, makeEntriesServiceMock()).findOneWithPaymentStatus(
+      company,
+      'invoice-1',
+    );
+    expect(result.paymentStatus).toBeNull();
+  });
+
+  it('findAllWithPaymentStatus batches every eligible invoice into ONE ecriture.findMany call', async () => {
+    const prisma = makePrismaMock();
+    const overdueDate = new Date();
+    overdueDate.setDate(overdueDate.getDate() - 45);
+    prisma.invoice.findMany.mockResolvedValue([
+      {
+        ...FINALIZED_SALE,
+        id: 'invoice-1',
+        postedEcritureId: 'ecriture-1',
+        invoiceDate: overdueDate,
+      },
+      {
+        ...FINALIZED_SALE,
+        id: 'invoice-2',
+        postedEcritureId: 'ecriture-2',
+        invoiceDate: overdueDate,
+      },
+      { ...DRAFT_INVOICE, id: 'invoice-3' },
+    ]);
+    prisma.ecriture.findMany.mockResolvedValue([
+      { id: 'ecriture-1', lignes: [{ compteId: CLIENT_ACCOUNT.id, lettrage: 'A' }] },
+      { id: 'ecriture-2', lignes: [{ compteId: CLIENT_ACCOUNT.id, lettrage: null }] },
+    ]);
+
+    const results = await service(prisma, makeEntriesServiceMock()).findAllWithPaymentStatus(
+      company,
+    );
+    expect(prisma.ecriture.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.ecriture.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { in: ['ecriture-1', 'ecriture-2'] } }),
+      }),
+    );
+    expect(results.find((r) => r.id === 'invoice-1')?.paymentStatus).toBe('PAID');
+    expect(results.find((r) => r.id === 'invoice-2')?.paymentStatus).toBe('OVERDUE');
+    expect(results.find((r) => r.id === 'invoice-3')?.paymentStatus).toBeNull();
   });
 });

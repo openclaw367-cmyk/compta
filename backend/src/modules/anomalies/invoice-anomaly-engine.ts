@@ -62,9 +62,37 @@ export const OVERDUE_GRACE_DAYS = 30;
 export const MATCH_WINDOW_DAYS_BEFORE = 5;
 export const MATCH_WINDOW_DAYS_AFTER = 60;
 
-function signedDaysBetween(a: Date, b: Date): number {
+/** Exported so classifyInvoicePaymentStatus() below reuses the exact same day-math, not a re-derivation. */
+export function signedDaysBetween(a: Date, b: Date): number {
   const msPerDay = 24 * 60 * 60 * 1000;
   return Math.round((a.getTime() - b.getTime()) / msPerDay);
+}
+
+export type InvoicePaymentStatus = 'PAID' | 'OPEN' | 'OVERDUE';
+
+/**
+ * Promotes this module's own grace-period/lettrage logic to a per-invoice,
+ * queryable property — see CLAUDE.md "Invoicing — payment status" and
+ * roadmap item 1b. Reuses `OVERDUE_GRACE_DAYS` and `signedDaysBetween()`
+ * verbatim rather than re-deriving the grace-period rule a second time.
+ *
+ * **`PARTIALLY_PAID` is deliberately NOT a state here.** `lettrage` in
+ * this app is a single per-ligne flag with no amount-netting computed
+ * anywhere (confirmed — grepped every `lettrage` reference in
+ * `src/modules`, nothing sums a lettrage group's own balance) — a
+ * genuine partial payment can't be honestly distinguished from "not
+ * paid at all" without a real netting mechanism (roadmap item 1f,
+ * prepayments, or a future lettrage-group-balance feature). Flagged
+ * here as a stated scope boundary, same "flag, don't fake" discipline
+ * as 2059-A's own court-terme/long-terme qualification staying null.
+ */
+export function classifyInvoicePaymentStatus(
+  isLettered: boolean,
+  invoiceDate: Date,
+  today: Date,
+): InvoicePaymentStatus {
+  if (isLettered) return 'PAID';
+  return signedDaysBetween(today, invoiceDate) >= OVERDUE_GRACE_DAYS ? 'OVERDUE' : 'OPEN';
 }
 
 /**

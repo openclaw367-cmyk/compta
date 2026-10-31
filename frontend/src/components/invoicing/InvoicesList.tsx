@@ -1,4 +1,5 @@
 import type { Account, Invoice } from '../../api/types';
+import { PaymentStatusBadge } from './PaymentStatusBadge';
 
 function clientLabel(invoice: Invoice, accounts: Account[]): string {
   if (invoice.clientNameSnapshot) return invoice.clientNameSnapshot;
@@ -63,6 +64,7 @@ export function InvoicesList({
             <th className="px-4 py-2.5">N°</th>
             <th className="px-4 py-2.5">Type</th>
             <th className="px-4 py-2.5">Statut</th>
+            <th className="px-4 py-2.5">Paiement</th>
             <th className="px-4 py-2.5">Client</th>
             <th className="px-4 py-2.5">Date</th>
             <th className="px-4 py-2.5">Lignes</th>
@@ -89,6 +91,9 @@ export function InvoicesList({
                 </td>
                 <td className="px-4 py-2.5">
                   <StatusBadge status={invoice.status} />
+                </td>
+                <td className="px-4 py-2.5">
+                  <PaymentStatusBadge status={invoice.paymentStatus} />
                 </td>
                 <td className="px-4 py-2.5 text-ink">{clientLabel(invoice, accounts)}</td>
                 <td className="px-4 py-2.5 tabular-nums text-ink-muted">
