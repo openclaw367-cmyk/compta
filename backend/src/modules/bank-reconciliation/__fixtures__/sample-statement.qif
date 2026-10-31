@@ -1,0 +1,20 @@
+; Hand-built, spec-compliant QIF sample for test purposes only - NOT a real bank/Quicken export. See CLAUDE.md "Bank reconciliation -- OFX/QIF statement import".
+!Type:Bank
+D03/05/2026
+T1200.00
+PVirement recu Client Leroy
+MFacture SAMPLE-VE-0001
+NQIF-REF001
+^
+D03/08/2026
+T-450.00
+PPrelevement EDF
+^
+D03/12'26
+T-100.00
+MFrais de tenue de compte
+^
+D03/15/26
+T2,400.00
+PVirement client Leroy reglement
+^

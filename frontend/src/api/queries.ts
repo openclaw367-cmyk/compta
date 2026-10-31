@@ -1461,6 +1461,57 @@ export function useConfirmStatementImport() {
   });
 }
 
+/**
+ * OFX and QIF (see CLAUDE.md "Bank reconciliation — OFX/QIF statement
+ * import") are both fully self-describing formats, same as CAMT.053 —
+ * no column-mapping step, so these four hooks mirror
+ * usePreviewStatement()/useConfirmStatementImport() exactly, just
+ * against the sibling /ofx and /qif routes.
+ */
+export function usePreviewOfxStatement() {
+  return useMutation({
+    mutationFn: ({ bankAccountId, file }: { bankAccountId: string; file: File }) =>
+      api.postForm<StatementPreviewResponse>(
+        '/bank-reconciliation/statements/ofx/preview',
+        statementFormData(bankAccountId, file),
+      ),
+  });
+}
+
+export function useConfirmOfxStatementImport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ bankAccountId, file }: { bankAccountId: string; file: File }) =>
+      api.postForm<BankStatementImport>(
+        '/bank-reconciliation/statements/ofx',
+        statementFormData(bankAccountId, file),
+      ),
+    onSuccess: (_data, { bankAccountId }) => invalidateReconciliation(queryClient, bankAccountId),
+  });
+}
+
+export function usePreviewQifStatement() {
+  return useMutation({
+    mutationFn: ({ bankAccountId, file }: { bankAccountId: string; file: File }) =>
+      api.postForm<StatementPreviewResponse>(
+        '/bank-reconciliation/statements/qif/preview',
+        statementFormData(bankAccountId, file),
+      ),
+  });
+}
+
+export function useConfirmQifStatementImport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ bankAccountId, file }: { bankAccountId: string; file: File }) =>
+      api.postForm<BankStatementImport>(
+        '/bank-reconciliation/statements/qif',
+        statementFormData(bankAccountId, file),
+      ),
+    onSuccess: (_data, { bankAccountId }) => invalidateReconciliation(queryClient, bankAccountId),
+  });
+}
+
 function csvFormData(bankAccountId: string, file: File, mapping: CsvColumnMapping): FormData {
   const formData = new FormData();
   formData.append('bankAccountId', bankAccountId);

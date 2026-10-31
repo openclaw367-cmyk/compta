@@ -6,6 +6,8 @@ import { Camt053ParserService, ParsedStatement } from './camt053-parser.service'
 import { CsvColumnMapping, CsvStatementParserService } from './csv-statement-parser.service';
 import { CsvColumnsPreviewDto } from './dto/csv-columns-preview.dto';
 import { StatementPreviewResponseDto } from './dto/statement-preview.dto';
+import { OfxStatementParserService } from './ofx-statement-parser.service';
+import { QifStatementParserService } from './qif-statement-parser.service';
 
 /**
  * Preview-then-confirm for a CAMT.053 statement import — same two-step
@@ -24,6 +26,8 @@ export class BankStatementImportService {
     private readonly prisma: PrismaService,
     private readonly parser: Camt053ParserService,
     private readonly csvParser: CsvStatementParserService,
+    private readonly ofxParser: OfxStatementParserService,
+    private readonly qifParser: QifStatementParserService,
   ) {}
 
   async preview(
@@ -98,6 +102,84 @@ export class BankStatementImportService {
   ): Promise<BankStatementImport> {
     const bankAccount = await this.requireBankAccount(company, bankAccountId);
     const parsed = this.csvParser.parse(csv, mapping);
+    const existingReferences = await this.existingReferences(company, bankAccount.id);
+    this.assertNoDuplicates(parsed, existingReferences);
+    return this.persistParsedStatement(company, bankAccount.id, fileName, parsed);
+  }
+
+  /**
+   * OFX and QIF (see `OfxStatementParserService`/`QifStatementParserService`
+   * and CLAUDE.md "Bank reconciliation — OFX/QIF statement import") are
+   * both fully self-describing formats, unlike CSV — no human column-
+   * mapping step is needed, so these four methods mirror CAMT.053's own
+   * single-step preview/confirm shape exactly rather than CSV's two-step
+   * detect-columns-then-map one.
+   */
+  async previewOfx(
+    company: CompanyContext,
+    bankAccountId: string,
+    ofx: string,
+  ): Promise<StatementPreviewResponseDto> {
+    const bankAccount = await this.requireBankAccount(company, bankAccountId);
+    const parsed = this.ofxParser.parse(ofx);
+    const existingReferences = await this.existingReferences(company, bankAccount.id);
+
+    return {
+      iban: parsed.iban,
+      periodStart: parsed.periodStart,
+      periodEnd: parsed.periodEnd,
+      openingBalance: parsed.openingBalance,
+      closingBalance: parsed.closingBalance,
+      lines: parsed.lines.map((line) => ({
+        ...line,
+        isDuplicate: line.bankReference !== null && existingReferences.has(line.bankReference),
+      })),
+    };
+  }
+
+  async confirmImportOfx(
+    company: CompanyContext,
+    bankAccountId: string,
+    fileName: string,
+    ofx: string,
+  ): Promise<BankStatementImport> {
+    const bankAccount = await this.requireBankAccount(company, bankAccountId);
+    const parsed = this.ofxParser.parse(ofx);
+    const existingReferences = await this.existingReferences(company, bankAccount.id);
+    this.assertNoDuplicates(parsed, existingReferences);
+    return this.persistParsedStatement(company, bankAccount.id, fileName, parsed);
+  }
+
+  async previewQif(
+    company: CompanyContext,
+    bankAccountId: string,
+    qif: string,
+  ): Promise<StatementPreviewResponseDto> {
+    const bankAccount = await this.requireBankAccount(company, bankAccountId);
+    const parsed = this.qifParser.parse(qif);
+    const existingReferences = await this.existingReferences(company, bankAccount.id);
+
+    return {
+      iban: parsed.iban,
+      periodStart: parsed.periodStart,
+      periodEnd: parsed.periodEnd,
+      openingBalance: parsed.openingBalance,
+      closingBalance: parsed.closingBalance,
+      lines: parsed.lines.map((line) => ({
+        ...line,
+        isDuplicate: line.bankReference !== null && existingReferences.has(line.bankReference),
+      })),
+    };
+  }
+
+  async confirmImportQif(
+    company: CompanyContext,
+    bankAccountId: string,
+    fileName: string,
+    qif: string,
+  ): Promise<BankStatementImport> {
+    const bankAccount = await this.requireBankAccount(company, bankAccountId);
+    const parsed = this.qifParser.parse(qif);
     const existingReferences = await this.existingReferences(company, bankAccount.id);
     this.assertNoDuplicates(parsed, existingReferences);
     return this.persistParsedStatement(company, bankAccount.id, fileName, parsed);

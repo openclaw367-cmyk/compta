@@ -108,8 +108,14 @@ statement before getting at least one genuine CAMT.053 export and
 re-running verification against it** — same bar this project already
 held for `InvoiceExtractionService`'s PDF fixtures and the FEC export's
 Test Compta Demat run. Track this as a gating item on this feature's
-ship checklist, not a someday-nice-to-have. OFX/QIF/CSV and Layer 1b
-(live aggregator connectivity) remain unbuilt.
+ship checklist, not a someday-nice-to-have. **CSV, OFX, and QIF import
+are now all built too** (CSV shipped 2026-09-06; OFX/QIF shipped
+2026-10-31 — see CLAUDE.md "Bank reconciliation — CSV statement
+import" and "Bank reconciliation — OFX/QIF statement import"), each
+with the exact same hand-built-fixture-only caveat as CAMT.053 above
+(neither the OFX nor the QIF parser has been checked against a real
+bank/Quicken export either). Layer 1b (live aggregator connectivity) is
+its own separate item, see below.
 
 ### Layer 1a (original scope note, below) — statement import + matching engine (local, build first)
 
@@ -201,7 +207,10 @@ See CLAUDE.md "Bank reconciliation — Layer 1b" for the full design,
 the honest mid-design correction (the Connect handshake itself needs
 no public backend endpoint, only ongoing sync would), the full
 sandbox-verification checklist, and the exact live verification
-performed. OFX/QIF/CSV remain unbuilt.
+performed. **OFX/QIF/CSV statement-import formats are now all built
+too** — see CLAUDE.md "Bank reconciliation — CSV statement import" and
+"Bank reconciliation — OFX/QIF statement import". Only the real
+Bridge-sandbox verification above remains open.
 
 ### Layer 1b (original scope note, below) — live aggregator connectivity (external, build second)
 
@@ -797,9 +806,9 @@ if the negatives ("X doesn't exist") are guessed rather than confirmed.
   EN16931 Factur-X export, a devis PDF mode, per-tiers identity capture
   feeding invoice pre-fill. **The most mature business-operational
   module in this app** and the natural anchor for Tier 1 below.
-- **Bank reconciliation** — Layer 1a (CAMT.053 + CSV import, tiered
-  matching engine, `lettrage`) real and live-verified; Layer 1b (Bridge
-  aggregator) architecturally real but explicitly flagged as an
+- **Bank reconciliation** — Layer 1a (CAMT.053 + CSV + OFX + QIF
+  import, tiered matching engine, `lettrage`) real and live-verified;
+  Layer 1b (Bridge aggregator) architecturally real but explicitly flagged as an
   unverified paper design pending real sandbox access. The closest
   thing this app has to a "payments" integration today — but it's
   reconciliation (matching an existing ledger line to a bank movement),

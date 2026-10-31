@@ -19,6 +19,8 @@ import {
   useClearMatch,
   useConfirmCsvStatementImport,
   useConfirmMatch,
+  useConfirmOfxStatementImport,
+  useConfirmQifStatementImport,
   useConfirmStatementImport,
   useCreateBankAccount,
   useCreateConnectSession,
@@ -29,6 +31,8 @@ import {
   useIgnoreStatementLine,
   useJournals,
   usePreviewCsvStatement,
+  usePreviewOfxStatement,
+  usePreviewQifStatement,
   usePreviewStatement,
   useReconciliationProposals,
   useRevokeLink,
@@ -460,15 +464,32 @@ function AggregatorConsentDialog({
   );
 }
 
+type StatementFormat = 'camt053' | 'csv' | 'ofx' | 'qif';
+
+const STATEMENT_FORMAT_LABELS: Record<StatementFormat, string> = {
+  camt053: 'CAMT.053 (XML)',
+  csv: 'CSV',
+  ofx: 'OFX',
+  qif: 'QIF',
+};
+
+/**
+ * Four supported statement formats (see CLAUDE.md "Bank reconciliation —
+ * OFX/QIF statement import"): CAMT.053/OFX/QIF are all fully self-
+ * describing (no human column-mapping step needed), so
+ * Camt053ImportSection/OfxImportSection/QifImportSection share the exact
+ * same simple file-upload-then-preview-then-confirm shape; only CSV
+ * needs the heavier two-step column-mapping flow below.
+ */
 function StatementImportSection({ bankAccount }: { bankAccount: BankAccount }) {
-  const [format, setFormat] = useState<'camt053' | 'csv'>('camt053');
+  const [format, setFormat] = useState<StatementFormat>('camt053');
 
   return (
     <div className="rounded-lg border border-border bg-surface p-4 shadow-card">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-[14px] font-semibold text-ink">Importer un relevé</h2>
         <div className="inline-flex rounded-md border border-border p-0.5 text-[12px]">
-          {(['camt053', 'csv'] as const).map((f) => (
+          {(['camt053', 'csv', 'ofx', 'qif'] as const).map((f) => (
             <button
               key={f}
               type="button"
@@ -477,16 +498,15 @@ function StatementImportSection({ bankAccount }: { bankAccount: BankAccount }) {
                 format === f ? 'bg-accent text-white' : 'text-ink-muted hover:text-ink'
               }`}
             >
-              {f === 'camt053' ? 'CAMT.053 (XML)' : 'CSV'}
+              {STATEMENT_FORMAT_LABELS[f]}
             </button>
           ))}
         </div>
       </div>
-      {format === 'camt053' ? (
-        <Camt053ImportSection bankAccount={bankAccount} />
-      ) : (
-        <CsvImportSection bankAccount={bankAccount} />
-      )}
+      {format === 'camt053' && <Camt053ImportSection bankAccount={bankAccount} />}
+      {format === 'csv' && <CsvImportSection bankAccount={bankAccount} />}
+      {format === 'ofx' && <OfxImportSection bankAccount={bankAccount} />}
+      {format === 'qif' && <QifImportSection bankAccount={bankAccount} />}
     </div>
   );
 }
@@ -530,6 +550,166 @@ function Camt053ImportSection({ bankAccount }: { bankAccount: BankAccount }) {
         <input
           type="file"
           accept=".xml"
+          onChange={(e) => {
+            setFile(e.target.files?.[0] ?? null);
+            setPreviewData(null);
+            setSuccess(null);
+          }}
+          className="text-[13px] text-ink-muted"
+        />
+        <button
+          type="button"
+          disabled={!file || preview.isPending}
+          onClick={() => void handlePreview()}
+          className="rounded-md border border-border px-3 py-1.5 text-[12.5px] font-medium text-ink-muted hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {preview.isPending ? 'Analyse…' : 'Aperçu'}
+        </button>
+        {previewData && (
+          <button
+            type="button"
+            disabled={confirmImport.isPending}
+            onClick={() => void handleConfirm()}
+            className="rounded-md bg-accent px-3.5 py-1.5 text-[13px] font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+          >
+            {confirmImport.isPending ? 'Import…' : "Confirmer l'import"}
+          </button>
+        )}
+      </div>
+
+      {error && <p className="mt-2 text-[12.5px] text-negative">{error}</p>}
+      {success && <p className="mt-2 text-[12.5px] text-positive">{success}</p>}
+
+      {previewData && <StatementPreviewSummary preview={previewData} />}
+    </div>
+  );
+}
+
+/**
+ * OFX import — self-describing like CAMT.053, so no column-mapping step
+ * (see CLAUDE.md "Bank reconciliation — OFX/QIF statement import").
+ * Deliberately no opening balance shown (always null for this format —
+ * see StatementPreviewSummary, which already omits it when null).
+ */
+function OfxImportSection({ bankAccount }: { bankAccount: BankAccount }) {
+  const preview = usePreviewOfxStatement();
+  const confirmImport = useConfirmOfxStatementImport();
+  const [file, setFile] = useState<File | null>(null);
+  const [previewData, setPreviewData] = useState<StatementPreviewResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  async function handlePreview() {
+    if (!file) return;
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await preview.mutateAsync({ bankAccountId: bankAccount.id, file });
+      setPreviewData(result);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.details.join(' ') : "L'aperçu a échoué.");
+    }
+  }
+
+  async function handleConfirm() {
+    if (!file) return;
+    setError(null);
+    try {
+      await confirmImport.mutateAsync({ bankAccountId: bankAccount.id, file });
+      setSuccess('Relevé importé.');
+      setPreviewData(null);
+      setFile(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.details.join(' ') : "L'import a échoué.");
+    }
+  }
+
+  return (
+    <div className="mt-3">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <input
+          type="file"
+          accept=".ofx,.qfx"
+          onChange={(e) => {
+            setFile(e.target.files?.[0] ?? null);
+            setPreviewData(null);
+            setSuccess(null);
+          }}
+          className="text-[13px] text-ink-muted"
+        />
+        <button
+          type="button"
+          disabled={!file || preview.isPending}
+          onClick={() => void handlePreview()}
+          className="rounded-md border border-border px-3 py-1.5 text-[12.5px] font-medium text-ink-muted hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {preview.isPending ? 'Analyse…' : 'Aperçu'}
+        </button>
+        {previewData && (
+          <button
+            type="button"
+            disabled={confirmImport.isPending}
+            onClick={() => void handleConfirm()}
+            className="rounded-md bg-accent px-3.5 py-1.5 text-[13px] font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+          >
+            {confirmImport.isPending ? 'Import…' : "Confirmer l'import"}
+          </button>
+        )}
+      </div>
+
+      {error && <p className="mt-2 text-[12.5px] text-negative">{error}</p>}
+      {success && <p className="mt-2 text-[12.5px] text-positive">{success}</p>}
+
+      {previewData && <StatementPreviewSummary preview={previewData} />}
+    </div>
+  );
+}
+
+/**
+ * QIF import — self-describing like CAMT.053, so no column-mapping step
+ * (see CLAUDE.md "Bank reconciliation — OFX/QIF statement import").
+ * Deliberately no balances shown at all (always null for this format —
+ * QIF carries no balance information whatsoever).
+ */
+function QifImportSection({ bankAccount }: { bankAccount: BankAccount }) {
+  const preview = usePreviewQifStatement();
+  const confirmImport = useConfirmQifStatementImport();
+  const [file, setFile] = useState<File | null>(null);
+  const [previewData, setPreviewData] = useState<StatementPreviewResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  async function handlePreview() {
+    if (!file) return;
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await preview.mutateAsync({ bankAccountId: bankAccount.id, file });
+      setPreviewData(result);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.details.join(' ') : "L'aperçu a échoué.");
+    }
+  }
+
+  async function handleConfirm() {
+    if (!file) return;
+    setError(null);
+    try {
+      await confirmImport.mutateAsync({ bankAccountId: bankAccount.id, file });
+      setSuccess('Relevé importé.');
+      setPreviewData(null);
+      setFile(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.details.join(' ') : "L'import a échoué.");
+    }
+  }
+
+  return (
+    <div className="mt-3">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <input
+          type="file"
+          accept=".qif"
           onChange={(e) => {
             setFile(e.target.files?.[0] ?? null);
             setPreviewData(null);

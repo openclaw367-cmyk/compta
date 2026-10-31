@@ -3331,10 +3331,14 @@ code was written.
   the test écriture, deleted the test `BankAccount`/`BankStatementImport`/
   `BankStatementLine`/`LettrageAuditLog` rows via a temporary script)
   and confirmed the ledger balance returned to its exact known baseline.
-- **Not built this pass**: OFX/QIF/CSV import formats, Layer 1b (live
-  bank-aggregator connectivity — Plaid/Bridge/Budget Insight-style),
-  and the pre-ship real-CAMT.053-export verification flagged above. See
-  `specs/roadmap.md` for how this fits the rest of the roadmap.
+- **Not built this pass**: OFX/QIF/CSV import formats (all three now
+  built — CSV 2026-09-06, OFX/QIF 2026-10-31, see "Bank reconciliation
+  — CSV statement import" and "Bank reconciliation — OFX/QIF statement
+  import" below), Layer 1b (live bank-aggregator connectivity —
+  Plaid/Bridge/Budget Insight-style, now also built, see below), and
+  the pre-ship real-CAMT.053-export verification flagged above (still
+  open). See `specs/roadmap.md` for how this fits the rest of the
+  roadmap.
 
 ## Bank reconciliation — Layer 1b (live aggregator connectivity)
 
@@ -3630,10 +3634,140 @@ bank-specific template) and **no balance check for CSV**.
   `GET /bank-accounts` returning `[]` that the company was restored to
   its exact original state.
 - **Not built this pass**: OFX/QIF import formats (unchanged from
-  Layer 1a's own list), and no memory of a previously-used column
-  mapping (re-selected by hand on every import) — a natural, low-cost
-  future polish item if repeat imports from the same bank turn out to
-  be common, not attempted speculatively here.
+  Layer 1a's own list at the time — **now built too, see "Bank
+  reconciliation — OFX/QIF statement import" immediately below**), and
+  no memory of a previously-used column mapping (re-selected by hand on
+  every import) — a natural, low-cost future polish item if repeat
+  imports from the same bank turn out to be common, not attempted
+  speculatively here.
+
+## Bank reconciliation — OFX/QIF statement import
+
+`src/modules/bank-reconciliation/{ofx,qif}-statement-parser.service.ts`
+(2026-10-31) add the fourth and fifth supported bank-statement formats
+— closing the exact gap CLAUDE.md's own CSV section above named as
+remaining: *"OFX/QIF remain the only genuinely unimplemented statement
+formats."* Both are fully self-describing formats (unlike CSV, which
+needs a human column-mapping step), so both reuse CAMT.053's own
+single-step preview-then-confirm shape, not CSV's two-step
+detect-columns-then-map one — and both reuse `persistParsedStatement()`
+verbatim for persistence, same seam Layer 1b's Bridge sync and the CSV
+importer already proved reusable.
+
+- **OFX (Open Financial Exchange) 1.x — SGML, not XML, so parsed with a
+  hand-rolled tag-value regex, not a real XML parser.** OFX 1.x leaf
+  elements commonly have NO closing tag at all (e.g. `<TRNAMT>123.45`
+  followed directly by the next tag on the next line) — a real XML
+  parser doesn't apply here. `extractTag()`/`extractBlocks()`
+  (`ofx-statement-parser.service.ts`) are a ~150-line regex-based
+  extraction, matching this codebase's own "don't add a dependency for
+  something a small amount of code can do" precedent already
+  established for `parseDelimitedText()` (see "Bank reconciliation —
+  CSV statement import" above). OFX 2.x (proper XML) is deliberately
+  NOT supported — most real-world bank exports still use the 1.x SGML
+  style, and this is a stated scope boundary, not silently assumed
+  covered too.
+  - **`<TRNAMT>` needed no sign-flip at all** — unlike CAMT.053's own
+    `CdtDbtInd`, OFX's `TRNAMT` is signed per the spec itself (negative
+    = money leaving the account), the EXACT SAME convention
+    `ParsedStatementLine.amount` already uses. Amounts are also always
+    decimal-POINT per the OFX spec, confirmed from the format's own
+    grammar, never a locale-dependent comma.
+  - **`openingBalance` is always `null` — the same documented choice
+    already made for CSV, not a new decision.** OFX has no
+    standardized "opening balance" tag the way CAMT.053 has `OPBD`; the
+    closing balance (`<LEDGERBAL><BALAMT>`) IS commonly present and is
+    surfaced when found, but with no honest opening counterpart there
+    is nothing for an `assertBalancesReconcile()`-style check to
+    compare against — not attempted, by design. `iban` is always
+    `null` too — OFX has no dedicated IBAN tag (only
+    `BANKID`/`ACCTID`, which may or may not hold something IBAN-shaped
+    depending on the exporting bank); treated as honestly absent
+    rather than guessed.
+  - `periodStart`/`periodEnd` prefer `<BANKTRANLIST>`'s own
+    `<DTSTART>`/`<DTEND>` tags (present in every real OFX export,
+    unlike CSV which has no equivalent at all) and fall back to the
+    derived min/max of the parsed transactions' own dates only when
+    those tags are absent.
+  - Label fallback chain: `<NAME>` then `<MEMO>` then the honest
+    `"(sans libellé)"` placeholder — the same "found and parsed, or
+    honestly absent, never guessed" discipline as CAMT.053's own
+    3-deep fallback. `<FITID>` → `bankReference`, optional (`null` if
+    absent), matching how CAMT.053/CSV populate theirs.
+- **QIF (Quicken Interchange Format) — a much simpler, line-based,
+  field-code format.** A `!Type:` header, then one block per
+  transaction terminated by a line containing only `^`, with
+  field-code lines (`D`=date, `T`/`U`=amount, `P`=payee, `M`=memo,
+  `N`=check/reference number); unrecognized field codes (`L`=categorie,
+  `C`=cleared status, `A`=address, ...) are silently ignored — out of
+  scope for a bank-statement import, same thin-dispatch discipline as
+  every other parser in this module.
+  - **`openingBalance`/`closingBalance`/`iban` are always `null` — QIF
+    carries NONE of this information at all**, not even a closing
+    balance the way OFX at least sometimes has — same documented
+    "no balance oracle exists for this format" choice already made
+    for CSV, now the second time this exact choice has been made for
+    the second-least-structured format.
+  - **Dates vary more here than in any other format in this module** —
+    `MM/DD/YYYY`, `MM/DD/YY`, and the classic Quicken `MM/DD'YY`
+    (apostrophe-year) convention are all handled; anything else throws
+    a clear, named error rather than guessing, same discipline as the
+    CSV importer's own `parseDate()`.
+  - Amounts (`T`/`U`) are always decimal-POINT (confirmed from the
+    format's own documented grammar, same convention as OFX) and may
+    carry a comma thousands separator (the classic US-locale Quicken
+    export) — commas are stripped before parsing, never treated as a
+    decimal separator, unlike the CSV importer which lets the caller
+    choose a decimal separator explicitly.
+  - Label fallback: payee (`P`) then memo (`M`) then the honest
+    placeholder; `N` → `bankReference`, optional.
+  - **A file whose last transaction block is missing its closing `^`
+    terminator is still honored, not silently dropped** — a deliberate
+    choice, verified by a dedicated test: "never silently drop real
+    data" was judged to outweigh strict terminator conformance for a
+    possibly hand-built or truncated export.
+- **New routes, same single-step shape as CAMT.053**: `POST
+  /bank-reconciliation/statements/ofx/preview` + `.../statements/ofx`,
+  and the QIF mirror at `.../statements/qif/preview` + `.../statements/qif`
+  — both reuse the exact same `ImportStatementDto` (file + bankAccountId)
+  and multipart body schema CAMT.053 already uses, since neither format
+  needs a column-mapping DTO the way CSV does.
+- **Built and tested against hand-crafted samples**
+  (`__fixtures__/sample-statement.ofx`, `__fixtures__/sample-statement.qif`)
+  — **NOT checked against a real bank or Quicken export**, the exact
+  same honestly-flagged pre-ship caveat already recorded for the
+  CAMT.053 fixture above; both new fixture files and both new parser
+  files state this explicitly in their own doc comments, not left
+  implicit.
+- **Frontend**: `BankReconciliationPage.tsx`'s `StatementImportSection`
+  format toggle widens from CAMT.053/CSV to four options
+  (`StatementFormat = 'camt053' | 'csv' | 'ofx' | 'qif'`); the new
+  `OfxImportSection`/`QifImportSection` components mirror
+  `Camt053ImportSection` exactly (a single file input, "Aperçu" then
+  "Confirmer l'import," reusing `StatementPreviewSummary` verbatim,
+  which already omits a `null` balance/IBAN rather than showing a
+  blank) — no column-mapping UI needed for either, same reasoning as
+  the backend routes above.
+- **Verified two ways.** 25 new hand-traced oracle tests across
+  `ofx-statement-parser.service.spec.ts` (11) and
+  `qif-statement-parser.service.spec.ts` (14) — every field of the
+  hand-built fixture asserted exactly, both date-fallback-to-derived-
+  period and date-tags-present cases for OFX, all three QIF date
+  conventions plus the comma-thousands-separator case, and malformed-
+  input refusals (missing root tag/header, missing transaction block,
+  missing date/amount, unparseable date/amount) for both — plus 6 new
+  tests in `bank-statement-import.service.spec.ts`'s own
+  `describe('OFX import ...')`/`describe('QIF import ...')` blocks
+  (preview reuses duplicate detection, confirm persists with the
+  correct null balances, confirm refuses all-or-nothing on a
+  duplicate) — 973 backend tests passing overall; `tsc`/`eslint` clean
+  both sides, frontend `vite build` clean.
+- **Not built this pass**: no live verification against a real
+  bank/Quicken-exported OFX or QIF file (see the pre-ship caveat
+  above) — tracked the same way the CAMT.053 pre-ship blocker already
+  is, not a new kind of gap; and no memory of a previously-selected
+  format (the toggle always starts on CAMT.053), same low-cost,
+  not-attempted-speculatively polish item already logged for CSV.
 
 ## FEC file import
 
