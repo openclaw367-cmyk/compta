@@ -7046,6 +7046,113 @@ orchestration logic, best designed against a real multi-client user.
   rule — worth a deliberate fix in a future pass if it's ever revisited,
   not attempted here as an unrequested side effect.
 
+## Multi-client / cabinet management (item 3)
+
+(2026-10-31, a later pass) Closes the third and final phased item in
+`specs/roadmap.md`'s own "Multi-client / cabinet management" section —
+batch cross-company actions. Builds exactly the one, real action every
+other document discussing this feature (CLAUDE.md's own item-3 entry
+above, the roadmap) names as the example: **export FEC for every
+client with an open fiscal year closing in a given month.** Deliberately
+not a generic "any action" framework — a second batch action, if ever
+wanted, follows the same hand-written pattern this one establishes,
+rather than a speculative abstraction built ahead of a second real use
+case.
+
+- **`src/modules/cabinet/` (new)** —
+  `cabinet-batch.service.ts`/`cabinet-batch.controller.ts`/
+  `cabinet.module.ts`. `CabinetBatchService.exportFecForClosingCompanies(user,
+  month)` **never reimplements any part of `FecExportService`'s own
+  gate** — it calls `FecExportService.generate(context, fiscalYearId)`
+  verbatim, unmodified, exactly once per matching (company, fiscal
+  year) pair, letting its own draft-block `ConflictException` (or any
+  other throw) propagate straight into that pair's own `FAILED` result
+  entry. `"closing this month"` means an OPEN fiscal year
+  (`closedAt === null`) whose `endDate` falls within the given calendar
+  month — `month` is a caller-supplied `YYYY-MM` query param (e.g.
+  `?month=2026-10`), never "the current month" hardcoded, so this is
+  testable against fixed data and usable for a near-future month too.
+- **Authorization — the actual security-sensitive part, modeled
+  directly on `BackupController`'s own shape.** This endpoint spans
+  MULTIPLE companies in one call, so it cannot go through
+  `CompanyContextMiddleware` (which resolves exactly ONE company from
+  `x-company-id`). `CabinetBatchController` is added to the FIRST
+  `consumer.apply(AuthMiddleware).forRoutes(...)` call in
+  `app.module.ts` (alongside `BackupController`) but is absent from the
+  SECOND `consumer.apply(CompanyContextMiddleware)` call and absent
+  from `companyScopedControllers` — the identical wiring shape
+  `BackupController` already established for "spans every company,
+  needs to know WHO but never a single company context."
+  **`CabinetBatchService` never accepts a caller-supplied company-id
+  list at all** — every company acted on comes from
+  `CompaniesService.findAllForUser(user.id)`
+  (`@CurrentUser()` → `AuthenticatedUser.id`), the exact same
+  membership-scoped read `GET /companies` and `CabinetPage.tsx` already
+  use. A company the caller doesn't belong to can therefore never be
+  reached through this endpoint by construction, not by a separate
+  permission check layered on top. The per-company `CompanyContext`
+  built from that membership result (`{companyId, role}`) is exactly
+  the shape `CompanyContextMiddleware` would have resolved for an
+  individual, non-batched call against that same company — verified by
+  a dedicated regression-equivalence test asserting
+  `FecExportService.generate()` is called with that exact shape.
+- **The result shape, modeled directly on
+  `EntriesService.validateBatch()`'s own `ValidateBatchResponseDto`** —
+  the closest existing precedent in this codebase for "one action,
+  looped per id, partial failure is a normal response." One entry per
+  (company, fiscal year) pair actually ATTEMPTED
+  (`CabinetBatchResultItemDto`: `companyId`/`companyName`/
+  `fiscalYearId`/`fiscalYearLabel`/`status` (`SUCCEEDED`|`FAILED`)/
+  `fileName?`/`error?`), never a silent partial success and never an
+  aggregate boolean hiding which ones failed. A company with NO open
+  fiscal year closing the requested month is simply ABSENT from
+  `results` — it was never attempted, so it isn't reported as a
+  failure; this is spelled out in the DTO's own doc comment so a
+  future reader doesn't mistake "not listed" for "silently dropped."
+  One company's own `generate()` call throwing never aborts or rolls
+  back the loop — the next company's own call still happens, exactly
+  the same try/catch-per-iteration discipline `validateBatch()` already
+  uses, not a `Promise.all()` that would reject on the first failure.
+- **Deliberately returns only `fileName`, not the FEC file's own
+  content, in this pass.** The response is a per-company status report,
+  not a bulk download mechanism — actually delivering each generated
+  file (e.g. a zip, mirroring `BackupService`'s own archiver use) is a
+  natural follow-up if a real multi-client user asks for it, not
+  invented speculatively here; keeping the response small also avoids
+  returning potentially many companies' full FEC text in one JSON body.
+- **Frontend**: `CabinetPage.tsx` gained one new header button
+  ("Exporter FEC — clôtures de ce mois", via the new
+  `useExportFecForClosingCompanies()` mutation hook in `api/queries.ts`)
+  and a results panel reusing the page's OWN existing per-company
+  row-list/status-pill vocabulary (`CountPill`, widened with two new
+  tones — `positive`/`negative` — and an optional `hideCount` for a
+  plain status label like "Réussi"/"Échoué", rather than inventing a
+  second pill component) — never a new visual language. A `FAILED`
+  row shows its real underlying error message inline, same "name the
+  failure, don't paraphrase it" discipline as every other
+  partial-failure UI in this app (`FiscalYearsPage`'s own bulk-validate
+  banner).
+- **Verified two ways.** A hand-traced oracle test suite
+  (`cabinet-batch.service.spec.ts`, 7 tests, mocked
+  `CompaniesService`/`FiscalYearsService`/`FecExportService`): a
+  malformed `month` rejected; a company with no fiscal year closing
+  the month correctly skipped (not attempted, not in `results`); an
+  already-CLOSED fiscal year whose `endDate` still falls in the month
+  correctly excluded; the non-negotiable partial-failure case — a
+  FAILING company processed BEFORE a SUCCEEDING one, confirming the
+  second company's own call still completes and its real error message
+  is preserved verbatim, never short-circuiting the loop; the
+  regression-equivalence check (the exact `CompanyContext` shape a
+  non-batched call would receive); the "only ever acts on the caller's
+  own memberships" check; and an inclusive month-boundary check (the
+  first and last calendar day of the month both included, the day just
+  after excluded). 949 backend tests passing overall (up from 942,
+  before this pass's 7 new ones); `tsc`/`eslint` clean on both sides
+  (`eslint --fix` on `src/modules/cabinet` only normalized quote style,
+  no logic change), `vite build` clean, and a full backend suite
+  re-run confirmed nothing else (including `app.module.ts`'s own
+  middleware wiring) broke.
+
 ## Invoicing — payment status
 
 `POST /invoicing/invoices` and `GET /invoicing/invoices/:id` now carry a

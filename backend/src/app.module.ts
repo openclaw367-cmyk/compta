@@ -69,6 +69,8 @@ import { DevModule } from './modules/dev/dev.module';
 import { DevController } from './modules/dev/dev.controller';
 import { BackupModule } from './modules/backup/backup.module';
 import { BackupController } from './modules/backup/backup.controller';
+import { CabinetModule } from './modules/cabinet/cabinet.module';
+import { CabinetBatchController } from './modules/cabinet/cabinet-batch.controller';
 
 // Dev-only convenience routes (GET /dev/ids) are never mounted when
 // NODE_ENV=production — this isn't a route-level guard, DevModule is
@@ -147,6 +149,7 @@ const companyScopedControllers = [
     AnomaliesModule,
     ActivityModule,
     BackupModule,
+    CabinetModule,
     ...(isProduction ? [] : [DevModule]),
   ],
   providers: [{ provide: APP_GUARD, useClass: ReadOnlyGuard }],
@@ -168,16 +171,23 @@ export class AppModule implements NestModule {
     // Swagger's docs UI (mounted in main.ts via SwaggerModule.setup, not
     // as a Nest controller) is a raw Express route outside this list
     // too, needing neither. See CLAUDE.md "Multi-user / roles &
-    // permissions" and "Multi-tenant data model". BackupController is
-    // the same "needs AuthMiddleware (who), never CompanyContextMiddleware
-    // (spans every company)" shape as CompaniesController's own
-    // POST/GET exclusion below — simply never added to the second
-    // .forRoutes() call at all, since its one route never needs a
-    // company context either way (no .exclude() needed for a
-    // single-route controller).
-    consumer
-      .apply(AuthMiddleware)
-      .forRoutes(CompaniesController, BackupController, ...companyScopedControllers);
+    // permissions" and "Multi-tenant data model". BackupController and
+    // CabinetBatchController are both the same "needs AuthMiddleware
+    // (who), never CompanyContextMiddleware (spans every company)"
+    // shape as CompaniesController's own POST/GET exclusion below —
+    // simply never added to the second .forRoutes() call at all, since
+    // neither one's route ever needs a single company context either
+    // way (no .exclude() needed for a single-route controller).
+    // CabinetBatchController resolves WHICH companies it may act on
+    // from the caller's own Memberships (CompaniesService.findAllForUser)
+    // inside CabinetBatchService — see CLAUDE.md "Multi-client /
+    // cabinet management (item 3)".
+    consumer.apply(AuthMiddleware).forRoutes(
+      CompaniesController,
+      BackupController,
+      CabinetBatchController,
+      ...companyScopedControllers,
+    );
 
     consumer
       .apply(CompanyContextMiddleware)

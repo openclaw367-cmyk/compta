@@ -12,6 +12,7 @@ import type {
   Ca3Declaration,
   Ca3LineTraceResult,
   Ca3TraceColumn,
+  CabinetBatchResponse,
   CabinetCompanySummary,
   CashFlowDeltaLineKey,
   CashFlowDeltaLineTraceResult,
@@ -2029,5 +2030,23 @@ export function useCabinetSummaries(companies: Company[]) {
       },
       staleTime: 30 * 1000,
     })),
+  });
+}
+
+/**
+ * Cabinet item 3 — batch cross-company actions (see CLAUDE.md
+ * "Multi-client / cabinet management (item 3)"). Calls
+ * `POST /cabinet/batch/export-fec-closing?month=YYYY-MM`, which reuses
+ * `FecExportService.generate()` verbatim once per matching company —
+ * the companies acted on are resolved SERVER-SIDE from the caller's
+ * own memberships, never a frontend-supplied list. The response is
+ * never all-or-nothing — see `CabinetBatchResponse`'s own doc comment
+ * — so even a partial result (some succeeded, some failed) is a
+ * normal 200/201, not an error to catch.
+ */
+export function useExportFecForClosingCompanies() {
+  return useMutation({
+    mutationFn: (month: string) =>
+      api.post<CabinetBatchResponse>(`/cabinet/batch/export-fec-closing?month=${month}`, {}),
   });
 }

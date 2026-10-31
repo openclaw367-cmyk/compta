@@ -218,6 +218,29 @@ export interface ValidateBatchResponse {
   failedCount: number;
 }
 
+/**
+ * One (company, fiscal year) outcome from POST
+ * /cabinet/batch/export-fec-closing — see CLAUDE.md "Multi-client /
+ * cabinet management (item 3)". A company with no fiscal year closing
+ * the requested month simply never appears here — it was never
+ * attempted, so it isn't a failure.
+ */
+export interface CabinetBatchResultItem {
+  companyId: string;
+  companyName: string;
+  fiscalYearId: string;
+  fiscalYearLabel: string;
+  status: 'SUCCEEDED' | 'FAILED';
+  fileName?: string;
+  error?: string;
+}
+
+export interface CabinetBatchResponse {
+  results: CabinetBatchResultItem[];
+  succeededCount: number;
+  failedCount: number;
+}
+
 export interface EcritureLigne {
   id: string;
   companyId: string;
