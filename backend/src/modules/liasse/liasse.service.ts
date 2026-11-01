@@ -53,6 +53,7 @@ import {
   Tableau2055,
   computeTableau2055,
 } from './tableau-2055';
+import { Tableau2033C, computeTableau2033C } from './tableau-2033-c';
 import { ProvisionMovementLigne, Tableau2056, computeTableau2056 } from './tableau-2056';
 import { PROVISION_ACCOUNT_CLASS_PREFIXES } from './provision-categories';
 import { Tableau2057, Tableau2057RawLigne, computeTableau2057 } from './tableau-2057';
@@ -126,15 +127,20 @@ export interface LiasseResult {
 }
 
 /**
- * Régime réel simplifié — bilan simplifié (2033-A) and compte de résultat
- * simplifié (2033-B, "A - RÉSULTAT COMPTABLE" section only) only, no
- * annexe equivalents (2033-C onward are a future pass) — see
- * bilan-2033-a.ts/compte-resultat-2033-b.ts for the full scope statement.
+ * Régime réel simplifié — bilan simplifié (2033-A), compte de résultat
+ * simplifié (2033-B, "A - RÉSULTAT COMPTABLE" section only), and 2033-C
+ * (immobilisations/amortissements movement — see tableau-2033-c.ts).
+ * 2033-C's own Cadre III (plus-values/moins-values) and everything from
+ * 2033-D onward (provisions/amortissements dérogatoires/déficits,
+ * effectifs/valeur ajoutée, capital, filiales) remain a future pass —
+ * see bilan-2033-a.ts/compte-resultat-2033-b.ts/tableau-2033-c.ts for
+ * the full scope statement on each.
  */
 export interface LiasseSimplifieResult {
   regime: 'REEL_SIMPLIFIE';
   bilan: Bilan2033A;
   compteResultat: CompteResultat2033B;
+  tableau2033C: Tableau2033C;
 }
 
 /**
@@ -169,7 +175,7 @@ export class LiasseService {
   ): Promise<LiasseResult | LiasseSimplifieResult> {
     const ctx = await this.fetchLedgerContext(company, dto);
     if (ctx.companyRecord.regime === 'REEL_SIMPLIFIE') {
-      return this.computeReelSimplifie(ctx.bilanAccounts, ctx.compteResultatAccounts);
+      return this.computeReelSimplifie(company, ctx);
     }
     return this.computeReelNormal(company, ctx);
   }
@@ -195,7 +201,7 @@ export class LiasseService {
     if (ctx.companyRecord.regime === 'REEL_SIMPLIFIE') {
       return this.computeReelNormal(company, ctx);
     }
-    return this.computeReelSimplifie(ctx.bilanAccounts, ctx.compteResultatAccounts);
+    return this.computeReelSimplifie(company, ctx);
   }
 
   /**
@@ -533,18 +539,65 @@ export class LiasseService {
     return { companyRecord, fiscalYear, lignes, bilanAccounts, compteResultatAccounts };
   }
 
-  /** Pure, cheap — bilan simplifié (2033-A) + compte de résultat simplifié (2033-B). */
-  private computeReelSimplifie(
-    bilanAccounts: ReturnType<typeof buildTrialBalance>,
-    compteResultatAccounts: ReturnType<typeof buildTrialBalance>,
-  ): LiasseSimplifieResult {
+  /**
+   * Bilan simplifié (2033-A) + compte de résultat simplifié (2033-B) +
+   * tableau 2033-C (immobilisations/amortissements movement — see
+   * tableau-2033-c.ts). No longer purely synchronous — 2033-C needs the
+   * same `fetchImmobilisations()` FixedAsset read `computeReelNormal()`
+   * already does for 2054/2055, reusing it verbatim rather than a
+   * second query shape.
+   */
+  private async computeReelSimplifie(
+    company: CompanyContext,
+    ctx: Awaited<ReturnType<LiasseService['fetchLedgerContext']>>,
+  ): Promise<LiasseSimplifieResult> {
+    const { fiscalYear, bilanAccounts, compteResultatAccounts } = ctx;
+
     const compteResultat = computeCompteResultat2033B(compteResultatAccounts);
     const bilan = computeBilan2033A(
       bilanAccounts,
       Money.fromString(compteResultat.beneficeOuPerte),
     );
     assertBilan2033ABalances(bilan);
-    return { regime: 'REEL_SIMPLIFIE', bilan, compteResultat };
+
+    // Same shared fetch as computeReelNormal()'s own 2054/2055 pass — see fetchImmobilisations()'s
+    // own doc comment for why both halves of its WHERE clause are load-bearing.
+    const assets = await this.fetchImmobilisations(company, fiscalYear);
+    const assetsDisposedThisYear = assets.filter(
+      (asset) =>
+        asset.cessionDate &&
+        asset.cessionDate >= fiscalYear.startDate &&
+        asset.cessionDate <= fiscalYear.endDate,
+    );
+
+    const tableau2033CAssets: ImmobilisationMovementAsset[] = assets.map((asset) => ({
+      accountNumber: asset.account.number,
+      acquisitionDate: asset.acquisitionDate,
+      acquisitionValue: Money.fromDecimal(asset.acquisitionValue),
+      cessionDate: asset.cessionDate,
+    }));
+    const tableau2033CEntries: ImmobilisationDepreciationMovement[] = assets.flatMap((asset) =>
+      asset.depreciationEntries.map((entry) => ({
+        accountNumber: asset.account.number,
+        fiscalYearId: entry.fiscalYearId,
+        fiscalYearEndDate: entry.fiscalYear.endDate,
+        amount: Money.fromDecimal(entry.amount),
+      })),
+    );
+    const tableau2033CDisposals: ImmobilisationDisposal[] = assetsDisposedThisYear.map((asset) => ({
+      accountNumber: asset.account.number,
+      amortissementsCumules: computeFixedAssetSummary(asset, asset.depreciationEntries)
+        .amortissementsCumules,
+    }));
+    const tableau2033C = computeTableau2033C(
+      tableau2033CAssets,
+      fiscalYear,
+      tableau2033CEntries,
+      { id: fiscalYear.id, endDate: fiscalYear.endDate },
+      tableau2033CDisposals,
+    );
+
+    return { regime: 'REEL_SIMPLIFIE', bilan, compteResultat, tableau2033C };
   }
 
   /** The full régime réel normal pipeline — bilan, compte de résultat, and every 2054–2059 annexe. */

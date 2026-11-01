@@ -138,6 +138,10 @@ const REEL_SIMPLIFIE: LiasseSimplifieResult = {
     lignes: [{ code: '210', label: 'Ventes de marchandises', montant: '2000.00' }],
     beneficeOuPerte: '300.00',
   } as never,
+  // tableau2033C (2026-10-31) — not rendered by renderLiasseExcel() yet, same as every other field
+  // on this fixture cast `as never`; this literal only needs to satisfy LiasseSimplifieResult's
+  // shape, not exercise the new field.
+  tableau2033C: {} as never,
 };
 
 describe('renderLiasseExcel', () => {
