@@ -5857,6 +5857,115 @@ same scope. Migration `20261031205512_add_budget`.
   item 2b, confirmed absent from the schema — a natural pairing once
   2b exists, not a hard dependency today).
 
+## Comptabilité analytique
+
+`src/modules/cost-centers/` (2026-11-01) is roadmap item 2b — an
+optional analytical-dimension tag on `EcritureLigne` (cost center /
+project) plus a read-only P&L broken out by that dimension. Built as
+the GATED anchor of this batch: it is the ONE item that touches
+`entry-validation.service.ts`, built directly rather than delegated,
+with sole occupancy of that file for the duration (per this app's own
+standing "only one task per batch may edit this file" discipline —
+see CLAUDE.md on `EntryValidationService` elsewhere in this file for
+why it's shared, sacred infrastructure).
+
+- **`CostCenter` is structurally identical to `VatRate`'s own role** —
+  a per-line, OPTIONAL reference entity. `EcritureLigne.costCenterId`
+  (nullable FK, migration `20261101113725_add_cost_center`) is built
+  as the exact mirror of `vatRateId`: optional on
+  `CreateEcritureLigneDto`, validated by a new
+  `EntryValidationService.assertCostCentersBelongToCompany()` written
+  line-for-line parallel to `assertVatRatesBelongToCompany()` (collect
+  distinct non-null ids, one `findMany` scoped to the company, throw
+  `BadRequestException` on a count mismatch — returns immediately,
+  with no query at all, when no line tags one). Called at the exact
+  same four sites `vatRateId`'s own check already is:
+  `EntriesService.create()`, `.update()`, the AI chatbot's
+  `ProposeToolsService.execute()` (`propose_ecriture`), and persisted
+  by `EntryValidationService.buildBalancedLignes()`'s own
+  ligne-mapping. Carried forward into a reversal
+  (contre-passation)'s own lignes, same as `vatRateId` — and unlike
+  `dateEcheance`/`lettrage`, which are deliberately NOT copied on
+  reversal (an already-documented fact elsewhere in this file). No
+  delete/update endpoint — same "no delete/deactivate on a reference
+  entity referenced by immutable écritures" precedent as
+  `Journal`/pre-2026-09-06-`Account`/`VatRate`/`FiscalYear`.
+- **The report (`analytical-report.ts`) reuses the compte-de-résultat's
+  own classification engine verbatim — no new aggregation logic.**
+  `computeAnalyticalReport()` groups validated, class-6/7
+  `EcritureLigne`s by `(accountNumber, costCenterId)` — the exact same
+  per-account aggregation `trial-balance-engine.ts`'s `buildTrialBalance()`
+  does, with one extra grouping key — then resolves each group's CDR
+  contribution via `resolveLineContribution(accountNumber, balance,
+  CDR_RULES)`, the SAME primitive `compte-resultat-2052-2053.ts`'s own
+  `classifyAccounts()` and the Tier-1 traceability drill-down already
+  use. **Confirmed safe before writing any code**: `CDR_RULES` has NO
+  `DualNatureRule` family at all (dual-nature accounts — bank
+  overdrafts, personnel/associés — are a BILAN-only concept; no
+  class-6/7 account is ever dual-nature), so there is no sign-dependent
+  routing that could differ between a per-account-only aggregate and a
+  per-(account, cost-center) one — the exact landmine Tier 1's own
+  dual-nature bilan classification already proved sensitive to,
+  checked here as a verification step BEFORE coding rather than a bug
+  found after.
+- **"Non ventilé" (unallocated) bucket, reusing the Dashboard's own
+  precedent**: lines with `costCenterId === null` group into their own
+  bucket (`costCenterLabel: 'Non ventilé'`), sorted last — never
+  hidden, never dropped, same convention as the Dashboard's own
+  comptes-courants-d'associés tile (see "Dashboard" above).
+- **The oracle, same non-negotiable discipline as every other tie-out
+  in this app**: `assertAnalyticalTiesToOfficialTotal()` sums the
+  per-cost-center split (every bucket, "Non ventilé" included) for
+  each CDR code and asserts it equals a SEPARATELY-derived company-wide
+  total for that same code (re-aggregating the same raw lignes by
+  account only, ignoring cost center — the same computation path
+  `compte-resultat-2052-2053.ts` itself would use). Throws
+  `ConflictException` naming both figures on mismatch. Hand-traced
+  before any code was written: two cost centers plus an unallocated
+  bucket on accounts 607000 (FS, debit-direction) and 707000 (FC,
+  credit-direction) — FS ties at 1700,00 (1000+500+200), FC ties at
+  3500,00 (3000+0+500).
+- **Scope reads VALIDATED-only lines, pcgClass 6/7 only — a deliberate
+  departure from `LedgerService.trialBalance()`'s own choice to
+  include drafts.** This report's own oracle ties against the
+  "official" compte de résultat total, itself a validated-only,
+  compliance-rooted figure — comparing against a mixed draft+validated
+  split would make the tie-out meaningless, same reasoning
+  `LiasseService.fetchLedgerContext()` already applies. **No hard
+  drafts-block guard, unlike `LiasseService.generate()`'s own
+  all-or-nothing refusal** — a draft simply isn't counted yet; forcing
+  a "no drafts anywhere in this fiscal year" gate would make a
+  day-to-day analytical report unusable for an actively-operating
+  company with any draft in flight.
+- **`CostCentersService`/`CostCentersController`** (`POST`/`GET
+  /cost-centers`, `GET /cost-centers/:id`,
+  `GET /cost-centers/report/by-fiscal-year`) — CRUD-minus-delete for
+  the reference entity, mirroring `VatService`'s own exact shape. The
+  report route is registered BEFORE `:id` in the controller — the
+  same route-ordering landmine CLAUDE.md "Search — écritures by
+  libellé/amount" already documents and fixed once, avoided here from
+  the start rather than found live.
+- **Verified two ways.** A hand-traced oracle (`analytical-report.spec.ts`,
+  using the fixture above, plus a pcgClass-6/7-only filter test and a
+  zero-balance-group-drops-cleanly test), a direct test of the
+  mismatch guard itself (`assertAnalyticalTiesToOfficialTotal` throws
+  naming both figures on a real mismatch, passes when every code ties),
+  a mocked-Prisma `cost-centers.service.spec.ts` (scoping, the
+  fiscal-year/cost-center `NotFoundException` guards, and an
+  end-to-end feed into `computeAnalyticalReport()`), plus parallel
+  coverage added to `entry-validation.service.spec.ts`/
+  `entries.service.spec.ts`/`propose-tools.service.spec.ts` mirroring
+  every existing `vatRateId` test case one-for-one (accept a cost
+  center belonging to the company, reject one that doesn't, never
+  query when untagged, carry forward into a reversal). 1059 backend
+  tests passing overall; `tsc`/`eslint` clean.
+- **Not built this pass, deliberately** — the task was scoped to "the
+  tagging step... plus a read-only report module," backend only: a
+  `CostCenter` management screen (mirroring the VAT-rates admin
+  screen), an entry-grid cost-center selector (mirroring
+  `lineNeedsVatRate()`'s own gating), and a report page. A natural,
+  separately-scoped follow-up, not started here.
+
 ## Anomaly surfacing
 
 `src/modules/anomalies/` (2026-09-05) is the roadmap's last unstarted

@@ -52,6 +52,15 @@ export class CreateEcritureLigneDto {
 
   @ApiPropertyOptional({
     description:
+      'Analytical cost-center/project id — optional, same per-line tagging shape as vatRateId. ' +
+      'Omit for lines with no analytical dimension; most lines will.',
+  })
+  @IsOptional()
+  @IsString()
+  costCenterId?: string;
+
+  @ApiPropertyOptional({
+    description:
       'Due date for a créance/dette line — feeds the 2057 (état des échéances) maturity split. ' +
       'Omit for lines with no due-date concept (charges, produits, immobilisations, trésorerie); ' +
       "omitting it on a créance/dette line falls into 2057's documented default bucket rather than " +

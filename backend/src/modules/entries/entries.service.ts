@@ -97,6 +97,7 @@ export class EntriesService {
     const lignesData = this.validation.buildBalancedLignes(company, dto.lignes);
     await this.validation.assertReferencesBelongToCompany(company, dto.journalId, dto.fiscalYearId);
     await this.validation.assertVatRatesBelongToCompany(company, dto.lignes);
+    await this.validation.assertCostCentersBelongToCompany(company, dto.lignes);
     const warnings = await this.validation.computeOrphanedImmobilisationWarnings(
       company,
       dto.lignes,
@@ -251,6 +252,7 @@ export class EntriesService {
     const lignesData = this.validation.buildBalancedLignes(company, dto.lignes);
     await this.validation.assertReferencesBelongToCompany(company, dto.journalId, dto.fiscalYearId);
     await this.validation.assertVatRatesBelongToCompany(company, dto.lignes);
+    await this.validation.assertCostCentersBelongToCompany(company, dto.lignes);
     const warnings = await this.validation.computeOrphanedImmobilisationWarnings(
       company,
       dto.lignes,
@@ -433,6 +435,7 @@ export class EntriesService {
             idDevise: ligne.idDevise ?? undefined,
             montantDevise: ligne.montantDevise ?? undefined,
             vatRateId: ligne.vatRateId ?? undefined,
+            costCenterId: ligne.costCenterId ?? undefined,
           })),
         },
       },

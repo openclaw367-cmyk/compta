@@ -52,6 +52,7 @@ function makePrismaMock() {
     },
     lettrageAuditLog: { create: jest.fn() },
     vatRate: { findMany: jest.fn().mockResolvedValue([]) },
+    costCenter: { findMany: jest.fn().mockResolvedValue([]) },
     account: { findMany: jest.fn().mockResolvedValue([]) },
     fixedAsset: { findMany: jest.fn().mockResolvedValue([]) },
     $transaction: jest.fn(),
@@ -404,6 +405,78 @@ describe('EntriesService', () => {
   it('does not query vatRate at all when no line carries a vatRateId', async () => {
     await service.create(company, baseDto());
     expect(prisma.vatRate.findMany).not.toHaveBeenCalled();
+  });
+
+  it('creates an écriture with a costCenterId tag that belongs to the company (parallel to vatRateId)', async () => {
+    prisma.costCenter.findMany.mockResolvedValue([
+      { id: 'cc-proj-a', companyId: company.companyId },
+    ]);
+    const dto = baseDto({
+      lignes: [
+        { compteId: 'account-607', debit: '100.00', costCenterId: 'cc-proj-a' },
+        { compteId: 'account-401', credit: '100.00' },
+      ],
+    });
+    await service.create(company, dto);
+    expect(prisma.costCenter.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['cc-proj-a'] }, companyId: company.companyId },
+    });
+    expect(prisma.ecriture.create).toHaveBeenCalled();
+  });
+
+  it('rejects a costCenterId that does not belong to the company', async () => {
+    prisma.costCenter.findMany.mockResolvedValue([]);
+    const dto = baseDto({
+      lignes: [
+        { compteId: 'account-607', debit: '100.00', costCenterId: 'someone-elses-cc' },
+        { compteId: 'account-401', credit: '100.00' },
+      ],
+    });
+    await expect(service.create(company, dto)).rejects.toThrow(BadRequestException);
+    expect(prisma.ecriture.create).not.toHaveBeenCalled();
+  });
+
+  it('does not query costCenter at all when no line carries a costCenterId', async () => {
+    await service.create(company, baseDto());
+    expect(prisma.costCenter.findMany).not.toHaveBeenCalled();
+  });
+
+  it('carries costCenterId forward into a reversal (contre-passation) écriture, same as vatRateId', async () => {
+    prisma.costCenter.findMany.mockResolvedValue([
+      { id: 'cc-proj-a', companyId: company.companyId },
+    ]);
+    const original = {
+      id: 'ecriture-1',
+      companyId: company.companyId,
+      journalId: 'journal-1',
+      fiscalYearId: 'fiscal-year-1',
+      ecritureDate: new Date('2026-01-15'),
+      libelle: 'Achat fournitures',
+      validatedAt: new Date('2026-01-16'),
+      lignes: [
+        {
+          compteId: 'account-607',
+          debit: new Prisma.Decimal('100.00'),
+          credit: new Prisma.Decimal('0.00'),
+          vatRateId: null,
+          costCenterId: 'cc-proj-a',
+        },
+        {
+          compteId: 'account-401',
+          debit: new Prisma.Decimal('0.00'),
+          credit: new Prisma.Decimal('100.00'),
+          vatRateId: null,
+          costCenterId: null,
+        },
+      ],
+    };
+    prisma.ecriture.findFirst.mockResolvedValue(original);
+    await service.reverse(company, 'ecriture-1');
+    const createArgs = prisma.ecriture.create.mock.calls[0][0] as {
+      data: { lignes: { create: { costCenterId?: string }[] } };
+    };
+    expect(createArgs.data.lignes.create[0].costCenterId).toBe('cc-proj-a');
+    expect(createArgs.data.lignes.create[1].costCenterId).toBeUndefined();
   });
 
   describe('orphaned-immobilisation warning', () => {

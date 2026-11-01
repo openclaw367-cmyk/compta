@@ -13,6 +13,7 @@ function makePrismaMock() {
       findFirst: jest.fn().mockResolvedValue({ id: 'fy-1', closedAt: null }),
     },
     vatRate: { findMany: jest.fn().mockResolvedValue([]) },
+    costCenter: { findMany: jest.fn().mockResolvedValue([]) },
     account: { findMany: jest.fn().mockResolvedValue([]) },
     fixedAsset: { findMany: jest.fn().mockResolvedValue([]) },
   };
@@ -79,6 +80,31 @@ describe('EntryValidationService (standalone)', () => {
     await expect(service.assertVatRatesBelongToCompany(company, withVat)).rejects.toBeInstanceOf(
       BadRequestException,
     );
+  });
+
+  it('accepts a cost center belonging to this company (exactly parallel to the VAT-rate check)', async () => {
+    prisma.costCenter.findMany.mockResolvedValue([{ id: 'cc-1' }]);
+    const withCostCenter: CreateEcritureLigneDto[] = [
+      { compteId: 'account-607', debit: '100.00', costCenterId: 'cc-1' },
+    ];
+    await expect(
+      service.assertCostCentersBelongToCompany(company, withCostCenter),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects a cost center not belonging to this company', async () => {
+    prisma.costCenter.findMany.mockResolvedValue([]);
+    const withCostCenter: CreateEcritureLigneDto[] = [
+      { compteId: 'account-607', debit: '100.00', costCenterId: 'cc-other-company' },
+    ];
+    await expect(
+      service.assertCostCentersBelongToCompany(company, withCostCenter),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('never queries the database when no line tags a cost center', async () => {
+    await service.assertCostCentersBelongToCompany(company, lignes);
+    expect(prisma.costCenter.findMany).not.toHaveBeenCalled();
   });
 
   it('warns (does not throw) on a debited immobilisation account with no linked FixedAsset', async () => {

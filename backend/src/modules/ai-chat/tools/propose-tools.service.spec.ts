@@ -22,6 +22,7 @@ function buildService() {
     buildBalancedLignes: jest.fn(),
     assertReferencesBelongToCompany: jest.fn().mockResolvedValue(undefined),
     assertVatRatesBelongToCompany: jest.fn().mockResolvedValue(undefined),
+    assertCostCentersBelongToCompany: jest.fn().mockResolvedValue(undefined),
     computeOrphanedImmobilisationWarnings: jest.fn().mockResolvedValue([]),
   };
   const service = new ProposeToolsService(validation as never);
@@ -47,6 +48,7 @@ describe('ProposeToolsService — propose_ecriture', () => {
       'fy-1',
     );
     expect(validation.assertVatRatesBelongToCompany).toHaveBeenCalled();
+    expect(validation.assertCostCentersBelongToCompany).toHaveBeenCalled();
     expect(validation.computeOrphanedImmobilisationWarnings).toHaveBeenCalled();
   });
 
