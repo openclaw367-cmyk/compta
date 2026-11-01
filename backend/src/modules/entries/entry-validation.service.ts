@@ -53,6 +53,7 @@ export class EntryValidationService {
           : undefined,
         idDevise: ligne.idDevise,
         vatRateId: ligne.vatRateId,
+        costCenterId: ligne.costCenterId,
         dateEcheance: ligne.dateEcheance ? new Date(ligne.dateEcheance) : undefined,
       };
     });
@@ -153,6 +154,32 @@ export class EntryValidationService {
     if (rates.length !== vatRateIds.length) {
       throw new BadRequestException(
         'One or more VAT rate references do not belong to this company.',
+      );
+    }
+  }
+
+  /**
+   * A tagged costCenterId must belong to this company — same
+   * multi-tenant scoping rule as every other reference, built exactly
+   * parallel to assertVatRatesBelongToCompany() above (see CLAUDE.md
+   * "Comptabilité analytique" / roadmap item 2b).
+   */
+  async assertCostCentersBelongToCompany(
+    company: CompanyContext,
+    lignes: CreateEcritureLigneDto[],
+  ): Promise<void> {
+    const costCenterIds = [
+      ...new Set(lignes.map((l) => l.costCenterId).filter((id): id is string => Boolean(id))),
+    ];
+    if (costCenterIds.length === 0) {
+      return;
+    }
+    const costCenters = await this.prisma.costCenter.findMany({
+      where: { id: { in: costCenterIds }, companyId: company.companyId },
+    });
+    if (costCenters.length !== costCenterIds.length) {
+      throw new BadRequestException(
+        'One or more cost-center references do not belong to this company.',
       );
     }
   }

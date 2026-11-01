@@ -236,6 +236,7 @@ model Company {
   archivedExports       ArchivedExport[]
   budgets               Budget[]
   budgetLines           BudgetLine[]
+  costCenters           CostCenter[]
 }
 
 /// Exercice comptable. Ecritures are validated (locked) relative to a
@@ -439,6 +440,15 @@ model EcritureLigne {
   /// untagged line on a VAT account rather than silently omitting it.
   vatRateId String?
   vatRate   VatRate? @relation(fields: [vatRateId], references: [id])
+
+  /// Analytical cost-center/project tag — roadmap item 2b, see
+  /// src/modules/cost-centers/. Same structurally-optional, per-line
+  /// tagging shape as vatRateId above, reused as the template:
+  /// tagging is opt-in per line, most lines carry no analytical
+  /// dimension at all, and nothing requires every line on an écriture
+  /// to share the same tag (or any tag).
+  costCenterId String?
+  costCenter   CostCenter? @relation(fields: [costCenterId], references: [id])
 
   /// Due date for a créance/dette line — feeds the 2057 (état des
   /// échéances) maturity split (see tableau-2057.ts). Optional: most
@@ -1408,5 +1418,29 @@ model BudgetLine {
   plannedAmount Decimal @db.Decimal(15, 2)
 
   @@unique([budgetId, accountId])
+  @@index([companyId])
+}
+
+/// An analytical dimension (cost center / project) — roadmap item 2b
+/// ("Comptabilité analytique"). Structurally identical to VatRate's own
+/// role as a per-line, OPTIONAL tag on EcritureLigne (see
+/// `EcritureLigne.costCenterId` below) — reused as the template rather
+/// than invented fresh, per CLAUDE.md's own stated plan for this item.
+/// No delete/update endpoint, same "no delete/deactivate on a reference
+/// entity referenced by immutable écritures" precedent as
+/// Journal/Account(pre-2026-09-06)/VatRate/FiscalYear.
+model CostCenter {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  code  String
+  label String
+
+  ecritureLignes EcritureLigne[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([companyId, code])
   @@index([companyId])
 }

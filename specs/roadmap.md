@@ -1240,30 +1240,47 @@ cash-flow reconciliation), reused for a genuinely new class of question.
   on a fixture company — the exact discipline every other GATED feature
   in this app already went through.
 
-#### 2b. Comptabilité analytique (cost-center / project allocation)
+#### 2b. Comptabilité analytique (cost-center / project allocation) — SHIPPED (backend, 2026-11-01)
 
-- **What**: an optional analytical-dimension tag on `EcritureLigne`
-  (a `CostCenter`/`AnalyticalAxis` model + `costCenterId` field),
-  captured at écriture-creation time — structurally identical to the
-  existing `vatRateId` per-line tagging, reused as the template rather
-  than invented fresh. Reporting: a P&L broken out by cost center/
-  project, alongside the existing company-wide compte de résultat.
-- **Classification: GATED for the tagging/validation step** (the same
-  `EntriesService` validates a tagged `costCenterId` belongs to the
-  company, exactly like `vatRateId` today) — **PRESENTATION for the
-  aggregation report itself** (a read-only re-grouping of already-
-  validated data, same shape as `financial-analysis.ts`).
-- **Depends on**: nothing beyond the existing per-line tagging pattern.
-  Genuinely independent of everything else in this section — could be
-  picked up any time, including before Tier 1.
-- **Verification**: fully hand-oracle-testable to this app's normal
-  standard — tag a known dataset with known cost centers, assert the
-  per-cost-center P&L sums correctly, the exact same discipline as
-  `ca3-declaration.ts`'s own by-rate aggregation. Unlike 1a's quote/
-  order state machine, this item's correctness IS fully checkable
-  against a hand-traced number, because the underlying math (sum lines
-  tagged X) has no ambiguity — "management accounting" doesn't
-  automatically mean "unverifiable," only budgeting (next) does.
+See CLAUDE.md "Comptabilité analytique" for the full record. Built
+exactly as scoped: `CostCenter` model + `EcritureLigne.costCenterId`
+(nullable FK, structurally identical to `vatRateId`),
+`EntryValidationService.assertCostCentersBelongToCompany()` (mirrors
+`assertVatRatesBelongToCompany()` line for line), wired into
+`EntriesService.create()`/`.update()`/`.reverse()` and
+`ProposeToolsService` (the AI write path) — the same four call sites
+`vatRateId` already touches. Plus a read-only
+`analytical-report.ts` (pure, no I/O) reusing `CDR_RULES`/
+`resolveLineContribution()` from the compte-de-résultat engine
+verbatim — the P&L broken out by cost center, with an independently-
+derived company-wide total asserted to tie out exactly
+(`assertAnalyticalTiesToOfficialTotal`). `CostCentersService`/
+`CostCentersController` (`POST`/`GET /cost-centers`,
+`GET /cost-centers/report/by-fiscal-year`) are CRUD-minus-delete, same
+precedent as `VatRate`/`Journal`/`FiscalYear`.
+- **Classification held exactly as predicted**: GATED for the tagging
+  step (the one task this batch that touched
+  `entry-validation.service.ts`, built directly by the orchestrating
+  session rather than delegated, per the batch's own "sole occupancy"
+  rule) — PRESENTATION for the report (reuses the existing CDR
+  classification engine, no new aggregation logic beyond the extra
+  grouping key).
+- **Verified two ways**: a hand-traced oracle
+  (`analytical-report.spec.ts`) — two cost centers + an unallocated
+  "Non ventilé" bucket on two accounts (607000/FS, 707000/FC), summed
+  by hand before any code was written, confirming the split ties to
+  the official total to the centime — plus a mocked-Prisma
+  `cost-centers.service.spec.ts` and parallel coverage in
+  `entry-validation.service.spec.ts`/`entries.service.spec.ts`/
+  `propose-tools.service.spec.ts` mirroring every existing `vatRateId`
+  test case (accept/reject/no-query-when-untagged/carried-forward-on-
+  reversal). 1059 backend tests passing overall; `tsc`/`eslint`
+  clean.
+- **Frontend deliberately not built this pass** — the task was scoped
+  to "the tagging step... plus a read-only report module," backend
+  only; a `CostCenter` management screen, an entry-grid selector
+  (mirroring `lineNeedsVatRate()`), and a report page are a natural,
+  separately-scoped follow-up, not started here.
 
 #### 2c. Budgeting / forecasting vs. actuals — SHIPPED (2026-10-31)
 

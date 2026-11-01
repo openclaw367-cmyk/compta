@@ -110,6 +110,7 @@ export class ProposeToolsService {
                     debit: { type: 'string', description: 'Money string, e.g. "120.00".' },
                     credit: { type: 'string', description: 'Money string, e.g. "120.00".' },
                     vatRateId: { type: 'string' },
+                    costCenterId: { type: 'string' },
                     dateEcheance: { type: 'string', description: 'YYYY-MM-DD, optional.' },
                   },
                   required: ['compteId'],
@@ -146,6 +147,7 @@ export class ProposeToolsService {
             dto.fiscalYearId,
           );
           await this.validation.assertVatRatesBelongToCompany(company, dto.lignes);
+          await this.validation.assertCostCentersBelongToCompany(company, dto.lignes);
           const warnings = await this.validation.computeOrphanedImmobilisationWarnings(
             company,
             dto.lignes,
