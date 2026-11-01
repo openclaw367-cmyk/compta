@@ -16,6 +16,7 @@
     "test:cov": "jest --coverage",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "mcp:local": "ts-node src/mcp-server/main.ts",
     "seed": "ts-node prisma/seed.ts",
     "seed:sample": "ts-node prisma/seed-sample.ts",
     "seed:monaco": "ts-node prisma/seed-monaco.ts"
@@ -25,6 +26,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.0",

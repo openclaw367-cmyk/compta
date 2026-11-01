@@ -62,6 +62,7 @@ import type {
   MembershipsList,
   Regime,
   AnomaliesSummary,
+  PendingMcpProposal,
   RecurringEntryApplicationPreview,
   RecurringEntryTemplate,
   ResultatFiscalLineTraceResult,
@@ -2111,5 +2112,38 @@ export function useExportFecForClosingCompanies() {
   return useMutation({
     mutationFn: (month: string) =>
       api.post<CabinetBatchResponse>(`/cabinet/batch/export-fec-closing?month=${month}`, {}),
+  });
+}
+
+/**
+ * MCP confirmation flow — see CLAUDE.md "MCP confirmation flow". The
+ * WHOLE reviewable stack for the current (user, company) — opening
+ * ANY of a user's own confirmation links shows this same full list,
+ * never just the one item the link named.
+ */
+export function useMcpPendingProposals() {
+  return useQuery({
+    queryKey: ['mcp-proposals-pending'],
+    queryFn: () => api.get<PendingMcpProposal[]>('/mcp-confirmations/pending'),
+  });
+}
+
+export function useConfirmMcpProposal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<void>(`/mcp-confirmations/${id}/confirm`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mcp-proposals-pending'] });
+    },
+  });
+}
+
+export function useRejectMcpProposal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<void>(`/mcp-confirmations/${id}/reject`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mcp-proposals-pending'] });
+    },
   });
 }

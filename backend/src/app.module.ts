@@ -75,6 +75,8 @@ import { CabinetModule } from './modules/cabinet/cabinet.module';
 import { CabinetBatchController } from './modules/cabinet/cabinet-batch.controller';
 import { CostCentersModule } from './modules/cost-centers/cost-centers.module';
 import { CostCentersController } from './modules/cost-centers/cost-centers.controller';
+import { McpConfirmationsModule } from './modules/mcp-confirmations/mcp-confirmations.module';
+import { McpConfirmationsController } from './modules/mcp-confirmations/mcp-confirmations.controller';
 
 // Dev-only convenience routes (GET /dev/ids) are never mounted when
 // NODE_ENV=production — this isn't a route-level guard, DevModule is
@@ -114,6 +116,7 @@ const companyScopedControllers = [
   AnomaliesController,
   BudgetingController,
   CostCentersController,
+  McpConfirmationsController,
   MembershipsController,
   ActivityController,
   ...(isProduction ? [] : [DevController]),
@@ -158,6 +161,7 @@ const companyScopedControllers = [
     BackupModule,
     CabinetModule,
     CostCentersModule,
+    McpConfirmationsModule,
     ...(isProduction ? [] : [DevModule]),
   ],
   providers: [{ provide: APP_GUARD, useClass: ReadOnlyGuard }],

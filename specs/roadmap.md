@@ -1690,6 +1690,54 @@ design safely.
 
 ---
 
+## MCP server — inverse of the in-app assistant — SHIPPED (local, 2026-11-01), public hosting DEFERRED
+
+See CLAUDE.md "MCP server (local)" for the full record. A user's own
+Claude (Pro/Max, custom remote MCP connectors) can drive this app's
+read/propose capabilities under their own subscription — the opposite
+direction from the in-app assistant, which brings this app's own model
+to the user's data. Built as a new TRANSPORT over the EXISTING
+`ReadToolsService`/`ProposeToolsService` registries (zero new query/
+write logic), with the write surface grep-confirmed to be exactly
+`propose_ecriture` — never a direct post, the identical propose-then-
+human-confirms gate the in-app assistant already has, verified live
+including an injection probe. Company-scoping reuses the real
+Membership/auth model directly (login → verify → the same lookup
+`CompanyContextMiddleware` runs on every HTTP request), confirmed live
+against a real unauthorized-company attempt and a real READ_ONLY
+Membership.
+
+**Shipped this pass**: the MCP server + tool layer, verified LOCALLY
+(stdio transport — a local MCP client or Claude Code spawning the
+server as a child process; no public endpoint needed for this half at
+all). **Deliberately NOT shipped, a separate deployment decision**: the
+PUBLIC HOSTED deployment a REMOTE custom connector needs — HTTPS +
+OAuth 2.1 + a public endpoint, the same deployment-gated shape already
+deferred once for Bridge Layer 1b (polling, not webhooks, because
+there's no public endpoint today). No HTTPS, no OAuth server, no
+public route exists yet.
+
+**The confirmation flow this gated on is also now shipped (2026-11-01,
+same day).** See CLAUDE.md "MCP confirmation flow" for the full record:
+a confirmation LINK (a short-lived, single-use, `(user, company)`-scoped
+token, reusing the same hashed-opaque-token primitive as
+`RefreshToken`/`PasswordResetToken`) returned alongside
+`propose_ecriture`'s own structured result, opening an ordinary,
+already-auth-gated web page that shows the REAL structured écriture —
+never the model's prose — for a human to confirm (posts as a draft,
+same path manual entry uses) or reject. Batch support is "whichever
+proposals are still pending for this identity," not a separate entity,
+so several proposals naturally collect into one page with no bulk
+"confirm all" — each item needs its own explicit click, mirroring the
+batch invoice queue's own precedent. Decoupled from the still-deferred
+public-hosting decision (the confirm page is an ordinary page of the
+existing frontend, reusing the already-existing `FRONTEND_ORIGIN` env
+var) — fully local-buildable today, same code once a public deployment
+exists later. Verified live end to end: a real 3-item stack (two
+benign + one injection-style libelle) confirmed one-by-one, proving the
+injected item sits inert until its own explicit click, and proving
+cross-user/cross-company confirm attempts are both refused.
+
 ## Noted, not planned
 
 ### Mobile

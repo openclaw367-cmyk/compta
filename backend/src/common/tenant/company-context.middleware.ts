@@ -1,12 +1,8 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-  NestMiddleware,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NestMiddleware } from '@nestjs/common';
 import { NextFunction, Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestWithCompany } from './request-with-company';
+import { resolveCompanyContextForUser } from './resolve-company-context';
 
 const COMPANY_HEADER = 'x-company-id';
 
@@ -40,15 +36,7 @@ export class CompanyContextMiddleware implements NestMiddleware {
       throw new BadRequestException(`Missing required "${COMPANY_HEADER}" header.`);
     }
 
-    const membership = await this.prisma.membership.findUnique({
-      where: { userId_companyId: { userId: req.user.id, companyId } },
-      select: { role: true },
-    });
-    if (!membership) {
-      throw new ForbiddenException(`You are not a member of company ${companyId}.`);
-    }
-
-    req.companyContext = { companyId, role: membership.role };
+    req.companyContext = await resolveCompanyContextForUser(this.prisma, req.user.id, companyId);
     next();
   }
 }

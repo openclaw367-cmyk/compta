@@ -17,6 +17,7 @@ import { ChatModelModule } from './chat-model/chat-model.module';
 import { ReadToolsService } from './tools/read-tools.service';
 import { ProposeToolsService } from './tools/propose-tools.service';
 import { CloudProposeToolsService } from './tools/cloud-propose-tools.service';
+import { McpToolsService } from './tools/mcp-tools.service';
 import { ChatContextService } from './chat-context.service';
 import { ChatOrchestratorService } from './chat-orchestrator.service';
 import { AiChatService } from './ai-chat.service';
@@ -48,6 +49,13 @@ import { AiChatController } from './ai-chat.controller';
  * The server-side gate on WHEN a turn is allowed to use it (credential
  * existence + thread/file context) lives in `cloud-thread-gate.ts`, not
  * here.
+ * `McpToolsService` (see CLAUDE.md "MCP server (local)") is a FOURTH
+ * registry, for `src/mcp-server/` — the opposite direction from the
+ * cloud tier: not narrower, but a new TRANSPORT for the SAME breadth
+ * this module already exposes to the in-app `/assistant` chat (all 16
+ * `ReadToolsService` tools plus `propose_ecriture`). It inherits the
+ * identical non-persisting guarantee for the identical reason — it only
+ * composes the two already-exported registries, never a new tool.
  * `CloudCredentialsModule` is imported for that same cloud branch —
  * `CloudCredentialsService.getDecryptedKey()` is the one call in this
  * whole module that ever touches a real plaintext API key, and only for
@@ -89,10 +97,11 @@ import { AiChatController } from './ai-chat.controller';
     ReadToolsService,
     ProposeToolsService,
     CloudProposeToolsService,
+    McpToolsService,
     ChatContextService,
     ChatOrchestratorService,
     AiChatService,
   ],
-  exports: [ChatOrchestratorService, CloudProposeToolsService],
+  exports: [ChatOrchestratorService, CloudProposeToolsService, McpToolsService],
 })
 export class AiChatModule {}

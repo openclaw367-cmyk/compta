@@ -1338,6 +1338,25 @@ export interface ProposedEcriture {
 }
 
 /**
+ * One item in the MCP confirmation stack — see CLAUDE.md "MCP
+ * confirmation flow". Same `dto`/`warnings`/`assumptions` shape as
+ * `ProposedEcriture` above (the real structured proposal, never the
+ * model's prose) plus `id` (the row to confirm/reject against — NOT
+ * the raw, never-re-exposed opaque token from the original link) and
+ * the TTL fields. `GET /mcp-confirmations/pending` returns every one
+ * of these for the current (user, company) — the whole reviewable
+ * stack is just this array, there is no separate "batch" shape.
+ */
+export interface PendingMcpProposal {
+  id: string;
+  dto: ProposedEcritureDto;
+  warnings: string[];
+  assumptions: string[];
+  createdAt: string;
+  expiresAt: string;
+}
+
+/**
  * A saved template for a repeating écriture — see CLAUDE.md "Recurring
  * entries / templates". `frequency`/`anchorDay`/`anchorMonth` are purely
  * informational (feed `nextDueDate`'s "prochaine échéance" hint) —

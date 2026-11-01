@@ -237,6 +237,7 @@ model Company {
   budgets               Budget[]
   budgetLines           BudgetLine[]
   costCenters           CostCenter[]
+  mcpProposalTokens     McpProposalToken[]
 }
 
 /// Exercice comptable. Ecritures are validated (locked) relative to a
@@ -1180,10 +1181,11 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  memberships    Membership[]
-  refreshTokens  RefreshToken[]
-  passwordResets PasswordResetToken[]
-  sentInvites    CompanyInvite[]
+  memberships       Membership[]
+  refreshTokens     RefreshToken[]
+  passwordResets    PasswordResetToken[]
+  sentInvites       CompanyInvite[]
+  mcpProposalTokens McpProposalToken[]
 }
 
 /// Coarse per-company access level — see CLAUDE.md "Multi-user / roles &
@@ -1443,4 +1445,56 @@ model CostCenter {
 
   @@unique([companyId, code])
   @@index([companyId])
+}
+
+/// A pending-human-confirmation écriture proposed over the local MCP
+/// server (see CLAUDE.md "MCP server (local)" / "MCP confirmation
+/// flow"). `propose_ecriture` itself never writes to the ledger — this
+/// row is the ONLY thing it persists, and it's proposal-tracking
+/// metadata, never an Ecriture/EcritureLigne. Hashed at rest, single-use,
+/// short-lived — the exact same `generateOpaqueToken()`/
+/// `hashOpaqueToken()` primitive and PasswordResetToken-shaped pattern
+/// already used by RefreshToken/PasswordResetToken/CompanyInvite, never
+/// a parallel one. `dto`/`warnings`/`assumptions` are the REAL
+/// structured proposal (ProposedEcriture) the confirm page renders —
+/// never the model's own prose description of it.
+model McpProposalToken {
+  id        String @id @default(cuid())
+  tokenHash String @unique
+
+  /// Scoped to the exact user who called propose_ecriture — not "any
+  /// member of the company." A deliberate, narrower-than-necessary
+  /// choice stated explicitly, not an oversight; widening it (e.g. any
+  /// OWNER can confirm a teammate's pending proposal) is a separate,
+  /// later decision.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  /// The real CreateEcritureDto this token confirms — JSON, never a
+  /// re-derivation from any prose description.
+  dto         Json
+  warnings    Json
+  assumptions Json
+
+  status McpProposalStatus @default(PENDING)
+
+  createdAt  DateTime  @default(now())
+  /// 24h, a stated choice (not a sourced spec): long enough that
+  /// checking a browser "later today" isn't punished, short enough that
+  /// a stale proposal against a possibly-closed fiscal year doesn't
+  /// linger. Checked at confirm/reject time, same TTL-at-use-time
+  /// pattern RefreshToken/PasswordResetToken already use.
+  expiresAt  DateTime
+  resolvedAt DateTime?
+
+  @@index([userId, companyId, status])
+}
+
+enum McpProposalStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
 }
