@@ -455,12 +455,32 @@ misstated twice during development before being pinned down here.
   §4b): **Case A** — a *French*-jurisdiction entity with some
   Monaco-destined operations still files the French CA3, with a memo
   sub-line (ligne 18, *"Dont TVA sur opérations à destination de
-  Monaco"*) reserved for it — **documented in the spec but not yet
-  implemented**; `ca3-declaration.ts` has no `ligne18` today. **Case
-  B** — a *Monaco*-jurisdiction (`Company.jurisdiction === 'MC'`)
-  entity files its own Monegasque DSF declaration, a genuinely
-  different form with different line numbers — **implemented**, see
-  below.
+  Monaco"*, case **0038**, confirmed 2026-11-01 directly from the
+  rendered form, `specs/3310-ca3-sd_5377.pdf` Cadre B — a sibling "Dont"
+  breakout of ligne16 alongside ligne 17's own AIC memo line, NOT nested
+  under ligne 17) reserved for it. **The field now exists
+  (`Ca3Declaration.ligne18?: string | null`) but always computes as
+  `null`, never a guessed figure** — this app's data model has no
+  honest way to identify which collectée lines are "opérations... à
+  destination de Monaco" today: `Ca3Ligne` (the function's own input)
+  carries no destination-country signal at all, and the one plausible
+  proxy (`Account.countryCode`/`Invoice.clientCountrySnapshot`, added
+  later for invoicing — see "Invoicing — client identity pre-fill"
+  above) is optional/free-text/often-null, only ever populated for an
+  invoiced sale (never a manual journal-entry one), isn't wired into
+  this computation's input shape, and even if it were, client billing
+  country isn't the same fact as "opération à destination de Monaco" —
+  the notice also excludes travaux immobiliers/établissements bancaires,
+  a sector judgment this app can't make. Wiring a real signal through
+  would mean widening `Ca3Ligne`/`VatService` beyond this function, a
+  separate, larger pass — not attempted here, so the null stays honest
+  rather than a guess dressed up as a computed figure, same "flag,
+  don't fake" discipline as 2059-A's qualification field/2058-B's cadre
+  I. See `ca3-declaration.ts`'s own `Ca3Declaration.ligne18` doc comment
+  before touching this again. **Case B** — a *Monaco*-jurisdiction
+  (`Company.jurisdiction === 'MC'`) entity files its own Monegasque DSF
+  declaration, a genuinely different form with different line numbers —
+  **implemented**, see below.
 - **Everything else deferred**: AIC/imports beyond the informational
   lines, groupe TVA / assujetti unique, régularisations, annexe 3310-A
   (taxes assimilées), accise sur les énergies (a different tax bundled
@@ -497,8 +517,10 @@ misstated twice during development before being pinned down here.
 
 `src/modules/vat/monaco-declaration.ts` computes the Monegasque DSF
 declaration (basic case) for a Monaco-jurisdiction company filing its
-own return — Case B above, distinct from Case A's not-yet-built ligne
-18 memo line on the French CA3. Full line spec, three-bucket divergence
+own return — Case B above, distinct from Case A's ligne 18 memo line on
+the French CA3 (the field exists, see "VAT / CA3 declaration" above,
+but always computes `null` — no destination-country signal exists in
+this app's data model to populate it honestly). Full line spec, three-bucket divergence
 table vs. France, and account-mapping analysis are in
 `specs/vat-monaco-implementation-spec.md`; built against that document's
 primary sources (the actual DSF form + its notice), never inferred from
@@ -7933,10 +7955,17 @@ Not on this numbered list but still open whenever it's picked back up:
 widening either VAT computation — FR: remaining taux particuliers beyond
 T6, AIC/imports, groupe TVA, régularisations, annexe 3310-A; MC: TMP,
 acomptes provisionnels, filing-frequency mechanics, the cross-border
-memo-line question — and building Case A's ligne 18 memo line on the
-French CA3 for a French entity with Monaco-destined activity, which is
-documented but not implemented. See "VAT / CA3 declaration" and "VAT /
-Monaco declaration (Case B)" above.
+memo-line question — and giving Case A's ligne 18 memo line on the
+French CA3 a real computed value for a French entity with Monaco-
+destined activity. The field exists (`ca3-declaration.ts`) and always
+reports `null` honestly today (no destination-country signal exists
+anywhere in this app's ledger data to compute it from) — a real value
+would need new cross-module wiring (e.g. threading
+`Account.countryCode`/`Invoice.clientCountrySnapshot` into
+`VatService`/`Ca3Ligne`) plus a real answer to the notice's own
+travaux-immobiliers/établissements-bancaires exclusion, neither
+attempted this pass. See "VAT / CA3 declaration" and "VAT / Monaco
+declaration (Case B)" above.
 
 ## Monaco compliance — verify before trusting
 

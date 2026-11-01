@@ -1,5 +1,10 @@
 import { Prisma } from '@prisma/client';
-import { Ca3Ligne, Ca3VatRate, computeCa3Declaration } from './ca3-declaration';
+import {
+  Ca3Ligne,
+  Ca3VatRate,
+  DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT,
+  computeCa3Declaration,
+} from './ca3-declaration';
 
 const RATE_20 = 'rate-20';
 const RATE_10 = 'rate-10';
@@ -455,4 +460,48 @@ describe('computeCa3Declaration', () => {
     const rate20After = after.collecteeByRate.find((r) => r.ratePercent === '20.00')!;
     expect(rate20After.taxe).toBe('100.00');
   });
+
+  it(
+    'ligne 18 (Dont TVA sur opérations à destination de Monaco, case 0038) is always null — ' +
+      'no destination-country signal exists in Ca3Ligne to compute it honestly, see the ' +
+      'Ca3Declaration.ligne18 doc comment',
+    () => {
+      const lignes: Ca3Ligne[] = [
+        {
+          compteNumber: '707000',
+          pcgClass: 7,
+          debit: d('0.00'),
+          credit: d('1000.00'),
+          vatRateId: RATE_20,
+        },
+        {
+          compteNumber: '4457100',
+          pcgClass: 4,
+          debit: d('0.00'),
+          credit: d('200.00'),
+          vatRateId: RATE_20,
+        },
+        {
+          compteNumber: DEDUCTIBLE_IMMOBILISATIONS_ACCOUNT,
+          pcgClass: 4,
+          debit: d('160.00'),
+          credit: d('0.00'),
+          vatRateId: null,
+        },
+      ];
+      const declaration = computeCa3Declaration(lignes, VAT_RATES, '2026-01-01', '2026-01-31');
+
+      // ligne16/ligne19 are real, computed, non-zero figures in this same declaration —
+      // proving ligne18's own null isn't an artifact of an otherwise-empty period.
+      expect(declaration.ligne16).toBe('200.00');
+      expect(declaration.ligne19).toBe('160.00');
+      expect(declaration.ligne18).toBeNull();
+
+      // A second, independent period (different data, different rate, no collectée at all)
+      // confirms this isn't a one-off — ligne18 has no computation path that could ever
+      // produce anything other than null today.
+      const otherPeriod = computeCa3Declaration([], VAT_RATES, '2026-02-01', '2026-02-28');
+      expect(otherPeriod.ligne18).toBeNull();
+    },
+  );
 });
