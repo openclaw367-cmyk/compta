@@ -1071,7 +1071,11 @@ shouldn't exist" discipline as everywhere else in this app).
   are not built either** — this pass is bilan + compte de résultat
   only, the same scope the 2050-series had before its own annexe passes
   (2054/2055/2056/2057/2059) came later. `LiasseSimplifieResult` has no
-  annexe fields.
+  annexe fields. **2033-C's own Cadre I/II (immobilisations/
+  amortissements movement) is now built** (2026-10-31) — see "Liasse
+  fiscale — régime réel simplifié, 2033-C annexe" below. Cadre III
+  (plus-values/moins-values) and everything from 2033-D onward remain
+  exactly as deferred as stated above — not widened by that pass.
 - **Verified two ways.** Hand-computed oracles in `bilan-2033-a.spec.ts`
   and `compte-resultat-2033-b.spec.ts`, reusing the SAME hand-traced
   dataset `liasse-oracle-fixture.ts` already provides for the 2050-series
@@ -1093,15 +1097,131 @@ shouldn't exist" discipline as everywhere else in this app).
   `liasse.service.spec.ts` has a full mocked-Prisma end-to-end wiring
   test for the `REEL_SIMPLIFIE` branch, exercising the real query shape
   `LiasseService.generate()` issues (not just the pure compute
-  functions), confirming `fixedAsset.findMany` is never called on this
-  path (no 2033-C this pass). **Not verified live against the running
-  Postgres dev DB** — `Company.regime` isn't settable via
-  `UpdateCompanyDto`, and `Company` has no delete endpoint, so creating
-  a throwaway REEL_SIMPLIFIE company for a one-off live check would
-  permanently clutter the dev DB with no way to clean it up; the oracle
-  + cross-regime + mocked end-to-end coverage above was judged
-  sufficient without it. If `regime` ever becomes updatable, a live
-  check is a natural thing to add then.
+  functions). **`fixedAsset.findMany` was never called on this path
+  until 2033-C was built (2026-10-31) — it now is, since 2033-C reads
+  the same `FixedAsset` data 2054/2055 already do; see "Liasse fiscale
+  — régime réel simplifié, 2033-C annexe" below.** **Not verified live
+  against the running Postgres dev DB** — `Company.regime` isn't
+  settable via `UpdateCompanyDto`, and `Company` has no delete
+  endpoint, so creating a throwaway REEL_SIMPLIFIE company for a
+  one-off live check would permanently clutter the dev DB with no way
+  to clean it up; the oracle + cross-regime + mocked end-to-end
+  coverage above was judged sufficient without it. If `regime` ever
+  becomes updatable, a live check is a natural thing to add then.
+  (This limitation carried over unchanged into the 2033-C pass below —
+  still no live Postgres check for either.)
+
+## Liasse fiscale — régime réel simplifié, 2033-C annexe
+
+`tableau-2033-c.ts` (2026-10-31) computes **2033-C-SD's own Cadre I
+(IMMOBILISATIONS) and Cadre II (AMORTISSEMENTS)** — the régime réel
+simplifié's direct analog of the 2050-series' 2054/2055 movement
+annexes, and the first annexe this regime gets at all (see "Liasse
+fiscale — régime réel simplifié (2033-series)" above for the bilan/
+compte de résultat pass this builds on). `LiasseService.computeReelSimplifie()`
+gained one additive call to `computeTableau2033C()`, returned as a new
+`tableau2033C` field on `LiasseSimplifieResult` — `generate()`'s
+`REEL_NORMAL` path and every other pre-existing `REEL_SIMPLIFIE`
+field/test are unaffected except for gaining this one field (confirmed
+by the full pre-existing test suite passing unmodified).
+
+- **Primary source confirmed by rendering `specs/2033-sd_5394.pdf`
+  page 3 to an image** (`pip install pymupdf`, same tooling/reasoning
+  as bilan-2033-a.ts's own doc comment — `pdftotext`'s reading order
+  for this grid is not trustworthy) — this PDF turned out to already
+  contain the 2033-C-SD form (page 3 of 7), not a separate file; every
+  case number/label pair below is read directly off that rendered
+  grid, not text extraction.
+- **Cadre I only has ONE "Diminutions" column** (unlike 2054's own
+  split cessions/virements columns) — per the form's own header
+  ("Diminutions", directly between "Augmentations" and "Valeur brute
+  ... fin"), it folds cessions, mises hors service, and virements de
+  poste à poste together. Since this app has no reclassify/virements
+  mechanism (same stated gap as 2054's own doc comment), diminutions
+  here is exactly cessions, computed via the SAME `classifyAssetContributions()`
+  primitive 2054 already uses, just column-renamed and regrouped — no
+  separately-written logic. **Cadre III (PLUS-VALUES, MOINS-VALUES à
+  19 %, 15 % et 0 %) is deliberately NOT represented** — this regime's
+  own analog of 2059-A, out of scope this pass, same "flag, don't
+  fake" discipline as everywhere else in this codebase. **Réévaluation
+  légale (Cadre I's 5th column) is also not represented** — no
+  revaluation field exists on `FixedAsset`, the exact same structural
+  (not deferred) gap 2054's own doc comment already states.
+- **Row grouping is coarser than 2054/2055, confirmed category-by-
+  category against `IMMOBILISATION_CATEGORIES`, not guessed.** 9 Cadre
+  I rows / 8 Cadre II rows (no financières row in Cadre II — never
+  amortized, same structural fact 2055's own `ROWS_2055` already
+  reflects). Two folds confirmed against this codebase's own existing
+  2033-series precedent rather than invented fresh: "Autres" (case
+  410, incorporelles) folds `FRAIS_ETABLISSEMENT_DEV` +
+  `AUTRES_INCORPORELLES` — the EXACT SAME prefix set (201/203/205/206/
+  208/232/237) `bilan-2033-a.ts`'s own case `014` already uses, cross-
+  checked directly rather than re-derived; "Autres immobilisations
+  corporelles" (case 470, Cadre I only) folds
+  `AUTRES_CORP_MATERIEL_BUREAU` + `AUTRES_CORP_EMBALLAGES` +
+  `IMMOS_CORP_EN_COURS` (231) + `AVANCES_ACOMPTES` (238) — the same
+  231/238 "no dedicated row → nearest catch-all" fold
+  `bilan-2033-a.ts`'s own case `028` already makes at ITS coarser
+  granularity, confirmed consistent rather than independently
+  re-decided. "Constructions" (case 430/520) folds
+  `CONSTRUCTIONS_SOL_PROPRE` + `CONSTRUCTIONS_SOL_AUTRUI` +
+  `CONSTRUCTIONS_INST_GENERALES` — three separate 2054/2055 rows
+  merged into one, since this form prints only one "Constructions"
+  line. "Installations générales, agencements, aménagements divers"
+  (case 450/540) is its OWN dedicated row, mapping to
+  `AUTRES_CORP_INST_GENERALES` (PCG account `2181`, whose own label is
+  verbatim this case's label) — confirmed NOT folded into "Autres
+  immobilisations corporelles", a real distinction a less careful
+  reading of the form's own grid could have missed.
+- **Reuses `classifyAssetContributions()` (Cadre I) and
+  `classifyDepreciationEntry()`/`classifyDisposal()` (Cadre II)
+  verbatim from `tableau-2054.ts`/`tableau-2055.ts`** — zero
+  separately-written classification logic, only a new, coarser row
+  table on top. This also means 2055's own `ROW_CODES` guard (a
+  depreciation entry/disposal on an en-cours/avances/financières
+  category throws `ConflictException`, since those are never
+  amortized) is inherited for free, with the identical message.
+- **Verified two ways — oracle + cross-regime reconciliation, same
+  non-negotiable discipline as 2033-A/2033-B.** `tableau-2033-c.spec.ts`
+  (7 tests) hand-traces BOTH cadres against the SAME shared
+  `tableau-2054-2055-oracle-fixture.ts` dataset 2054/2055's own specs
+  already use (not a new fixture) — every row independently re-derived
+  by hand, including the Cadre I "Constructions" fold (Bâtiment B's
+  prior-year `début` + Entrepôt C's this-year `augmentations` combined
+  into one row) and the Cadre II "Autres immobilisations corporelles"
+  row (Ordinateurs E's `dotations` only, since the 231/238 fold that
+  widens Cadre I's own equivalent row never applies to Cadre II). The
+  actual cross-regime reconciliation test asserts
+  `computeTableau2033C(...).immobilisations.totalFin` equals
+  `computeTableau2054(...).totalGeneral` and
+  `computeTableau2033C(...).amortissements.totalFin` equals
+  `computeTableau2055(...).totalGeneral` on the IDENTICAL fixture
+  (390 000,00 / 38 600,00 respectively, net 351 400,00 — the same
+  figures `tableau-2054-2055-oracle-fixture.ts`'s own doc comment
+  already documents) — two independently-specified, differently-
+  grouped rule tables landing on exactly the same grand totals, not
+  asserted by construction. A dedicated disposal test (reusing Machine
+  D/215400's mid-year cession, the same scenario `tableau-2054.spec.ts`/
+  `tableau-2055.spec.ts` already exercise independently) confirms
+  diminutions reduces `fin` correctly in BOTH cadres at once, without
+  touching `début`. Two guard-propagation tests confirm the
+  out-of-period throws from `classifyAssetContributions()`/
+  `classifyDepreciationEntry()` still surface correctly through this
+  new wrapper, unmodified. `liasse.service.spec.ts`'s own REEL_SIMPLIFIE
+  wiring test was extended (not just left passing) to feed it the same
+  `ORACLE_ASSETS`/`ORACLE_DEPRECIATION_ENTRIES` FixedAsset-shaped mock
+  data the REEL_NORMAL "wires 2054/2055 end to end" test already uses,
+  confirming `tableau2033C` reaches the exact same totals through the
+  real Prisma-shaped query path, not just the pure compute function —
+  1047 backend tests passing overall; `tsc`/`eslint` clean on the
+  liasse module, full backend suite re-run clean. **Not verified live
+  against the running Postgres dev DB**, same accepted limitation
+  already stated for 2033-A/2033-B above and for the same reason
+  (`Company.regime` isn't updatable, `Company` has no delete endpoint).
+- **Not built this pass, deliberately**: Cadre III (plus-values/
+  moins-values), réévaluation légale, and everything 2033-D onward —
+  see the bullets above for exactly why each stays out of scope, not
+  silently dropped.
 
 ## Liasse fiscale / 2057 — maturity split
 

@@ -210,7 +210,7 @@ describe('LiasseService.generate', () => {
     );
   });
 
-  it('wires the REEL_SIMPLIFIE (2033-A/2033-B) path end to end on the same oracle dataset the REEL_NORMAL path uses', async () => {
+  it('wires the REEL_SIMPLIFIE (2033-A/2033-B/2033-C) path end to end on the same oracle dataset the REEL_NORMAL path uses', async () => {
     // Reuses this file's own ORACLE_BILAN_LIGNES/ORACLE_HN (tableau-2054-2055-oracle-fixture.ts —
     // despite the name, it's the FULL ledger including the class-6 dotations, same as the "wires
     // 2054/2055" test above feeds it) — a real ecritureLigne.findMany call returns every validated
@@ -222,7 +222,34 @@ describe('LiasseService.generate', () => {
     // (101000, capital) = 385000.00; resultatDeLExercice = ORACLE_HN = -19600.00 (from 681100's
     // 19600.00 total dotations, the fixture's only charge). totalPassif = 385000 − 19600 =
     // 365400.00 — balances, matching totalActifNet.
-    const prisma = makePrismaMock();
+    //
+    // 2033-C (2026-10-31): the SAME ORACLE_ASSETS/ORACLE_DEPRECIATION_ENTRIES this file's "wires
+    // 2054/2055" test below feeds the REEL_NORMAL path with — proving the REEL_SIMPLIFIE path now
+    // reads the identical FixedAsset data and reaches the identical grand totals (390000.00 fin
+    // immobilisations / 38600.00 fin amortissements), just regrouped into 2033-C's own coarser rows.
+    const entriesByAccount = new Map<string, typeof ORACLE_DEPRECIATION_ENTRIES>();
+    for (const entry of ORACLE_DEPRECIATION_ENTRIES) {
+      const list = entriesByAccount.get(entry.accountNumber) ?? [];
+      list.push(entry);
+      entriesByAccount.set(entry.accountNumber, list);
+    }
+    const fixedAssets: FakeFixedAsset[] = ORACLE_ASSETS.map((asset, i) => ({
+      id: `asset-${i}`,
+      companyId: company.companyId,
+      accountId: `account-${asset.accountNumber}`,
+      account: { number: asset.accountNumber },
+      acquisitionDate: asset.acquisitionDate,
+      acquisitionValue: new Prisma.Decimal(asset.acquisitionValue.toApiString()),
+      residualValue: new Prisma.Decimal('0.00'),
+      depreciationEntries: (entriesByAccount.get(asset.accountNumber) ?? []).map((entry) => ({
+        fiscalYearId: entry.fiscalYearId,
+        fiscalYear: { endDate: entry.fiscalYearEndDate },
+        amount: new Prisma.Decimal(entry.amount.toApiString()),
+        postedEcritureId: 'some-ecriture-id',
+      })),
+    }));
+
+    const prisma = makePrismaMock(fixedAssets);
     prisma.company.findFirst.mockResolvedValue({ id: company.companyId, regime: 'REEL_SIMPLIFIE' });
     prisma.ecritureLigne.findMany = jest.fn().mockResolvedValue(
       ORACLE_BILAN_LIGNES.map((l) => ({
@@ -242,8 +269,14 @@ describe('LiasseService.generate', () => {
     expect(result.bilan.resultatDeLExercice).toBe(ORACLE_HN);
     expect(result.bilan.totalActifNet).toBe('365400.00');
     expect(result.bilan.totalPassif).toBe('365400.00');
-    // fixedAsset.findMany must never be queried on the simplifié path — no 2033-C this pass.
-    expect(prisma.fixedAsset.findMany).not.toHaveBeenCalled();
+    expect(result.tableau2033C.immobilisations.totalFin).toBe('390000.00');
+    expect(result.tableau2033C.amortissements.totalFin).toBe('38600.00');
+    expect(result.tableau2033C.immobilisations.lignes.find((l) => l.code === '430')).toMatchObject({
+      debut: '200000.00',
+      augmentations: '80000.00',
+      fin: '280000.00',
+    });
+    expect(prisma.fixedAsset.findMany).toHaveBeenCalled();
   });
 
   it('wires 2054/2055 end to end on the multi-year oracle — the first real exercise of entry.fiscalYear.endDate', async () => {
