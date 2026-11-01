@@ -80,6 +80,38 @@ export interface Ca3Declaration {
   collecteeByRate: Ca3RateLine[];
   /** Ligne 16 — total de la TVA brute due (implemented scope: sum of collecteeByRate). Money string. */
   ligne16: string;
+  /**
+   * Ligne 18 — case 0038, "Dont TVA sur opérations à destination de
+   * Monaco" — a memo sub-line of ligne16 (confirmed from the rendered
+   * form, specs/3310-ca3-sd_5377.pdf, Cadre B: 17 "Dont TVA sur
+   * acquisitions intracommunautaires" and 18 are both "Dont" breakouts
+   * of ligne 16's own total, siblings of each other, NOT 18 nested
+   * under 17 — see CLAUDE.md "VAT / CA3 declaration" before touching
+   * this). Per specs/vat-ca3-implementation-spec.md §4b (Case A): a
+   * French-jurisdiction entity with some Monaco-destined operations
+   * still files this French CA3, and this line is reserved for exactly
+   * that subset — it never changes ligne16/ligne23/ligneTD, same as
+   * ligne 17's own existing non-field.
+   *
+   * ALWAYS null — this app's data model has no honest way to identify
+   * which collectée lines are "opérations... à destination de Monaco"
+   * today. `Ca3Ligne` (this function's own input) carries no
+   * destination-country signal at all; the one plausible proxy
+   * (Account.countryCode / Invoice.clientCountrySnapshot, added later
+   * for invoicing — see CLAUDE.md "Invoicing — client identity
+   * pre-fill") is optional/free-text/often-null, is never populated for
+   * a manual journal-entry sale (only an invoiced one), isn't wired
+   * into this computation's input shape, and — even if it were — client
+   * billing country isn't the same fact as "opération à destination de
+   * Monaco" (the notice also excludes travaux immobiliers/
+   * établissements bancaires, a sector judgment this app can't make).
+   * Computing a guessed value here would violate this codebase's
+   * "flag, don't fake" discipline (see e.g. 2059-A's qualification
+   * field, 2058-B's cadre I) — stays null with the reason documented,
+   * not silently approximated as "0.00". Money string when it IS ever
+   * computed by a future pass; null for now.
+   */
+  ligne18?: string | null;
   /** Ligne 19 — biens constituant des immobilisations. Money string. */
   ligne19: string;
   /** Ligne 20 — autres biens et services. Money string. */
@@ -230,6 +262,8 @@ export function computeCa3Declaration(
       };
     }),
     ligne16: roundToNearestEuro(ligne16).toApiString(),
+    // Ligne 18: always null — see the Ca3Declaration.ligne18 doc comment above for why.
+    ligne18: null,
     ligne19: roundToNearestEuro(ligne19).toApiString(),
     ligne20: roundToNearestEuro(ligne20).toApiString(),
     ligne23: roundToNearestEuro(ligne23).toApiString(),
