@@ -1,0 +1,36 @@
+{
+  "productName": "Citaledge",
+  "version": "0.1.0",
+  "identifier": "com.citaledge.desktop",
+  "build": {
+    "frontendDist": "../../frontend/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "npm --prefix ../../frontend ci && npm --prefix ../../frontend run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Citaledge",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 640
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "resources": ["resources/postgres/", "resources/backend/"],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": null
+    }
+  }
+}

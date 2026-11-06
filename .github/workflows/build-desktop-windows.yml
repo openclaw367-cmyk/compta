@@ -1,0 +1,130 @@
+name: Build desktop (Windows)
+
+# Manual trigger only, for now — this is the first real build of the
+# Tauri shell, not yet trusted to run unattended on every push. Add a
+# push/release trigger once a few manual runs have been confirmed clean.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    # The clean "build/sign machine" — see desktop/ARCHITECTURE.md
+    # "Dev machine vs. build machine, the actual split." This runner has
+    # no Smart App Control (or equivalent) blocking local Rust
+    # compilation, which is the whole reason this step doesn't run on a
+    # developer's own machine.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./desktop/src-tauri -> target"
+
+      # --- Backend: build the real app, exactly as `npm run build` does
+      # in local dev. No change to the backend's own source for packaging
+      # — see desktop/node-sidecar-prototype/README.md, already verified
+      # this needs none.
+      - name: Install and build backend
+        working-directory: backend
+        run: |
+          npm ci
+          npx prisma generate
+          npm run build
+
+      # --- Stage the backend sidecar bundle. Full node_modules (dev tree
+      # included), matching exactly what desktop/node-sidecar-prototype
+      # already verified end to end (Prisma engine, bcrypt, facturx,
+      # libxml2-wasm, archiver, jsonwebtoken all confirmed working when
+      # relocated this way). A production-only trim (npm ci --omit=dev)
+      # is a real, worthwhile size optimization — NOT done here, because
+      # it has not been verified to still produce a working Prisma client
+      # the same way; don't silently swap this for an unverified path.
+      - name: Stage backend resources
+        shell: pwsh
+        run: |
+          $dest = "desktop\src-tauri\resources\backend"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          robocopy backend\dist "$dest\dist" /E /NFL /NDL /NJH /NJS
+          robocopy backend\node_modules "$dest\node_modules" /E /NFL /NDL /NJH /NJS /MT:8
+          Copy-Item backend\package.json "$dest\package.json"
+          New-Item -ItemType Directory -Force -Path "$dest\prisma" | Out-Null
+          Copy-Item backend\prisma\schema.prisma "$dest\prisma\schema.prisma"
+          Copy-Item -Recurse backend\prisma\migrations "$dest\prisma\migrations"
+          # Vendor the exact Node binary actions/setup-node just installed
+          # — an already-official, already-reputable build, not a second
+          # ad hoc download. See ARCHITECTURE.md on why this matters for
+          # Smart App Control / SmartScreen reputation on the END USER's
+          # machine too, not just this dev machine.
+          $nodeExe = node -e "console.log(process.execPath)"
+          Copy-Item $nodeExe "$dest\node.exe"
+          if ($LASTEXITCODE -gt 8) { exit 1 }  # robocopy: 0-7 is success
+
+      # --- Stage the Postgres sidecar bundle. windows-latest ships
+      # PostgreSQL 17.11 pre-installed (confirmed via the runner-images
+      # repo's own README) at this exact path — the SAME major version
+      # already prototyped and hard-kill-tested locally. bin/ AND share/
+      # both required: initdb reads share/postgresql.conf.sample etc. at
+      # runtime, not just the executables. PostgreSQL's own license
+      # permits redistributing these binaries freely.
+      - name: Stage Postgres resources
+        shell: pwsh
+        run: |
+          $dest = "desktop\src-tauri\resources\postgres"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          robocopy "C:\Program Files\PostgreSQL\17\bin" "$dest\bin" /E /NFL /NDL /NJH /NJS
+          robocopy "C:\Program Files\PostgreSQL\17\share" "$dest\share" /E /NFL /NDL /NJH /NJS
+          if ($LASTEXITCODE -gt 8) { exit 1 }
+
+      # Frontend build is NOT a separate step here — tauri.conf.json's
+      # own beforeBuildCommand runs `npm ci && npm run build` inside
+      # frontend/ as part of `tauri build` below. One source of truth
+      # for how the frontend gets built, not two.
+
+      # ⚠️ Code signing hooks in, here — NOT configured, flagged only,
+      # per the explicit instruction to flag rather than build this pass.
+      # See desktop/ARCHITECTURE.md "Code signing — where it hooks in"
+      # for the full design. When ready:
+      #   1. Add WINDOWS_CERTIFICATE (base64 .pfx) and
+      #      WINDOWS_CERTIFICATE_PASSWORD as repo secrets.
+      #   2. Add a step here, before tauri-action, that decodes the
+      #      secret and imports it into Cert:\CurrentUser\My.
+      #   3. Set bundle.windows.certificateThumbprint in
+      #      desktop/src-tauri/tauri.conf.json to the imported cert's
+      #      thumbprint (currently null).
+      # - name: Import code-signing certificate
+      #   shell: pwsh
+      #   run: |
+      #     $bytes = [Convert]::FromBase64String("${{ secrets.WINDOWS_CERTIFICATE }}")
+      #     $certPath = Join-Path $env:TEMP "citaledge-signing.pfx"
+      #     [IO.File]::WriteAllBytes($certPath, $bytes)
+      #     $pw = ConvertTo-SecureString -String "${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}" -AsPlainText -Force
+      #     Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $pw
+
+      - name: Build and bundle the Tauri app
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: ./desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: citaledge-windows-installer
+          path: |
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

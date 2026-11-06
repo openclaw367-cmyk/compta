@@ -1,0 +1,36 @@
+[package]
+name = "citaledge-desktop"
+version = "0.1.0"
+description = "Citaledge desktop shell — spawns the already-verified Postgres and NestJS backend sidecars; see desktop/ARCHITECTURE.md"
+edition = "2021"
+rust-version = "1.77"
+
+# No [lib] split (no mobile target) — see ARCHITECTURE.md's own note on
+# this choice. A single src/main.rs binary is the simpler, documented
+# Tauri v2 desktop-only pattern.
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Random local Postgres superuser password at first launch (see
+# provision_postgres::generate_local_password). A small, standard crate —
+# chosen over shelling out to the vendored node.exe for a one-off random
+# value, which would be cleverness for its own sake.
+rand = "0.8"
+# One blocking HTTP call in the exit handler, to trigger the real
+# /backup/export endpoint before stopping Postgres (see
+# CLAUDE.md "Operational readiness — backup and recovery" for the
+# endpoint this reuses). `blocking` feature only — ExitRequested's
+# callback is sync, and this app has no other use for an async runtime.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
+
+# Deliberately NOT a dependency: tauri-plugin-shell. All sidecar process
+# management happens in Rust (setup + exit handler), never triggered from
+# the webview/JS side — so the shell plugin's whole purpose (letting JS
+# safely invoke a whitelisted command) doesn't apply here, and neither
+# does the capabilities-JSON ceremony that goes with it. Plain
+# std::process::Command is correct and simpler. See ARCHITECTURE.md.

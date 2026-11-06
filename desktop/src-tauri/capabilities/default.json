@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Baseline core permissions for the main window. No shell/process permissions — every sidecar is spawned from Rust (setup + shutdown), never triggered from the webview, so the shell plugin and its capability ceremony are deliberately not used here. See Cargo.toml's own doc comment.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
