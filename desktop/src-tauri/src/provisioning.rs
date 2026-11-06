@@ -58,8 +58,8 @@ fn generate_hex_secret(num_bytes: usize) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn other_err(msg: impl Into<String>) -> IoError {
-    IoError::new(ErrorKind::Other, msg.into())
+fn other_err(msg: impl std::fmt::Display) -> IoError {
+    IoError::new(ErrorKind::Other, msg.to_string())
 }
 
 /// First launch: `initdb --data-checksums` + the explicit durability
