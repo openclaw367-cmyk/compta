@@ -81,7 +81,14 @@ jobs:
           # machine too, not just this dev machine.
           $nodeExe = node -e "console.log(process.execPath)"
           Copy-Item $nodeExe "$dest\node.exe"
-          if ($LASTEXITCODE -gt 8) { exit 1 }  # robocopy: 0-7 is success
+
+          # Explicit, deliberate: a GitHub Actions pwsh step fails if
+          # $LASTEXITCODE is nonzero when the script ends, EVEN with no
+          # error — and robocopy's own "files copied successfully" code
+          # is 1, not 0. Without this, a fully successful copy still
+          # fails the step. Found live on this exact step's sibling
+          # (Stage Postgres resources) — see that fix's commit message.
+          exit 0
 
       # --- Stage the Postgres sidecar bundle. windows-latest ships
       # PostgreSQL 17.11 pre-installed (confirmed via the runner-images
@@ -114,6 +121,13 @@ jobs:
           $shareExit = $LASTEXITCODE
           Write-Host "robocopy share/ exit code: $shareExit"
           if ($shareExit -gt 8) { throw "robocopy failed copying share/ (exit $shareExit)" }
+
+          # See the matching comment in "Stage backend resources" — a
+          # GitHub Actions pwsh step fails on a nonzero trailing
+          # $LASTEXITCODE even with no actual error. This is the exact
+          # root cause of this step's first two failures: robocopy's own
+          # "success" exit code is 1, not 0.
+          exit 0
 
       # Frontend build is NOT a separate step here — tauri.conf.json's
       # own beforeBuildCommand runs `npm ci && npm run build` inside
