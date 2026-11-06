@@ -12,11 +12,22 @@
 
 use rand::{Rng, RngCore};
 use serde_json::json;
-use std::fs;
+use std::fs::{self, File};
 use std::io::{Error as IoError, ErrorKind};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
+
+/// Every sidecar's stdout/stderr MUST be redirected to a real file — in a
+/// release build (`windows_subsystem = "windows"`, no console), output
+/// that isn't explicitly redirected is silently discarded, not just
+/// hidden. Found before ever shipping a build, not live: there was
+/// nowhere to look if the backend sidecar failed to start cleanly.
+fn log_file(app_data_dir: &Path, name: &str) -> std::io::Result<File> {
+    let log_dir = app_data_dir.join("logs");
+    fs::create_dir_all(&log_dir)?;
+    File::create(log_dir.join(name))
+}
 
 /// Fixed, non-5432 port — see ARCHITECTURE.md "Port and CORS" for why a
 /// fixed port was chosen over dynamic negotiation for v1.
@@ -196,9 +207,13 @@ pub fn spawn_backend(app_data_dir: &Path, backend_dir: &Path, pg: &PostgresHandl
         .arg("deploy")
         .arg(format!("--schema={}", schema_path.display()))
         .env("DATABASE_URL", &database_url)
+        .stdout(Stdio::from(log_file(app_data_dir, "migrate-deploy.log")?))
+        .stderr(Stdio::from(log_file(app_data_dir, "migrate-deploy.log")?))
         .status()?;
     if !migrate_status.success() {
-        return Err(other_err("prisma migrate deploy failed"));
+        return Err(other_err(
+            "prisma migrate deploy failed — see logs/migrate-deploy.log",
+        ));
     }
 
     let jwt_secret = read_or_create_secret(&jwt_secret_path(app_data_dir), 32)?;
@@ -217,6 +232,8 @@ pub fn spawn_backend(app_data_dir: &Path, backend_dir: &Path, pg: &PostgresHandl
         .env("MAILER_PROVIDER", "console")
         .env("PG_DUMP_PATH", &pg_dump)
         .env("DOCUMENT_STORAGE_DIR", &document_storage_dir)
+        .stdout(Stdio::from(log_file(app_data_dir, "backend-stdout.log")?))
+        .stderr(Stdio::from(log_file(app_data_dir, "backend-stderr.log")?))
         .spawn()?;
 
     Ok(child)
