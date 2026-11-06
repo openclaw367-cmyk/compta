@@ -59,8 +59,17 @@ jobs:
         run: |
           $dest = "desktop\src-tauri\resources\backend"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          robocopy backend\dist "$dest\dist" /E /NFL /NDL /NJH /NJS
-          robocopy backend\node_modules "$dest\node_modules" /E /NFL /NDL /NJH /NJS /MT:8
+
+          robocopy backend\dist "$dest\dist" /E /NFL /NDL
+          $distExit = $LASTEXITCODE
+          Write-Host "robocopy dist/ exit code: $distExit"
+          if ($distExit -gt 8) { throw "robocopy failed copying backend/dist (exit $distExit)" }
+
+          robocopy backend\node_modules "$dest\node_modules" /E /NFL /NDL /MT:8
+          $nmExit = $LASTEXITCODE
+          Write-Host "robocopy node_modules/ exit code: $nmExit"
+          if ($nmExit -gt 8) { throw "robocopy failed copying backend/node_modules (exit $nmExit)" }
+
           Copy-Item backend\package.json "$dest\package.json"
           New-Item -ItemType Directory -Force -Path "$dest\prisma" | Out-Null
           Copy-Item backend\prisma\schema.prisma "$dest\prisma\schema.prisma"
@@ -84,11 +93,27 @@ jobs:
       - name: Stage Postgres resources
         shell: pwsh
         run: |
+          Write-Host "--- Diagnostics: what actually exists under C:\Program Files\PostgreSQL ---"
+          Get-ChildItem "C:\Program Files\PostgreSQL" -ErrorAction SilentlyContinue | Format-Table Name, FullName
+          Get-ChildItem "C:\Program Files\PostgreSQL\17" -ErrorAction SilentlyContinue | Format-Table Name, FullName
+
+          $pgRoot = Get-ChildItem "C:\Program Files\PostgreSQL" -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $pgRoot) { throw "No PostgreSQL installation found under C:\Program Files\PostgreSQL" }
+          Write-Host "Using Postgres install: $pgRoot"
+
           $dest = "desktop\src-tauri\resources\postgres"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          robocopy "C:\Program Files\PostgreSQL\17\bin" "$dest\bin" /E /NFL /NDL /NJH /NJS
-          robocopy "C:\Program Files\PostgreSQL\17\share" "$dest\share" /E /NFL /NDL /NJH /NJS
-          if ($LASTEXITCODE -gt 8) { exit 1 }
+
+          robocopy "$pgRoot\bin" "$dest\bin" /E /NFL /NDL
+          $binExit = $LASTEXITCODE
+          Write-Host "robocopy bin/ exit code: $binExit"
+          if ($binExit -gt 8) { throw "robocopy failed copying bin/ (exit $binExit)" }
+
+          robocopy "$pgRoot\share" "$dest\share" /E /NFL /NDL
+          $shareExit = $LASTEXITCODE
+          Write-Host "robocopy share/ exit code: $shareExit"
+          if ($shareExit -gt 8) { throw "robocopy failed copying share/ (exit $shareExit)" }
 
       # Frontend build is NOT a separate step here — tauri.conf.json's
       # own beforeBuildCommand runs `npm ci && npm run build` inside
