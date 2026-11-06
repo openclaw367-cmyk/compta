@@ -129,10 +129,22 @@ jobs:
           # "success" exit code is 1, not 0.
           exit 0
 
-      # Frontend build is NOT a separate step here — tauri.conf.json's
-      # own beforeBuildCommand runs `npm ci && npm run build` inside
-      # frontend/ as part of `tauri build` below. One source of truth
-      # for how the frontend gets built, not two.
+      # Frontend build — a real explicit step, not tauri.conf.json's own
+      # beforeBuildCommand hook. Found live: `npm --prefix <dir> ci`
+      # doesn't reliably search THAT directory for package-lock.json
+      # (a known npm quirk — --prefix affects where packages install,
+      # not where `ci` looks for the lockfile), so the hook failed with
+      # "The npm ci command can only install with an existing
+      # package-lock.json" even though frontend/package-lock.json is
+      # real and committed. `working-directory:` (same as the backend
+      # step above) sidesteps the whole question. beforeBuildCommand is
+      # now empty — the frontend is already built by the time tauri
+      # build reads frontendDist.
+      - name: Install and build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
 
       # ⚠️ Code signing hooks in, here — NOT configured, flagged only,
       # per the explicit instruction to flag rather than build this pass.
