@@ -93,10 +93,13 @@ jobs:
       # --- Stage the Postgres sidecar bundle. windows-latest ships
       # PostgreSQL 17.11 pre-installed (confirmed via the runner-images
       # repo's own README) at this exact path — the SAME major version
-      # already prototyped and hard-kill-tested locally. bin/ AND share/
-      # both required: initdb reads share/postgresql.conf.sample etc. at
-      # runtime, not just the executables. PostgreSQL's own license
-      # permits redistributing these binaries freely.
+      # already prototyped and hard-kill-tested locally. bin/, share/,
+      # AND lib/ are all required: initdb reads share/postgresql.conf.sample
+      # etc. at runtime, not just the executables, and postgres.exe loads
+      # lib/dict_snowball.dll (and friends) via "$libdir/..." references in
+      # its own bootstrap SQL — lib/ was missing for a while and broke
+      # initdb outright on every machine, see the comment below. PostgreSQL's
+      # own license permits redistributing these binaries freely.
       - name: Stage Postgres resources
         shell: pwsh
         run: |
@@ -121,6 +124,20 @@ jobs:
           $shareExit = $LASTEXITCODE
           Write-Host "robocopy share/ exit code: $shareExit"
           if ($shareExit -gt 8) { throw "robocopy failed copying share/ (exit $shareExit)" }
+
+          # lib/ holds Postgres's own loadable shared libraries (e.g.
+          # dict_snowball.dll) that initdb's bootstrap SQL references via
+          # "$libdir/..." — postgres.exe resolves $libdir as a sibling of
+          # bin/ under the same root. Omitting this directory was a real,
+          # reproducible bug: initdb always failed on EVERY machine with
+          # "could not access file "$libdir/dict_snowball"", found live
+          # when actually running the packaged installer for the first
+          # time — not caught earlier because VM testing never got far
+          # enough to exercise this runtime path.
+          robocopy "$pgRoot\lib" "$dest\lib" /E /NFL /NDL
+          $libExit = $LASTEXITCODE
+          Write-Host "robocopy lib/ exit code: $libExit"
+          if ($libExit -gt 8) { throw "robocopy failed copying lib/ (exit $libExit)" }
 
           # See the matching comment in "Stage backend resources" — a
           # GitHub Actions pwsh step fails on a nonzero trailing
