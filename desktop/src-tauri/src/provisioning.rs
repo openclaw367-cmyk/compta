@@ -266,12 +266,16 @@ pub fn spawn_backend(app_data_dir: &Path, backend_dir: &Path, pg: &PostgresHandl
         .env("DATABASE_URL", &database_url)
         .env("PORT", BACKEND_PORT.to_string())
         .env("JWT_ACCESS_SECRET", jwt_secret)
-        // ⚠️ NOT YET LIVE-CONFIRMED — see ARCHITECTURE.md "Open item:
-        // confirm the real webview origin". https://tauri.localhost is
-        // Tauri v2's documented Windows/WebView2 convention; verify
-        // against window.location.origin on the first real build and
-        // correct this if it differs.
-        .env("FRONTEND_ORIGIN", "https://tauri.localhost")
+        // Confirmed live (2026-11-07) via main.ts's own LOG_REQUEST_ORIGIN
+        // debug middleware, now removed: the real header on Windows/
+        // WebView2 is "http://tauri.localhost" — PLAIN HTTP, not https.
+        // The original guess (https://tauri.localhost, the documented
+        // Tauri v2 convention) was wrong by exactly that scheme, which
+        // silently CORS-blocked every API call the packaged app's
+        // webview ever made (preflight OPTIONS never matched this
+        // origin), while a plain browser against localhost:5173 worked
+        // fine the whole time since that's FRONTEND_ORIGIN's own default.
+        .env("FRONTEND_ORIGIN", "http://tauri.localhost")
         .env("MAILER_PROVIDER", "console")
         .env("PG_DUMP_PATH", &pg_dump)
         .env("DOCUMENT_STORAGE_DIR", &document_storage_dir)

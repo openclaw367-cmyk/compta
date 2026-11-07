@@ -18,22 +18,6 @@ async function bootstrap(): Promise<void> {
   // req.cookies directly, no other part of this app uses cookies.
   app.use(cookieParser());
 
-  // TEMPORARY — desktop packaging verification only, reverted after the
-  // first real Tauri-packaged launch confirms (or corrects) the
-  // FRONTEND_ORIGIN value in desktop/src-tauri/src/provisioning.rs.
-  // Logs the real Origin header the webview actually sends, independent
-  // of whether CORS ultimately accepts it (the request still physically
-  // arrives either way — CORS is enforced by the browser reading the
-  // response, not by blocking the request).
-  if (process.env.LOG_REQUEST_ORIGIN === '1') {
-    app.use((req: { headers: Record<string, unknown> }, _res: unknown, next: () => void) => {
-      const origin = req.headers.origin;
-      console.log(
-        `[origin-debug] Origin header: ${typeof origin === 'string' ? origin : '(none)'}`,
-      );
-      next();
-    });
-  }
   // exposedHeaders is required for the FEC export endpoints: browsers only
   // expose a CORS-safelisted header set to JS by default, and
   // Content-Disposition (which carries the server-assigned filename,
