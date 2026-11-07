@@ -73,6 +73,36 @@ fn other_err(msg: impl std::fmt::Display) -> IoError {
     IoError::new(ErrorKind::Other, msg.to_string())
 }
 
+/// Strips a Windows "verbatim"/extended-length-path prefix (`\\?\`) if
+/// present. Found live, the second real bug behind the silent-crash
+/// investigation (after the missing initdb stdio redirection, see
+/// `provision_postgres` above): Tauri's resource/app-data path resolution
+/// can return a `\\?\`-prefixed absolute path, and PostgreSQL's own
+/// internal path-canonicalization layer blanket-replaces every backslash
+/// with a forward slash for cross-platform portability — which corrupts
+/// that prefix into `//?/`, a form Windows no longer recognizes as the
+/// extended-length-path escape. The filesystem then tries to resolve the
+/// mangled path literally and fails with "the system cannot find the path
+/// specified," even though the real file sits right there — reproduced
+/// live as exactly this failure when `initdb` tried to locate its own
+/// sibling `postgres.exe` (`initdb: error: program "postgres" is needed by
+/// initdb but was not found in the same directory as
+/// "//?/C:/Users/.../bin/initdb.exe"`), confirmed to NOT happen when the
+/// identical binaries were invoked by hand from a plain (non-verbatim)
+/// path. Every path handed to a Postgres binary — the bin directory used
+/// to build initdb/pg_ctl/pg_dump/createdb's own paths, and the `-D` data
+/// directory — must go through this first. A plain path well under
+/// MAX_PATH (true for every path this app constructs, all nested a few
+/// levels under the user's own app-data/local-app directories) loses
+/// nothing by not being verbatim.
+pub fn strip_verbatim_prefix(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(stripped) => PathBuf::from(stripped),
+        None => path.to_path_buf(),
+    }
+}
+
 /// First launch: `initdb --data-checksums` + the explicit durability
 /// settings verified in the Postgres prototype (fsync, synchronous_commit,
 /// full_page_writes all on, loopback-only). Every later launch: just

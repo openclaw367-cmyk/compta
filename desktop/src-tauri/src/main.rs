@@ -16,10 +16,17 @@ struct BackendChild(Mutex<Option<Child>>);
 fn main() {
     let app = tauri::Builder::default()
         .setup(|app| {
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("could not resolve app data directory");
+            // strip_verbatim_prefix: Tauri's path resolution can return a
+            // Windows `\\?\`-prefixed absolute path, which PostgreSQL's own
+            // internal path handling corrupts into a non-functional
+            // "//?/..." form — see that function's own doc comment in
+            // provisioning.rs for the full explanation and how this was
+            // found (a real, live-reproduced crash, not a defensive guess).
+            let app_data_dir = provisioning::strip_verbatim_prefix(
+                &app.path()
+                    .app_data_dir()
+                    .expect("could not resolve app data directory"),
+            );
             std::fs::create_dir_all(&app_data_dir).expect("could not create app data directory");
 
             // Bundled via tauri.conf.json's bundle.resources — whole
@@ -29,14 +36,16 @@ fn main() {
             // ARCHITECTURE.md "Why bundle.resources, not externalBin, for
             // Postgres" for why externalBin's single-file/renaming model
             // doesn't fit Postgres's own binaries.
-            let pg_bin_dir = app
-                .path()
-                .resolve("resources/postgres/bin", BaseDirectory::Resource)
-                .expect("could not resolve bundled postgres/bin resource");
-            let backend_dir = app
-                .path()
-                .resolve("resources/backend", BaseDirectory::Resource)
-                .expect("could not resolve bundled backend resource");
+            let pg_bin_dir = provisioning::strip_verbatim_prefix(
+                &app.path()
+                    .resolve("resources/postgres/bin", BaseDirectory::Resource)
+                    .expect("could not resolve bundled postgres/bin resource"),
+            );
+            let backend_dir = provisioning::strip_verbatim_prefix(
+                &app.path()
+                    .resolve("resources/backend", BaseDirectory::Resource)
+                    .expect("could not resolve bundled backend resource"),
+            );
 
             let pg = provisioning::provision_postgres(&app_data_dir, &pg_bin_dir)
                 .expect("Postgres provisioning failed");
