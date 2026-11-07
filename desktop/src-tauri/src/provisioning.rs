@@ -92,6 +92,17 @@ pub fn provision_postgres(app_data_dir: &Path, pg_bin_dir: &Path) -> std::io::Re
         let pw_file = app_data_dir.join(".pg-init-pw.tmp");
         fs::write(&pw_file, &password)?;
 
+        // stdout/stderr MUST be explicitly redirected here, same as every
+        // other sidecar spawn in this file (pg_ctl/migrate/backend below) —
+        // this one was missing it. In a release build
+        // (windows_subsystem = "windows"), the parent process has no
+        // console and no valid stdio handles at all; spawning a
+        // console-mode child (initdb.exe) with the default "inherit"
+        // behavior can fail outright on Windows with no error surfaced
+        // anywhere, which is exactly what made this invisible — initdb
+        // ran fine every time it was tested by hand from a real terminal
+        // (valid handles to inherit) but silently failed every time the
+        // packaged app launched it, on every machine tried.
         let status = Command::new(&initdb)
             .arg("-D")
             .arg(&data_dir)
@@ -104,10 +115,12 @@ pub fn provision_postgres(app_data_dir: &Path, pg_bin_dir: &Path) -> std::io::Re
             .arg("UTF8")
             .arg("--locale=C")
             .arg("--data-checksums")
+            .stdout(Stdio::from(log_file(app_data_dir, "initdb.log")?))
+            .stderr(Stdio::from(log_file(app_data_dir, "initdb.log")?))
             .status()?;
         let _ = fs::remove_file(&pw_file);
         if !status.success() {
-            return Err(other_err("initdb failed"));
+            return Err(other_err("initdb failed — see logs/initdb.log"));
         }
 
         // Explicit, not trusted to defaults — see the Postgres prototype's
